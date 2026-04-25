@@ -1,10 +1,11 @@
 // ==UserScript==
 // @name         Torn Crimes Burglary Extended
 // @namespace    https://github.com/SOLiNARY
-// @version      0.6.1
+// @version      0.7.0
 // @description  Sorts all scouted by target, created date, expire date, confidence, risk or uniques number. Remembers your choice.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT License
+// @match        https://www.torn.com/page.php?sid=crimes*
 // @match        https://www.torn.com/loader.php?sid=crimes*
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=torn.com
 // @grant        GM_addStyle
@@ -22,10 +23,49 @@
     const scoutCommercialUrl = 'loader.php?sid=crimesData&step=attempt&typeID=7&crimeID=67&';
     const scoutIndustrialUrl = 'loader.php?sid=crimesData&step=attempt&typeID=7&crimeID=68&';
     const observerConfig = { childList: true, subtree: true };
+    const VIRTUAL_LIST_SELECTOR = 'div[class*=virtualList___]';
+    const VIRTUAL_ITEM_SELECTOR = 'div[class*=virtualItem___]';
+    const SCOUT_ITEM_HEIGHT = 61;
+    const TARGET_ITEM_HEIGHT = 51;
     let foundTargets = false;
     let noTargets = false;
     let targets = {};
     let burgledPlaces;
+    let isApplyingVirtualSort = false;
+
+    function getVirtualList(root) {
+        return (root || document).querySelector(VIRTUAL_LIST_SELECTOR);
+    }
+
+    function getTargetItems(virtualList) {
+        if (!virtualList) return [];
+        // Scout-for-targets row contains a `propertyTypeSection___` (Residential/Commercial/Industrial buttons +
+        // category dropdown). Real target rows don't. Filtering this way works regardless of whether
+        // sibling userscripts (cm-bg) have decorated rows with `data-cm-id`.
+        return Array.from(virtualList.querySelectorAll(VIRTUAL_ITEM_SELECTOR))
+            .filter(item => !item.querySelector('[class*=propertyTypeSection___]'));
+    }
+
+    function applyVirtualSortPositions(items) {
+        items.forEach((item, idx) => {
+            const newY = SCOUT_ITEM_HEIGHT + TARGET_ITEM_HEIGHT * idx;
+            const desired = `translateY(${newY}px)`;
+            // Skip no-op writes — each style mutation is something React's reactive chain reacts to,
+            // and writing the same value would otherwise trigger pointless re-render cycles.
+            if (item.style.transform === desired) return;
+            item.style.transform = desired;
+        });
+    }
+
+    async function waitForVirtualList(root, maxAttempts = 100) {
+        let attempts = 0;
+        let virtualList;
+        while (!(virtualList = getVirtualList(root)) && attempts < maxAttempts) {
+            await sleep(50);
+            attempts++;
+        }
+        return virtualList;
+    }
     const safetyAssessments = {
         "Apartment": {
             "type": "Residential",
@@ -49,7 +89,7 @@
             "cases": "1-2",
             "finds": "Melatonin, Laptop",
             "unique": "1x Soap on a Rope, 1x Xanax, 1x Vitamins, 1x Toothbrush",
-            "advice": "Case once or twice. Only melatoning being noteworthy, everything else mostly being common consumables, clothes and weapons."
+            "advice": "Case once or twice. Only melatonin being noteworthy, everything else mostly being common consumables, clothes and weapons."
         },
         "Cottage": {
             "type": "Residential",
@@ -417,11 +457,12 @@
             try {
                 const jsonData = await response.clone().json();
                 if (jsonData.DB.outcome.result === 'success') {
-                    const targetsNode = document.querySelector("div[class*=crimeOptionGroup___]:not([class*=firstGroup___])");
+                    const targetsNode = await waitForVirtualList(document, 40);
                     const targetsObserver = new MutationObserver((mutationsList, observer) => {
                         for (const mutation of mutationsList) {
-                            if (mutation.type === 'childList' && mutation.target.className.indexOf('crimeOptionGroup___') > -1) {
-                                let newTargets = mutation.target.querySelectorAll('div[class*=crimeOption___]:not(.silmaril-crimes-burglary-header):not([data-created-time])');
+                            if (mutation.type === 'childList') {
+                                let newTargets = getTargetItems(targetsNode).filter(item => !item.hasAttribute('data-created-time'));
+                                if (newTargets.length === 0) continue;
                                 newTargets.forEach((element) => {
                                     const nowTimestamp = (Date.now()/1000).toFixed(0);
                                     const threeDaysAfterTimestamp = (Date.now()/1000 + 3*86400 - 1).toFixed(0);
@@ -437,14 +478,21 @@
                                         createdDiv.innerText = 'Just now';
                                         expireDiv.innerText = 'In 3 days';
                                     }
-                                })
+                                });
+                                const burglaryRoot = document.querySelector('div.crime-root.burglary-root');
+                                if (burglaryRoot) {
+                                    sortChildElements(burglaryRoot, currentSortBy, currentSortDirection);
+                                }
                                 observer.disconnect();
                                 break;
                             }
                         }
                     });
- 
-                    targetsObserver.observe(targetsNode, observerConfig);
+
+                    if (targetsNode) {
+                        targetsObserver.observe(targetsNode, observerConfig);
+                        setTimeout(() => targetsObserver.disconnect(), 5000);
+                    }
                 }
  
                 response.json = async () => jsonData;
@@ -498,50 +546,63 @@
     }
     const targetNode = document.querySelector("html");
  
-    const observer = new MutationObserver(async (mutationsList, observer) => {
-        const divs = document.querySelectorAll("div[class*=currentCrime___]");
-        for (const mutation of mutationsList) {
-            if (mutation.type === 'childList' && mutation.target.className == 'crime-root burglary-root') {
- 
-                getBurgledPlaces();
- 
-                divs.forEach((div) => {
-                    div.addEventListener("click", function (event) {
-                        if (event.target.matches("div[class*=topSection___] div[class*=crimeBanner___] div[class*=crimeSliderArrowButtons___] button[class*=arrowButton___]")) {
-                            observer.observe(targetNode, observerConfig);
-                            noTargets = false;
-                        }
-                        if (event.target.matches("div[class*=crimeOptionGroup___]:not([class*=firstGroup___]) div.silmaril-crimes-burglary-sorting")) {
-                            let sortName = event.target.getAttribute("data-sort-name");
-                            let newSortBy = sortBy[sortName];
-                            let newSortDirection = newSortBy === currentSortBy ? currentSortDirection * -1 : currentSortDirection;
-                            sortChildElements(mutation.target, newSortBy, newSortDirection);
-                            currentSortBy = newSortBy;
-                            currentSortDirection = newSortDirection;
-                            localStorage.setItem("silmaril-torn-crimes-burglary-sorting-by", newSortBy);
-                            localStorage.setItem("silmaril-torn-crimes-burglary-sorting-direction", newSortDirection);
-                        }
-                    });
+    let isSetupInProgress = false;
+    async function setupBurglaryView(burglaryRoot) {
+        if (isSetupInProgress) return;
+        isSetupInProgress = true;
+        try {
+            getBurgledPlaces();
+
+            document.querySelectorAll("div[class*=currentCrime___]").forEach((div) => {
+                if (div.dataset.silmarilBurglaryListener === '1') return;
+                div.dataset.silmarilBurglaryListener = '1';
+                div.addEventListener("click", function (event) {
+                    const sortEl = event.target.closest('.silmaril-crimes-burglary-sorting');
+                    if (sortEl) {
+                        const sortName = sortEl.getAttribute("data-sort-name");
+                        const newSortBy = sortBy[sortName];
+                        const newSortDirection = newSortBy === currentSortBy ? currentSortDirection * -1 : currentSortDirection;
+                        const root = document.querySelector('div.crime-root.burglary-root');
+                        if (root) sortChildElements(root, newSortBy, newSortDirection);
+                        currentSortBy = newSortBy;
+                        currentSortDirection = newSortDirection;
+                        localStorage.setItem("silmaril-torn-crimes-burglary-sorting-by", newSortBy);
+                        localStorage.setItem("silmaril-torn-crimes-burglary-sorting-direction", newSortDirection);
+                    }
                 });
- 
-                if (isSortingEnabled) {
-                    addHeader(mutation.target);
-                }
- 
-                if (noTargets) {
-                    observer.disconnect();
-                    break;
-                }
- 
-                await addTimestamps();
-                sortChildElements(mutation.target, currentSortBy, currentSortDirection);
-                observer.disconnect();
+            });
+
+            const virtualList = await waitForVirtualList(burglaryRoot, 100);
+            if (!virtualList) return;
+
+            if (isSortingEnabled) {
+                addHeader(burglaryRoot);
+            }
+
+            await addTimestamps();
+            sortChildElements(burglaryRoot, currentSortBy, currentSortDirection);
+            attachVirtualListObserver(burglaryRoot);
+        } finally {
+            isSetupInProgress = false;
+        }
+    }
+
+    const observer = new MutationObserver(async (mutationsList) => {
+        for (const mutation of mutationsList) {
+            if (mutation.type === 'childList' && mutation.target.className === 'crime-root burglary-root') {
+                if (noTargets) break;
+                await setupBurglaryView(mutation.target);
                 break;
             }
         }
     });
- 
+
     observer.observe(targetNode, observerConfig);
+
+    const existingBurglaryRoot = document.querySelector('div.crime-root.burglary-root');
+    if (existingBurglaryRoot && !noTargets) {
+        setupBurglaryView(existingBurglaryRoot);
+    }
     setInterval(applyBurgledStatus, 1000);
  
     function getBurgledPlaces() {
@@ -580,26 +641,85 @@
         }
     }
  
+    let virtualListObserver = null;
+    let resortDebounceTimer = null;
+    function scheduleResort(burglaryRoot) {
+        if (resortDebounceTimer) clearTimeout(resortDebounceTimer);
+        resortDebounceTimer = setTimeout(() => {
+            resortDebounceTimer = null;
+            sortChildElements(burglaryRoot, currentSortBy, currentSortDirection);
+        }, 80);
+    }
+
+    // A node is a "target row" if it's a virtualItem and doesn't contain a propertyTypeSection
+    // (which is unique to the scout-for-targets row). Works without third-party scripts.
+    function isTargetRow(n) {
+        return n.matches && n.matches(VIRTUAL_ITEM_SELECTOR)
+            && !n.querySelector('[class*=propertyTypeSection___]');
+    }
+
+    function attachVirtualListObserver(burglaryRoot) {
+        const virtualList = getVirtualList(burglaryRoot);
+        if (!virtualList) return;
+        if (virtualListObserver) virtualListObserver.disconnect();
+
+        virtualListObserver = new MutationObserver((mutations) => {
+            if (isApplyingVirtualSort) return;
+
+            let hasAdded = false;
+            mutations.forEach(m => {
+                m.addedNodes.forEach(n => {
+                    if (isTargetRow(n)) hasAdded = true;
+                });
+            });
+
+            if (hasAdded) {
+                // New items need data attributes set up.
+                const items = getTargetItems(virtualList);
+                items.filter(item => !item.hasAttribute('data-target-name')).forEach((item) => {
+                    addSafetyAssessment(item);
+                    if (isMobileView) {
+                        const expireDiv = addExpireDiv(item);
+                        if (expireDiv) expireDiv.innerText = 'In 3 days';
+                    } else {
+                        const createdDiv = addCreatedAndExpireDivs(item);
+                        const expireDiv = item.querySelector('div[class*=sections___] > div.expireTime');
+                        if (createdDiv) createdDiv.innerText = 'Just now';
+                        if (expireDiv) expireDiv.innerText = 'In 3 days';
+                    }
+                });
+            }
+
+            // Debounce: collapse cascading mutations into one resort to avoid feedback loops
+            // with React/state libraries that re-evaluate on each style mutation we make.
+            scheduleResort(burglaryRoot);
+        });
+        virtualListObserver.observe(virtualList, { childList: true });
+    }
+
     function applyBurgledStatus(){
         try {
-            const currentTargetsHeader = document.querySelectorAll("div.crime-root.burglary-root div[class^=crimeOptionGroup]");
-            if (currentTargetsHeader.length == 0) {
-                return;
-            }
-            const currentTargets = currentTargetsHeader[1].querySelectorAll("div.crime-option");
-            [...currentTargets].forEach(line => {
-                let targetName = line.getAttribute('data-target-name');
+            const burglaryRoot = document.querySelector('div.crime-root.burglary-root');
+            if (!burglaryRoot) return;
+            const virtualList = getVirtualList(burglaryRoot);
+            if (!virtualList) return;
+            if (!burgledPlaces) return;
+            const currentTargets = getTargetItems(virtualList);
+            currentTargets.forEach(line => {
+                const targetName = line.getAttribute('data-target-name');
+                if (!targetName) return;
                 let titleDiv;
                 if (isMobileView) {
-                    titleDiv = line.firstChild.childNodes[1].querySelector('div[class*=confidenceSectionTablet___] div[class*=titleAndProgress___] div[class*=title___]');
+                    titleDiv = line.querySelector('div[class*=confidenceSectionTablet___] div[class*=titleAndProgress___] div[class*=title___]');
                 } else {
                     titleDiv = line.querySelector('[class*=crimeOptionSection___][class*=flexGrow___]');
-                };
-                if(burgledPlaces.includes(targetName)) {
+                }
+                if (!titleDiv) return;
+                if (burgledPlaces.includes(targetName)) {
                     titleDiv.style.color = "var(--crimes-stats-successes-color)";
                 } else {
                     titleDiv.style.color = "var(--crimes-stats-criticalFails-color)";
-                };
+                }
             });
         } catch (e) {
             console.log('No burgle targets available to apply burgled status');
@@ -608,8 +728,11 @@
  
     // Function to sort child elements
     function sortChildElements(element, sortByProperty, sortDirection) {
-        const parentElement = element.querySelector('[class*=crimeOptionGroup___]:not([class*=firstGroup___])');
-        const childElements = Array.from(parentElement.querySelectorAll('[class*=crimeOption___]:not(.silmaril-crimes-burglary-header)'));
+        if (isApplyingVirtualSort) return;
+        const parentElement = element.querySelector(VIRTUAL_LIST_SELECTOR);
+        if (!parentElement) return;
+        const childElements = getTargetItems(parentElement);
+        if (childElements.length === 0) return;
  
         if (isMobileView) {
             childElements.forEach((child) => {
@@ -638,8 +761,8 @@
             switch (sortByProperty){
                 case sortBy.Target:
                     childElements.sort((a, b) => {
-                        const aValue = a.querySelector('div[class*=sections___] > [class*=crimeOptionSection___]').textContent;
-                        const bValue = b.querySelector('div[class*=sections___] > [class*=crimeOptionSection___]').textContent;
+                        const aValue = a.getAttribute('data-target-name') ?? '';
+                        const bValue = b.getAttribute('data-target-name') ?? '';
                         return aValue.localeCompare(bValue) * sortDirection;
                     });
                     break;
@@ -658,34 +781,23 @@
                     });
                     break;
                 case sortBy.Confidence:
-                    if (isMobileView){
-                        childElements.sort((a, b) => {
-                            const aValue = a.querySelectorAll('div[class*=sections___] > [class*=crimeOptionSection___]')[0].querySelector('[class*=progressFill___]').style.width.slice(0, -1);
-                            const bValue = b.querySelectorAll('div[class*=sections___] > [class*=crimeOptionSection___]')[0].querySelector('[class*=progressFill___]').style.width.slice(0, -1);
-                            return aValue.localeCompare(bValue, undefined, {'numeric': true}) * sortDirection;
-                        })
-                    } else {
-                        childElements.sort((a, b) => {
-                            const aValue = a.querySelectorAll('div[class*=sections___] > [class*=crimeOptionSection___]')[3].querySelector('[class*=progressFill___]').style.height.slice(0, -1);
-                            const bValue = b.querySelectorAll('div[class*=sections___] > [class*=crimeOptionSection___]')[3].querySelector('[class*=progressFill___]').style.height.slice(0, -1);
-                            return aValue.localeCompare(bValue, undefined, {'numeric': true}) * sortDirection;
-                        })
-                    }
+                    childElements.sort((a, b) => {
+                        const aFill = a.querySelector('[class*=progressFill___]');
+                        const bFill = b.querySelector('[class*=progressFill___]');
+                        const sizeProp = isMobileView ? 'width' : 'height';
+                        const aValue = aFill ? (aFill.style[sizeProp] || '0%').slice(0, -1) : '0';
+                        const bValue = bFill ? (bFill.style[sizeProp] || '0%').slice(0, -1) : '0';
+                        return aValue.localeCompare(bValue, undefined, {'numeric': true}) * sortDirection;
+                    });
                     break;
                 case sortBy.Status:
-                    if (isMobileView){
-                        childElements.sort((a, b) => {
-                            const aValue = a.querySelectorAll('div[class*=sections___] > [class*=crimeOptionSection___]')[0].querySelector('[class*=safetyStatusIcon___]').style.backgroundPositionY.slice(0, -2);
-                            const bValue = b.querySelectorAll('div[class*=sections___] > [class*=crimeOptionSection___]')[0].querySelector('[class*=safetyStatusIcon___]').style.backgroundPositionY.slice(0, -2);
-                            return aValue.localeCompare(bValue, undefined, {'numeric': true}) * sortDirection;
-                        })
-                    } else {
-                        childElements.sort((a, b) => {
-                            const aValue = a.querySelectorAll('div[class*=sections___] > [class*=crimeOptionSection___]')[3].querySelector('[class*=safetyStatusIcon___]').style.backgroundPositionY.slice(0, -2);
-                            const bValue = b.querySelectorAll('div[class*=sections___] > [class*=crimeOptionSection___]')[3].querySelector('[class*=safetyStatusIcon___]').style.backgroundPositionY.slice(0, -2);
-                            return aValue.localeCompare(bValue, undefined, {'numeric': true}) * sortDirection;
-                        })
-                    }
+                    childElements.sort((a, b) => {
+                        const aIcon = a.querySelector('[class*=safetyStatusIcon___]');
+                        const bIcon = b.querySelector('[class*=safetyStatusIcon___]');
+                        const aValue = aIcon ? (aIcon.style.backgroundPositionY || '0px').slice(0, -2) : '0';
+                        const bValue = bIcon ? (bIcon.style.backgroundPositionY || '0px').slice(0, -2) : '0';
+                        return aValue.localeCompare(bValue, undefined, {'numeric': true}) * sortDirection;
+                    });
                     break;
                 case sortBy.Risk:
                     childElements.sort((a, b) => {
@@ -696,8 +808,8 @@
                     break;
                 case sortBy.HasUniques:
                     childElements.sort((a, b) => {
-                        const aValue = a.querySelectorAll('div[class*=sections___] > [class*=crimeOptionSection___][class*=commitButtonSection___] div[class*=uniqueStar___]').length;
-                        const bValue = b.querySelectorAll('div[class*=sections___] > [class*=crimeOptionSection___][class*=commitButtonSection___] div[class*=uniqueStar___]').length;
+                        const aValue = a.querySelectorAll('[class*=commitButtonSection___] [class*=uniqueStar___]').length;
+                        const bValue = b.querySelectorAll('[class*=commitButtonSection___] [class*=uniqueStar___]').length;
                         return (aValue < bValue ? -1 : aValue > bValue ? 1 : 0) * sortDirection;
                     });
                     break;
@@ -706,8 +818,16 @@
                     break;
             }
         }
- 
-        parentElement.append(...childElements);
+
+        isApplyingVirtualSort = true;
+        try {
+            applyVirtualSortPositions(childElements);
+        } finally {
+            // Hold the guard past the synchronous writes so the reactive chain
+            // (React render + any state-library notifications) has time to settle
+            // before we accept another mutation as "real".
+            setTimeout(() => { isApplyingVirtualSort = false; }, 50);
+        }
     }
  
     function addExpireDiv(element) {
@@ -738,9 +858,24 @@
     }
  
     function addSafetyAssessment(element) {
-        const titleCard = element.querySelector('[class*=crimeOptionSection___]');
-        const targetName = titleCard.textContent;
-        if (targetName === null) {
+        const titleCard = element.querySelector('[class*=crimeOptionSection___][class*=flexGrow___]')
+            || element.querySelector('[class*=crimeOptionSection___]');
+        if (!titleCard) {
+            return;
+        }
+        // Mobile/tablet view nests the name as `confidenceSectionTablet___ > titleAndProgress___ > title___`.
+        // Desktop puts the name as a direct text node of the title card. Read the mobile structure first
+        // because falling through to `textContent` would also pick up siblings like the cm-bg-lifetime "71h"
+        // chip that other userscripts inject — that produced "Brewery71h" target names on mobile.
+        const mobileTitle = titleCard.querySelector('[class*=titleAndProgress___] > [class*=title___]');
+        let targetName;
+        if (mobileTitle) {
+            targetName = mobileTitle.textContent.trim();
+        } else {
+            const firstTextNode = [...titleCard.childNodes].find(n => n.nodeType === Node.TEXT_NODE && n.nodeValue.trim());
+            targetName = firstTextNode ? firstTextNode.nodeValue.trim() : titleCard.textContent.trim();
+        }
+        if (!targetName) {
             return;
         }
         element.setAttribute('data-target-name', targetName);
@@ -775,83 +910,58 @@
     }
  
     function addHeader(element) {
-        if (element.querySelector('[class*=crimeOptionGroup___]:not([class*=firstGroup___]) > .silmaril-crimes-burglary-header') !== null) {
+        const virtualList = element.querySelector(VIRTUAL_LIST_SELECTOR);
+        if (!virtualList) {
             return;
         }
- 
-        const parentElement = element.querySelector('[class*=crimeOptionGroup___]:not([class*=firstGroup___])');
- 
-        if (parentElement === null) {
+        if (virtualList.parentNode.querySelector(':scope > .silmaril-crimes-burglary-header') !== null) {
             return;
         }
- 
-        let headerOuterDiv = document.createElement('div');
-        headerOuterDiv.className = 'crimeOption___LP90y crime___tIT_g silmaril-crimes-burglary-header';
- 
-        let headerInnerDiv = document.createElement('div');
-        headerInnerDiv.className = 'sections___tZPkg';
- 
-        let sortByDiv = document.createElement('div');
-        sortByDiv.className = 'crimeOptionImage___o2cmT';
-        sortByDiv.textContent = 'Sort by';
- 
-        let targetDiv = document.createElement('div');
-        targetDiv.className = 'crimeOptionSection___hslpu flexGrow___S5IUQ silmaril-crimes-burglary-sorting silmaril-crimes-burglary-sorting-target';
-        targetDiv.setAttribute('data-sort-name', 'Target');
-        targetDiv.textContent = 'Target ⇧⇩';
- 
-        headerInnerDiv.append(sortByDiv, targetDiv, delimiter.cloneNode());
- 
-        let createdTimeDiv = document.createElement('div');
-        createdTimeDiv.className = 'crimeOptionSection___hslpu flexGrow___S5IUQ silmaril-crimes-burglary-sorting silmaril-crimes-burglary-sorting-created';
-        createdTimeDiv.setAttribute('data-sort-name', 'CreationTime');
-        createdTimeDiv.textContent = 'Created ⇧⇩';
- 
-        headerInnerDiv.append(createdTimeDiv, delimiter.cloneNode());
- 
-        let expireTimeDiv = document.createElement('div');
-        expireTimeDiv.className = 'crimeOptionSection___hslpu flexGrow___S5IUQ silmaril-crimes-burglary-sorting silmaril-crimes-burglary-sorting-expire';
-        expireTimeDiv.setAttribute('data-sort-name', 'ExpirationTime');
-        expireTimeDiv.textContent = 'Expires ⇧⇩';
- 
-        headerInnerDiv.append(expireTimeDiv, delimiter.cloneNode());
- 
-        let confidenceDiv = document.createElement('div');
-        confidenceDiv.className = 'crimeOptionSection___hslpu flexGrow___S5IUQ silmaril-crimes-burglary-sorting silmaril-crimes-burglary-sorting-confidence';
-        confidenceDiv.setAttribute('data-sort-name', 'Confidence');
-        confidenceDiv.textContent = 'Confidence ⇧⇩';
- 
-        headerInnerDiv.append(confidenceDiv, delimiter.cloneNode());
- 
-        let riskDiv = document.createElement('div');
-        riskDiv.className = 'crimeOptionSection___hslpu flexGrow___S5IUQ silmaril-crimes-burglary-sorting silmaril-crimes-burglary-sorting-risk';
-        riskDiv.setAttribute('data-sort-name', 'Risk');
-        riskDiv.textContent = 'Risk ⇧⇩';
- 
-        headerInnerDiv.append(riskDiv, delimiter.cloneNode());
- 
-        let hasUniquesDiv = document.createElement('div');
-        hasUniquesDiv.className = 'crimeOptionSection___hslpu flexGrow___S5IUQ silmaril-crimes-burglary-sorting silmaril-crimes-burglary-sorting-has-uniques';
-        hasUniquesDiv.setAttribute('data-sort-name', 'HasUniques');
-        hasUniquesDiv.textContent = 'Uniques ⇧⇩';
- 
-        headerInnerDiv.append(hasUniquesDiv, delimiter.cloneNode());
- 
-        headerOuterDiv.appendChild(headerInnerDiv);
-        parentElement.appendChild(headerOuterDiv);
+
+        const header = document.createElement('div');
+        header.className = 'silmaril-crimes-burglary-header';
+
+        const labelSpan = document.createElement('span');
+        labelSpan.className = 'silmaril-crimes-burglary-header-label';
+        labelSpan.textContent = 'Sort by:';
+        header.appendChild(labelSpan);
+
+        const sortOptions = [
+            { name: 'Target', label: 'Target' },
+            { name: 'CreationTime', label: 'Created', cls: 'silmaril-crimes-burglary-sorting-created' },
+            { name: 'ExpirationTime', label: 'Expires' },
+            { name: 'Confidence', label: 'Confidence' },
+            { name: 'Risk', label: 'Risk' },
+            { name: 'HasUniques', label: 'Uniques' }
+        ];
+        sortOptions.forEach(opt => {
+            const btn = document.createElement('span');
+            btn.className = 'silmaril-crimes-burglary-sorting' + (opt.cls ? ' ' + opt.cls : '');
+            btn.setAttribute('data-sort-name', opt.name);
+            btn.textContent = opt.label + ' ⇧⇩';
+            header.appendChild(btn);
+        });
+
+        virtualList.parentNode.insertBefore(header, virtualList);
     }
  
     async function addTimestamps() {
-        while (Object.keys(targets).length == 0){
+        const start = Date.now();
+        while (Object.keys(targets).length === 0 && Date.now() - start < 5000){
             await sleep(50);
         }
- 
-        const parentElement = document.querySelector('[class*=crimeOptionGroup___]:not([class*=firstGroup___])');
-        const childElements = Array.from(parentElement.querySelectorAll('[class*=crimeOption___]:not(.silmaril-crimes-burglary-header)'));
- 
+        if (Object.keys(targets).length === 0) return;
+
+        const virtualList = await waitForVirtualList(document, 60);
+        if (!virtualList) return;
+        const childElements = getTargetItems(virtualList);
+
         childElements.forEach((element, index) => {
-            element.setAttribute('data-created-time', targets[index].created);
-            element.setAttribute('data-expire-time', targets[index].expire);
+            if (element.hasAttribute('data-created-time')) return;
+            if (targets[index]) {
+                element.setAttribute('data-created-time', targets[index].created);
+                element.setAttribute('data-expire-time', targets[index].expire);
+            }
         });
     }
  
@@ -918,10 +1028,35 @@
   display: block !important;
 }
  
-div.silmaril-crimes-burglary-header > div[class*=sections___] {
-  height: 25px;
+div.silmaril-crimes-burglary-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 6px 8px;
+  font-size: smaller;
+  border-radius: 5px;
+  margin: 4px 0;
+  background: rgba(128, 128, 128, 0.1);
 }
- 
+
+div.silmaril-crimes-burglary-header .silmaril-crimes-burglary-header-label {
+  font-weight: bold;
+  margin-right: 4px;
+}
+
+div.silmaril-crimes-burglary-header .silmaril-crimes-burglary-sorting {
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(128, 128, 128, 0.15);
+  user-select: none;
+}
+
+div.silmaril-crimes-burglary-header .silmaril-crimes-burglary-sorting:hover {
+  background: rgba(128, 128, 128, 0.3);
+}
+
 div.burglary-root div[class*=crimeOptionSection___][class*=flexGrow___] {
   width: -webkit-fill-available;
   width: -moz-available;
@@ -995,40 +1130,16 @@ div.safetyAssessment.NotFound {
   cursor: pointer;
 }
  
-div.silmaril-crimes-burglary-header > div[class*=sections___] > div.silmaril-crimes-burglary-sorting {
-  cursor: pointer;
-}
- 
-div.silmaril-crimes-burglary-header > div[class*=sections___] > div[class*=crimeOptionImage___] {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  flex-direction: row;
-  height: 25px;
-}
- 
-div.silmaril-crimes-burglary-sorting-risk {
-  width: 34px;
-}
- 
-div.silmaril-crimes-burglary-sorting-has-uniques {
-  width: 34px;
-}
- 
 @media only screen and (max-width: 784px) {
   div.burglary-root div.createdTime {
     display: none;
   }
- 
+
   div.burglary-root div.expireTime {
     font-size: x-small;
   }
- 
-  div.silmaril-crimes-burglary-sorting {
-    text-overflow: ellipsis; overflow: hidden; white-space: nowrap;
-  }
- 
-  div.silmaril-crimes-burglary-sorting-created {
+
+  div.silmaril-crimes-burglary-header .silmaril-crimes-burglary-sorting-created {
     display: none;
   }
 }
