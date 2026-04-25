@@ -11,8 +11,6 @@
 // @run-at       document-idle
 // @grant        GM_addStyle
 // @grant        GM_registerMenuCommand
-// @downloadURL https://update.greasyfork.org/scripts/473470/Torn%20Bazaar%20Filler.user.js
-// @updateURL https://update.greasyfork.org/scripts/473470/Torn%20Bazaar%20Filler.meta.js
 // ==/UserScript==
 
 (function() {
