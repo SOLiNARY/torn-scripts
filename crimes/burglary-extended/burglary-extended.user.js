@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Crimes Burglary Extended
 // @namespace    https://github.com/SOLiNARY
-// @version      0.7.0
+// @version      0.7.1
 // @description  Sorts all scouted by target, created date, expire date, confidence, risk or uniques number. Remembers your choice.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT License
@@ -234,8 +234,16 @@
             "finds": "Casket, Bone Saw, Chloroform, Small Suitcase, Medical Bill",
             "unique": "1x Empty Blood Bag, 1x Bone Saw, 1x Bone, 1x Cassock",
             "advice": "Case twice or thrice. Loot seems mostly related to future crimes, including a fairly lucrative small suitcase."
-        }, // Funeral Directors == Funeral Home
+        }, // Funeral Directors == Funeral Home == Funeral Parlor
         "Funeral Home": {
+            "type": "Commercial",
+            "safety": "Unsafe",
+            "cases": "2-3",
+            "finds": "Casket, Bone Saw, Chloroform, Small Suitcase, Medical Bill",
+            "unique": "1x Empty Blood Bag, 1x Bone Saw, 1x Bone, 1x Cassock",
+            "advice": "Case twice or thrice. Loot seems mostly related to future crimes, including a fairly lucrative small suitcase."
+        },
+        "Funeral Parlor": {
             "type": "Commercial",
             "safety": "Unsafe",
             "cases": "2-3",
@@ -625,7 +633,7 @@
             burgledPlaces.push('Cleaning Firm');
         }
         if (burgledPlaces.find(x => x == 'Funeral Directors') != null) {
-            burgledPlaces.push('Funeral Home');
+            burgledPlaces.push('Funeral Home', 'Funeral Parlor');
         }
         if (burgledPlaces.find(x => x == 'Recruitment Agency') != null) {
             burgledPlaces.push('Recruit Agency', 'Temp Agency');
@@ -634,7 +642,7 @@
             burgledPlaces.push('Self Storage');
         }
         if (burgledPlaces.find(x => x == 'Dockside Warehouse') != null) {
-            burgledPlaces.push('Docklands Farm');
+            burgledPlaces.push('Docklands');
         }
         if (burgledPlaces.find(x => x == 'Farm Storage Unit') != null) {
             burgledPlaces.push('Farm Storage', 'Storage Unit');
