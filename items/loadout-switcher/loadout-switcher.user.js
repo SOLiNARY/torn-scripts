@@ -11,13 +11,13 @@
 // @grant        GM_addStyle
 // @run-at       document-end
 // ==/UserScript==
- 
-(async function() {
+
+(async function () {
     'use strict';
- 
+
     // Change to 'false' to see only numbers, 'true' to see titles
     const showTitles = true;
- 
+
     const includeLogo = false;
     const rfcvArg = "rfcv=";
     const isTampermonkeyEnabled = typeof unsafeWindow !== 'undefined';
@@ -28,22 +28,24 @@
     try {
         const cachedTitles = localStorage.getItem("silmaril-loadout-switcher-titles");
         if (cachedTitles) loadoutTitles = JSON.parse(cachedTitles);
-    } catch (e) { loadoutTitles = {}; }
- 
-    const { fetch: originalFetch } = isTampermonkeyEnabled ? unsafeWindow : window;
- 
+    } catch (e) {
+        loadoutTitles = {};
+    }
+
+    const {fetch: originalFetch} = isTampermonkeyEnabled ? unsafeWindow : window;
+
     const customFetch = async (...args) => {
         let [resource, config] = args;
         let response = await originalFetch(resource, config);
- 
+
         if (rfcvUpdatedThisSession && Object.keys(loadoutTitles).length > 0) {
             return response;
         }
- 
+
         let fetchUrl = response.url;
-        if (!rfcvUpdatedThisSession){
+        if (!rfcvUpdatedThisSession) {
             let rfcvIdx = fetchUrl.indexOf(rfcvArg);
-            if (rfcvIdx >= 0){
+            if (rfcvIdx >= 0) {
                 rfcv = fetchUrl.substr(rfcvIdx + rfcvArg.length);
                 localStorage.setItem("silmaril-loadout-switcher-rfcv", rfcv);
                 document.querySelectorAll("div.silmaril-torn-loadout-switcher-container button").forEach((button) => button.classList.remove("disabled"));
@@ -51,36 +53,36 @@
                 if (Object.keys(loadoutTitles).length == 0) fetchTitlesManually();
             }
         }
-        if (Object.keys(loadoutTitles).length == 0){
-            if (fetchUrl.indexOf(getEquippedItemsUrl) >= 0){
+        if (Object.keys(loadoutTitles).length == 0) {
+            if (fetchUrl.indexOf(getEquippedItemsUrl) >= 0) {
                 const json = () => response.clone().json()
-                .then((data) => {
-                    if (data.currentLoadouts != null){
-                        for (let key in data.currentLoadouts) {
-                            if (data.currentLoadouts.hasOwnProperty(key)) {
-                                loadoutTitles[key] = data.currentLoadouts[key].title;
+                    .then((data) => {
+                        if (data.currentLoadouts != null) {
+                            for (let key in data.currentLoadouts) {
+                                if (data.currentLoadouts.hasOwnProperty(key)) {
+                                    loadoutTitles[key] = data.currentLoadouts[key].title;
+                                }
                             }
+                            persistTitles();
+                            refreshButtonText();
                         }
-                        persistTitles();
-                        refreshButtonText();
-                    }
-                    return data
-                })
- 
+                        return data
+                    })
+
                 response.json = json;
-                response.text = async () =>JSON.stringify(await json());
+                response.text = async () => JSON.stringify(await json());
             }
         }
- 
+
         return response;
     };
- 
-    if (isTampermonkeyEnabled){
+
+    if (isTampermonkeyEnabled) {
         unsafeWindow.fetch = customFetch;
     } else {
         window.fetch = customFetch;
     }
- 
+
     const styles = `
 div#loadoutsRoot p[class^=title___] {
     overflow-y: hidden;
@@ -135,23 +137,23 @@ div.silmaril-torn-loadout-switcher-container a img {
   }
 }
 `;
- 
-    if (isTampermonkeyEnabled){
+
+    if (isTampermonkeyEnabled) {
         GM_addStyle(styles);
     } else {
         let style = document.createElement("style");
         style.type = "text/css";
         style.innerHTML = styles;
-        while (document.head == null){
+        while (document.head == null) {
             await sleep(50);
         }
         document.head.appendChild(style);
     }
- 
+
     const setLoadoutUrl = "/page.php?sid=itemsLoadouts&step=changeLoadout&setID={loadoutId}&rfcv={rfcv}";
     let selectedLoadouts = localStorage.getItem("silmaril-loadout-switcher-selected-loadouts") ?? "1,2,3";
     let selectedLoadoutsArray = selectedLoadouts.split(',');
- 
+
     function tryAttach() {
         const titleEl = [...document.querySelectorAll("#loadoutsRoot [class*=title___]")]
             .find(el => Array.from(el.classList).some(c => c.startsWith('title___')));
@@ -172,25 +174,27 @@ div.silmaril-torn-loadout-switcher-container a img {
     }
 
     setInterval(tryAttach, 500);
- 
-    function addLogo(root){
-        if (!includeLogo){ return; }
- 
+
+    function addLogo(root) {
+        if (!includeLogo) {
+            return;
+        }
+
         const logoLink = document.createElement('a');
         logoLink.href = '/factions.php?step=profile&ID=6731';
         logoLink.target = '_blank';
- 
+
         const logoImg = document.createElement('img');
         logoImg.src = 'data:image/octet-stream;base64,UklGRpAFAABXRUJQVlA4WAoAAAAYAAAAfwAAfwAAQUxQSKcAAAABDzD/ERHCbW3tbSIRS4/gUTwaabEMa7ijxCVRj/jpl8ldRP8nwP0nx5AZVNBUcoOt0n/gUxSauzmCS9EzCFK400tCxBEcFGm8toWBRa6N0lQwgyzNSithbdHVNmnG3DbrERDjfO3c2/PPcXd8p5mgNOpqm6i1VlmsINNm2tYo10ZRA+1o4aHQnBaMehFBgl4NjiAVWt/Ma1tlDHkNKmg+KCHTxlF/RQBWUDggrAQAADAcAJ0BKoAAgAAAAAAlAGusoL8Y/ADVCuD/gr+rX9E5wzUrsB+pv8axQL4P+Ff8r4AD9CP55+O3AO/Tb+8/47hAP0A/iHCAfwf+O+jr/u/9F8C36q/2b/K/AT/Jf5R8/+3LeJf6B9AHjP/Sa6n+kU4BhD3961gj+Yfp160fzJ50PnT/He4J/G/5v/kvzY7pvoAfqqmnzJ4zUG87Va0zYvL6xWb+7JdFy9GX+yIyVf2p1gR6w+kkZGwvG/OF94fetMEdGx53ednF7J1scS7sPxiI6FjzydvQ4SbMdJNDC25UR6pUmPfvYcGGAAD+/97c8Ag//yLWLqou+QyhvH5zTSyXLSY2RoaUp2Wjt8xqZm4N5FaR+PoyTh8YUJM7QpH93+r4XaBryGMi0aFNVS8/7GOU+dSycbi/sz5Tz/hZhLoDMNx/CX7Gl1xcBT/L7AYCgsYxT9XAoH2pL3/9LpgQdOa6W/+JgLgV0/RBVejhSRsTkCyXl2UJH1kf9oU8GNvWkuD+mL+eZJVBocEr/9xsahGwJHFih+U67i9H5P/36l/Abt2sESXCK5WPOQn2zCQ+eAsAi6pLg5h+Sp+Vi6Kv0zH6AVXsPzb4N163PmwCeixL8S+oaebL0JSSbaOc3dOEcFV/7/yQN7cJmkJctgKW7TpzG1fBZjf3Vi3pVBgjt3DoFZ9H88FJsbZk4UQiSAdtgTBGGV0Qbako3/EaCDDhv6o3UXIy9VuFJpks3LnVLff/0tEUn/3H2mYOHRxXSCQhYbMo/6XcT8kbHRS/6WcF7Kq+JZpLoSWYlNcCRTgaomPehL6YDVV+P1MOwoKgPwzco3hVXqPoYRPjuqk9X6OWxjGQ/V4klAsdjwBL0nwpioJIYFxr5+e7qKBrLoO04+2st6nrmTVd/VSqEd/zP00iULw2nyDaeBgxC3T3J0fRf+s8oMIlseJhnGdpJRCUiaAEfGmACQG4zR+fsIkLKph96SQGxccfrou8foWYYSsrv1T5yJnbNXFgiNlMluCNU6JKxG7/ZZQJ/6vT/jD9Q5lNeaeXt//Ex/0JZFyx393d7XxhcoRvVUFWv/Mcj/ev2VLCojBVMPAn6f8SVZjwO54toOLjZfFY/oZc6jJnIH6bolYAD3Gt/wm55ZRHg2AlRSuMGsfBp1oTL0XxAMT/3Uxv56jhPLlFjPHZPRsN07Mp8ahvKqGaRjqc1NPylgQ0anN36Tkazqhznoj8OoNi1e/6Giff5NGL4f+Mbre0tl/9pdTw+4koHvkch/gnreoLlBf5Nb1OCy4J6L+hRhD0XZA/Z0za7xczd72XRx0cNO8l6mGOZuH98/4Lo3RIM2FLUV//u4oIuiJKtPt9/MNLMhcygG1EfRV6RICfU6QY4SxI/z3WEe439xw5wcpR2Vvzyy9srHuubX2rB0LJbtd0TvVlEiAdF1BC1he3fyzfhkY33hY4IJJ/c7na5AxArRy9TcD7D8hQc4UhVSsX4hlsH73UQSrPwn6v5YJHsQ30huCmqGJ/jbGu8jb18VcEFGB7wu/XqQ3juNRxhXEGqI3FH5GBeWSCinT3+epuVSD1dsxb9TvZq/IoGv6niKAAAAAARVhJRg4AAABNTQAqAAAACAAAAAAAAA==';
         logoImg.alt = 'Next Level logo';
- 
+
         logoLink.appendChild(logoImg);
         root.appendChild(logoLink);
     }
- 
-    function addLoadoutAndSettingButtons(root){
+
+    function addLoadoutAndSettingButtons(root) {
         addLoadoutButtons(root);
- 
+
         const settings = document.createElement('button');
         settings.type = 'button';
         settings.title = 'Settings';
@@ -216,11 +220,11 @@ div.silmaril-torn-loadout-switcher-container a img {
             wave.offsetHeight;
             wave.style.animation = null;
         });
- 
+
         root.appendChild(settings);
     }
- 
-    async function addLoadoutButtons(root){
+
+    async function addLoadoutButtons(root) {
         selectedLoadoutsArray.forEach((loadout) => {
             const button = document.createElement('button');
             button.type = 'button';
@@ -228,52 +232,56 @@ div.silmaril-torn-loadout-switcher-container a img {
             button.className = rfcv === null ? 'torn-btn disabled' : 'torn-btn';
             button.textContent = showTitles ? (loadoutTitles[loadout] ?? loadout) : loadout;
             button.setAttribute('data-loadout-number', loadout);
-            button.addEventListener('click', () => {handleLoadoutClick(root)});
- 
+            button.addEventListener('click', () => {
+                handleLoadoutClick(root)
+            });
+
             root.appendChild(button);
         })
     }
- 
-    async function handleLoadoutClick(root){
+
+    async function handleLoadoutClick(root) {
         let loadout = event.target.getAttribute('data-loadout-number');
-        if (event.target.classList.contains('disabled')){
+        if (event.target.classList.contains('disabled')) {
             return;
         }
         let url = setLoadoutUrl.replace("{loadoutId}", loadout).replace("{rfcv}", rfcv);
         await sendSetLoadoutRequest(url, root);
     }
- 
-    async function sendSetLoadoutRequest(url, root){
+
+    async function sendSetLoadoutRequest(url, root) {
         let wave = root.querySelector("div.wave");
         await fetch(url, {
             method: 'GET',
         })
             .then(response => {
-            if (response.ok) {
-                wave.style.backgroundColor = "green";
-            } else {
-                console.error("[TornLoadoutSwitcher] Set Loadout request failed:", response);
+                if (response.ok) {
+                    wave.style.backgroundColor = "green";
+                } else {
+                    console.error("[TornLoadoutSwitcher] Set Loadout request failed:", response);
+                    wave.style.backgroundColor = "red";
+                    wave.style.animationDuration = "5s";
+                }
+            })
+            .catch(error => {
+                console.error("[TornLoadoutSwitcher] Error setting loadout:", error);
                 wave.style.backgroundColor = "red";
                 wave.style.animationDuration = "5s";
-            }
-        })
-            .catch(error => {
-            console.error("[TornLoadoutSwitcher] Error setting loadout:", error);
-            wave.style.backgroundColor = "red";
-            wave.style.animationDuration = "5s";
-        });
+            });
         wave.style.animation = 'none';
         wave.offsetHeight;
         wave.style.animation = null;
     }
- 
+
     function sleep(ms) {
         return new Promise(resolve => setTimeout(resolve, ms));
     }
 
     function persistTitles() {
-        try { localStorage.setItem("silmaril-loadout-switcher-titles", JSON.stringify(loadoutTitles)); }
-        catch (e) { /* ignore quota errors */ }
+        try {
+            localStorage.setItem("silmaril-loadout-switcher-titles", JSON.stringify(loadoutTitles));
+        } catch (e) { /* ignore quota errors */
+        }
     }
 
     function refreshButtonText() {
