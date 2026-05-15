@@ -1,293 +1,298 @@
 // ==UserScript==
 // @name         Torn Crimes Card Skimming Extended
 // @namespace    https://github.com/SOLiNARY
-// @version      0.5.6
+// @version      0.6
 // @description  Sorts all installed card skimmers by location, time installed, score or cards skimmed. Adds card/hour stat. Remembers your choice.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT License
 // @match        https://www.torn.com/loader.php?sid=crimes*
+// @match        https://www.torn.com/page.php?sid=crimes*
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=torn.com
 // @grant        none
+// @run-at       document-end
 // ==/UserScript==
- 
-(function() {
+
+(async function () {
     'use strict';
- 
+
     const sortBy = {
-        "Location": 10,
-        "TimeInstalled": 20,
-        "CardsSkimmed": 30,
-        "Score": 40
+        Location: 10,
+        TimeInstalled: 20,
+        CardsSkimmed: 30,
+        Score: 40
     };
     const sortDirection = {
-        "Ascending": 1,
-        "Descending": -1
+        Ascending: 1,
+        Descending: -1
+    };
+
+    const STORAGE_KEY_BY = 'silmaril-torn-crimes-card-skimming-sorting-by';
+    const STORAGE_KEY_DIR = 'silmaril-torn-crimes-card-skimming-sorting-direction';
+    const HEADER_CLASS = 'silmaril-card-skimming-header';
+    const ROW_STATS_CLASS = 'silmaril-skimmer-stats';
+    const TOTAL_STATS_CLASS = 'silmaril-card-skimming-total-stats';
+    const DROPDOWN_STATS_CLASS = 'silmaril-card-skimming-dropdown-stats';
+    const SKIMMER_ROW_HEIGHT = 51;
+
+    function isMobileView() {
+        return window.innerWidth <= 784;
     }
- 
-    const viewPortWidthPx = window.innerWidth;
-    const isMobileView = viewPortWidthPx <= 784;
-    let currentSortBy = localStorage.getItem("silmaril-torn-crimes-card-skimming-sorting-by") ?? sortBy.Location;
-    currentSortBy = parseInt(currentSortBy);
-    let currentSortDirection = localStorage.getItem("silmaril-torn-crimes-card-skimming-sorting-direction") ?? sortDirection.Descending;
-    currentSortDirection = parseInt(currentSortDirection);
- 
-    const targetNode = document.querySelector("div.crimes-app");
-    const config = { childList: true, subtree: true };
- 
-    const observer = new MutationObserver((mutationsList, observer) => {
-        const divs = document.querySelectorAll("div[class*=currentCrime___]");
-        for (const mutation of mutationsList) {
-            if (mutation.type === 'childList' && mutation.target.className == 'crime-root cardskimming-root') {
-                divs.forEach((div) => {
-                    div.addEventListener("click", function (event) {
-                        if (event.target.matches("div[class*=topSection___] div[class*=crimeBanner___] div[class*=crimeSliderArrowButtons___] button[class*=arrowButton___]")) {
-                            observer.observe(targetNode, config);
-                        }
-                        if (event.target.matches("div[class*=crimeOptionGroup___]:not([class*=firstGroup___]) div.silmaril-crimes-card-skimming-sorting")) {
-                            let sortName = event.target.getAttribute("data-sort-name");
-                            let newSortBy = sortBy[sortName];
-                            let newSortDirection = newSortBy === currentSortBy ? currentSortDirection * -1 : currentSortDirection;
-                            sortChildElements(mutation.target, newSortBy, newSortDirection);
-                            currentSortBy = newSortBy;
-                            currentSortDirection = newSortDirection;
-                            localStorage.setItem("silmaril-torn-crimes-card-skimming-sorting-by", newSortBy);
-                            localStorage.setItem("silmaril-torn-crimes-card-skimming-sorting-direction", newSortDirection);
-                        }
-                    });
-                });
- 
-                addHeader(mutation.target);
-                sortChildElements(mutation.target, currentSortBy, currentSortDirection);
-                observer.disconnect();
-                break;
+
+    let currentSortBy = parseInt(localStorage.getItem(STORAGE_KEY_BY) ?? sortBy.Location, 10);
+    let currentSortDirection = parseInt(localStorage.getItem(STORAGE_KEY_DIR) ?? sortDirection.Descending, 10);
+    let isSetupInProgress = false;
+
+    function sleep(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    function parseVerbalTimestamp(text) {
+        const timeUnits = {
+            second: 1, seconds: 1,
+            minute: 60, minutes: 60,
+            hour: 3600, hours: 3600,
+            day: 86400, days: 86400,
+            week: 604800, weeks: 604800
+        };
+        const regex = /(\d+)\s+(\w+)/g;
+        let total = 0;
+        let match;
+        while ((match = regex.exec(text))) {
+            const [, value, unit] = match;
+            if (Object.prototype.hasOwnProperty.call(timeUnits, unit)) {
+                total += parseInt(value, 10) * timeUnits[unit];
             }
         }
-    });
- 
-    observer.observe(targetNode, config);
- 
-    // Function to sort child elements
-    function sortChildElements(element, sortByProperty, sortDirection) {
-        const parentElement = element.querySelector('[class*=crimeOptionGroup___]:not([class*=firstGroup___])');
-        const childElements = Array.from(parentElement.querySelectorAll('[class*=crimeOption___]:not(.silmaril-card-skimming-header)'));
-        let locationStats = {};
- 
-        // Append sorted elements back to the parent element
-        childElements.forEach(element => {
-            let cardsSkimmed = element.querySelector('[class*=crimeOptionSection___][class*=statusSection___] [class*=statusCards___]').textContent;
-            let hoursElapsed = parseVerbalTimestamp(element.querySelector(`[class*=crimeOptionSection___]${isMobileView ? '[class*=tabletMainSection___] div[class*=timeActive___]' : '[class*=timeSection___]'}`).textContent) / 3600;
-            let locationDiv = element.querySelector('[class*=crimeOptionSection___][class*=flexGrow___]');
-            let location = null;
- 
-            let locationText = locationDiv.innerText;
-            let newLineIdx = locationText.indexOf('\n');
-            if (newLineIdx >= 0){
-                location = locationText.substring(0, newLineIdx);
-            } else {
-                location = locationText;
+        return total;
+    }
+
+    function getCardSkimmingRoot() {
+        return document.querySelector('div.crime-root.cardskimming-root');
+    }
+
+    function getVirtualList(root) {
+        return root ? root.querySelector('[class*=virtualList___]') : null;
+    }
+
+    function getSkimmerItems(virtualList) {
+        if (!virtualList) return [];
+        return Array.from(virtualList.querySelectorAll('div[class*=virtualItem___]'))
+            .filter(item => item.querySelector('[class*=timeActive___]') && item.querySelector('[class*=statusCards___]'));
+    }
+
+    function getLocationText(locationDiv) {
+        if (!locationDiv) return '';
+        for (const node of locationDiv.childNodes) {
+            if (node.nodeType === Node.TEXT_NODE) {
+                const t = node.textContent.trim();
+                if (t) return t;
             }
- 
-            if (element.querySelector('div.stats') === null) {
-                if (isMobileView){
-                    const statsDivNew = document.createElement('div');
-                    statsDivNew.className = 'stats';
-                    statsDivNew.style.fontSize = '.6rem';
-                    locationDiv.appendChild(statsDivNew);
-                } else {
-                    const delimiter = document.createElement('div');
-                    delimiter.className = 'sectionDelimiter___NpsSC';
-                    const statsDivNew = document.createElement('div');
-                    statsDivNew.className = 'crimeOptionSection___hslpu stats';
-                    locationDiv.outerHTML += delimiter.outerHTML + statsDivNew.outerHTML;
-                }
-            }
- 
-            let statsDiv = element.querySelector('div.stats');
-            let statsScore = (cardsSkimmed / hoursElapsed).toFixed(2);
-            statsDiv.textContent = `${statsScore} card/hour`;
-            element.setAttribute('data-score', parseFloat(statsScore).toFixed(2));
- 
-            // Add stats to the locationStats object
-            if (!locationStats[location]) {
-                locationStats[location] = {
-                    totalScore: 0,
-                    totalCount: 0
-                };
-            }
- 
-            locationStats[location].totalScore += parseFloat(statsScore);
-            locationStats[location].totalCount++;
-        });
- 
-        // Sort card skimmers based on the filter
-        switch (sortByProperty){
+        }
+        return '';
+    }
+
+    function extractRowData(item) {
+        const cardsEl = item.querySelector('[class*=statusCards___]');
+        const cards = parseFloat((cardsEl ? cardsEl.textContent : '0').replace(/,/g, '')) || 0;
+        const timeEl = item.querySelector('[class*=timeActive___]');
+        const hours = parseVerbalTimestamp(timeEl ? timeEl.textContent : '') / 3600;
+        const locationDiv = item.querySelector('[class*=flexGrow___]');
+        const location = getLocationText(locationDiv);
+        const score = hours > 0 ? cards / hours : 0;
+        return {item, cards, hours, location, score, locationDiv};
+    }
+
+    function injectRowStats(rowData) {
+        const {score, locationDiv} = rowData;
+        if (!locationDiv) return;
+        let stats = locationDiv.querySelector('.' + ROW_STATS_CLASS);
+        if (!stats) {
+            stats = document.createElement('span');
+            stats.className = ROW_STATS_CLASS;
+            locationDiv.appendChild(stats);
+        }
+        const mobile = isMobileView();
+        const desiredStyle = `display:block;font-size:${mobile ? '.58rem' : '.65rem'};line-height:1;opacity:.85;font-weight:normal;`;
+        if (stats.style.cssText !== desiredStyle) stats.style.cssText = desiredStyle;
+        const label = mobile ? 'c/h' : 'card/hour';
+        const text = `${score.toFixed(2)} ${label}`;
+        if (stats.textContent !== text) stats.textContent = text;
+    }
+
+    function sortRows(rows) {
+        const dir = currentSortDirection;
+        let cmp;
+        switch (currentSortBy) {
             case sortBy.Location:
-                childElements.sort((a, b) => {
-                    const aValue = a.querySelector('[class*=crimeOptionSection___][class*=flexGrow___]').textContent;
-                    const bValue = b.querySelector('[class*=crimeOptionSection___][class*=flexGrow___]').textContent;
-                    return aValue.localeCompare(bValue) * sortDirection;
-                });
+                cmp = (a, b) => a.location.localeCompare(b.location) * dir;
                 break;
             case sortBy.TimeInstalled:
-                if (isMobileView) {
-                    childElements.sort((a, b) => {
-                        const aValue = parseVerbalTimestamp(a.querySelector('[class*=crimeOptionSection___][class*=tabletMainSection___] div[class*=timeActive___]').textContent);
-                        const bValue = parseVerbalTimestamp(b.querySelector('[class*=crimeOptionSection___][class*=tabletMainSection___] div[class*=timeActive___]').textContent);
-                        return (aValue < bValue ? -1 : aValue > bValue ? 1 : 0) * sortDirection;
-                    });
-                } else {
-                    childElements.sort((a, b) => {
-                        const aValue = parseVerbalTimestamp(a.querySelector('[class*=crimeOptionSection___][class*=timeSection___]').textContent);
-                        const bValue = parseVerbalTimestamp(b.querySelector('[class*=crimeOptionSection___][class*=timeSection___]').textContent);
-                        return (aValue < bValue ? -1 : aValue > bValue ? 1 : 0) * sortDirection;
-                    });
-                }
-                break;
-            case sortBy.Score:
-                childElements.sort((a, b) => {
-                    const aValue = a.getAttribute('data-score');
-                    const bValue = b.getAttribute('data-score');
-                    return aValue.localeCompare(bValue, undefined, {'numeric': true}) * sortDirection;
-                });
+                cmp = (a, b) => (a.hours - b.hours) * dir;
                 break;
             case sortBy.CardsSkimmed:
-                childElements.sort((a, b) => {
-                    const aValue = a.querySelector('[class*=crimeOptionSection___][class*=statusSection___] [class*=statusCards___]').textContent;
-                    const bValue = b.querySelector('[class*=crimeOptionSection___][class*=statusSection___] [class*=statusCards___]').textContent;
-                    return aValue.localeCompare(bValue, undefined, {'numeric': true}) * sortDirection;
-                });
+                cmp = (a, b) => (a.cards - b.cards) * dir;
+                break;
+            case sortBy.Score:
+                cmp = (a, b) => (a.score - b.score) * dir;
                 break;
             default:
-                console.error("[TornCrimesCardSkimmingSorting] Unexpected sort values!", sortByProperty, sortDirection);
-                break;
+                cmp = () => 0;
         }
- 
-        childElements.forEach(element => {
-            parentElement.appendChild(element);
-        });
- 
-        let locationsDropdown = document.querySelector('div[class*=locationSelectSection___] ul');
- 
-        // Calculate the average stat score for each location and append it to dropdown option
-        for (let location in locationStats) {
-            const averageScore = (locationStats[location].totalScore / locationStats[location].totalCount).toFixed(2);
-            let option = locationsDropdown.querySelector(`li#option-${location.replace(' ', '-')}`);
-            let stats = option.querySelector('p.stats') ?? addStatsBlockToDropdownOption(option);
-            stats.textContent = ` ${averageScore} c/h`;
-        }
- 
-        let totalStatsDiv = document.querySelector("div[class*=currentCrime___] div[class*=titleBar___] div.total-stats") ?? addTotalStats();
- 
-        // Calculate the overall average stat score
-        let overallTotalScore = 0;
-        let overallTotalCount = 0;
- 
-        for (let location in locationStats) {
-            overallTotalScore += locationStats[location].totalScore;
-            overallTotalCount += locationStats[location].totalCount;
-        }
- 
-        const overallScore = overallTotalScore.toFixed(2);
-        totalStatsDiv.textContent = isMobileView ? `${overallScore} c/h - ${overallTotalCount}/20 skimmers` : `${overallScore} card/hour with ${overallTotalCount}/20 skimmers`;
+        return [...rows].sort(cmp);
     }
- 
-    function addTotalStats() {
-        const statBlock = document.createElement('div');
-        statBlock.className = 'total-stats';
-        let crimeTitle = document.querySelector("div[class*=currentCrime___] div[class*=titleBar___] div[class*=title___]");
-        crimeTitle.parentNode.insertBefore(statBlock, crimeTitle.nextSibling);
-        return statBlock;
-    }
- 
-    function addStatsBlockToDropdownOption(element) {
-        const statBlock = document.createElement('p');
-        statBlock.className = 'stats';
-        element.appendChild(statBlock);
-        return statBlock;
-    }
- 
-    function addHeader(element) {
-        const parentElement = element.querySelector('[class*=crimeOptionGroup___]:not([class*=firstGroup___])');
-        let header = parentElement.querySelector('[class*=crimeOption___]').cloneNode(true);
-        header.classList.add("silmaril-card-skimming-header");
-        let headerDiv = header.querySelector('[class*=sections___]');
-        headerDiv.style.height = "25px";
-        let imageDiv = header.querySelector('[class*=crimeOptionImage___]');
-        imageDiv.style = "display: flex;justify-content: center;align-items: center;flex-direction: row;height: 25px;";
-        imageDiv.innerText = "Sort by";
-        let nameDiv = header.querySelector('[class*=crimeOptionSection___][class*=flexGrow___]');
-        nameDiv.style.cursor = "pointer";
-        nameDiv.classList.add("silmaril-crimes-card-skimming-sorting");
-        nameDiv.classList.add("silmaril-crimes-card-skimming-sorting-location");
-        nameDiv.setAttribute("data-sort-name", "Location");
-        nameDiv.innerHTML = "Location ⇧⇩";
-        let scoreDiv = nameDiv.cloneNode(true);
-        scoreDiv.classList.remove("silmaril-crimes-card-skimming-sorting-location");
-        scoreDiv.classList.add("silmaril-crimes-card-skimming-sorting-score");
-        scoreDiv.setAttribute("data-sort-name", "Score");
-        scoreDiv.innerText = "Score ⇧⇩";
- 
-        let delimiter = document.createElement("div");
-        delimiter.className = "sectionDelimiter___NpsSC";
-        if (isMobileView) {
-            nameDiv.parentNode.insertBefore(delimiter, nameDiv.nextSibling);
-            let timeDiv = nameDiv.cloneNode(true);
-            timeDiv.classList.remove("silmaril-crimes-card-skimming-sorting-location");
-            timeDiv.classList.add("silmaril-crimes-card-skimming-sorting-time-installed");
-            timeDiv.setAttribute("data-sort-name", "TimeInstalled");
-            timeDiv.innerText = "Time ⇧⇩";
-            delimiter.parentNode.insertBefore(timeDiv, delimiter.nextSibling);
-            timeDiv.parentNode.insertBefore(delimiter, timeDiv.nextSibling);
-            delimiter.parentNode.insertBefore(scoreDiv, delimiter.nextSibling);
-        } else {
-            let timeDiv = header.querySelector('[class*=crimeOptionSection___][class*=timeSection___]');
-            timeDiv.style.cursor = "pointer";
-            timeDiv.classList.add("silmaril-crimes-card-skimming-sorting");
-            timeDiv.classList.add("silmaril-crimes-card-skimming-sorting-time-installed");
-            timeDiv.setAttribute("data-sort-name", "TimeInstalled");
-            timeDiv.innerText = "Time installed ⇧⇩";
-            scoreDiv.style.justifyContent = 'space-around';
-            scoreDiv.style.width = '13px';
-            nameDiv.parentNode.insertBefore(delimiter, nameDiv.nextSibling);
-            delimiter.parentNode.insertBefore(scoreDiv, delimiter.nextSibling);
-        }
- 
-        let cardsDiv = header.querySelector('[class*=crimeOptionSection___][class*=statusSection___]');
-        cardsDiv.style.cursor = "pointer";
-        cardsDiv.classList.add("silmaril-crimes-card-skimming-sorting");
-        cardsDiv.classList.add("silmaril-crimes-card-skimming-sorting-cards-skimmed");
-        cardsDiv.setAttribute("data-sort-name", "CardsSkimmed");
-        cardsDiv.innerText = isMobileView ? "Cards ⇧⇩" : "Cards skimmed ⇧⇩";
- 
-        header.querySelector(`[class*=commitButtonSection___] ${isMobileView ? '' : 'button'}`).remove();
-        parentElement.appendChild(header);
-    }
- 
-    function parseVerbalTimestamp(verbalTimestamp) {
-        const timeUnits = {
-            second: 1,
-            seconds: 1,
-            minute: 60,
-            minutes: 60,
-            hour: 3600,
-            hours: 3600,
-            day: 86400,
-            days: 86400,
-            week: 604800,
-            weeks: 604800
-        };
- 
-        const regex = /(\d+)\s+(\w+)/g;
-        let totalSeconds = 0;
- 
-        let match;
-        while ((match = regex.exec(verbalTimestamp))) {
-            const [, value, unit] = match;
-            if (timeUnits.hasOwnProperty(unit)) {
-                totalSeconds += parseInt(value) * timeUnits[unit];
+
+    function applyPositions(originalRows, sortedRows) {
+        if (sortedRows.length === 0) return;
+        let baseY = Infinity;
+        for (const rd of originalRows) {
+            const t = rd.item.style.transform;
+            if (!t) continue;
+            const m = t.match(/translateY\(([-\d.]+)px\)/);
+            if (m) {
+                const y = parseFloat(m[1]);
+                if (y < baseY) baseY = y;
             }
         }
- 
-        return totalSeconds;
+        if (!Number.isFinite(baseY)) return;
+        sortedRows.forEach((rd, idx) => {
+            const desired = `translateY(${baseY + idx * SKIMMER_ROW_HEIGHT}px)`;
+            if (rd.item.style.transform !== desired) {
+                rd.item.style.transform = desired;
+            }
+        });
     }
+
+    function ensureHeader(root) {
+        if (root.querySelector('.' + HEADER_CLASS)) return;
+        const virtualList = getVirtualList(root);
+        if (!virtualList) return;
+
+        const mobile = isMobileView();
+        const header = document.createElement('div');
+        header.className = HEADER_CLASS;
+        header.style.cssText = `display:flex;align-items:center;height:${mobile ? '30' : '22'}px;padding:0 ${mobile ? '4' : '8'}px;font-size:${mobile ? '.72' : '.7'}rem;font-weight:bold;border-bottom:1px solid rgba(127,127,127,0.25);background:rgba(127,127,127,0.07);`;
+
+        const cols = [
+            {label: 'Location', sort: 'Location', flex: '2 1 0'},
+            {label: mobile ? 'Time' : 'Time installed', sort: 'TimeInstalled', flex: '1 1 0'},
+            {label: 'Score', sort: 'Score', flex: '1 1 0'},
+            {label: mobile ? 'Cards' : 'Cards skimmed', sort: 'CardsSkimmed', flex: '1 1 0'}
+        ];
+        cols.forEach(col => {
+            const el = document.createElement('div');
+            el.dataset.sortName = col.sort;
+            el.style.cssText = `cursor:pointer;flex:${col.flex};text-align:center;user-select:none;padding:0 ${mobile ? '2' : '4'}px;line-height:1.2;`;
+            el.textContent = `${col.label} ⇧⇩`;
+            el.addEventListener('click', () => {
+                const newSortBy = sortBy[col.sort];
+                const newDir = newSortBy === currentSortBy ? currentSortDirection * -1 : currentSortDirection;
+                currentSortBy = newSortBy;
+                currentSortDirection = newDir;
+                localStorage.setItem(STORAGE_KEY_BY, String(newSortBy));
+                localStorage.setItem(STORAGE_KEY_DIR, String(newDir));
+                runSetup();
+            });
+            header.appendChild(el);
+        });
+
+        virtualList.parentNode.insertBefore(header, virtualList);
+    }
+
+    function updateDropdownStats(root, byLocation) {
+        const dropdown = root.querySelector('[class*=locationSelectSection___] ul');
+        if (!dropdown) return;
+        for (const [location, agg] of byLocation) {
+            if (!location) continue;
+            const slug = location.replace(/ /g, '-');
+            const option = dropdown.querySelector(`li[id^="option-${slug}-"]`) ||
+                dropdown.querySelector(`li[id^="option-${slug}"]`);
+            if (!option) continue;
+            const target = option.querySelector('[class*=optionWithLevelRequirement___]') || option;
+            const avg = agg.totalCount > 0 ? (agg.totalScore / agg.totalCount).toFixed(2) : '0.00';
+            let stats = target.querySelector('.' + DROPDOWN_STATS_CLASS);
+            if (!stats) {
+                stats = document.createElement('span');
+                stats.className = DROPDOWN_STATS_CLASS;
+                stats.style.cssText = 'margin-left:auto;padding-left:6px;font-size:.7rem;opacity:.85;white-space:nowrap;';
+                target.appendChild(stats);
+            }
+            const text = `${avg} c/h`;
+            if (stats.textContent !== text) stats.textContent = text;
+        }
+    }
+
+    function updateTotalStats(root, totalScore, totalCount) {
+        const titleBar = root.querySelector('[class*=currentCrime___] [class*=titleBar___]');
+        if (!titleBar) return;
+        let totalStatsEl = titleBar.querySelector('.' + TOTAL_STATS_CLASS);
+        if (!totalStatsEl) {
+            totalStatsEl = document.createElement('div');
+            totalStatsEl.className = TOTAL_STATS_CLASS;
+            const title = titleBar.querySelector('[class*=title___]');
+            if (title) {
+                title.parentNode.insertBefore(totalStatsEl, title.nextSibling);
+            } else {
+                titleBar.appendChild(totalStatsEl);
+            }
+        }
+        const mobile = isMobileView();
+        const desiredStyle = `margin-left:${mobile ? '6' : '10'}px;font-size:${mobile ? '.65' : '.75'}rem;opacity:.85;align-self:center;white-space:nowrap;flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;`;
+        if (totalStatsEl.style.cssText !== desiredStyle) totalStatsEl.style.cssText = desiredStyle;
+        const scoreText = totalScore.toFixed(2);
+        const text = mobile
+            ? `${scoreText} c/h · ${totalCount}/20`
+            : `${scoreText} card/hour with ${totalCount}/20 skimmers`;
+        if (totalStatsEl.textContent !== text) totalStatsEl.textContent = text;
+    }
+
+    async function runSetup() {
+        if (isSetupInProgress) return;
+        isSetupInProgress = true;
+        try {
+            const root = getCardSkimmingRoot();
+            if (!root) return;
+
+            let attempts = 0;
+            let virtualList = getVirtualList(root);
+            let items = getSkimmerItems(virtualList);
+            while (items.length === 0 && attempts < 40) {
+                await sleep(50);
+                attempts++;
+                virtualList = getVirtualList(root);
+                items = getSkimmerItems(virtualList);
+            }
+            if (items.length === 0) return;
+
+            ensureHeader(root);
+
+            const rows = items.map(extractRowData);
+            rows.forEach(injectRowStats);
+
+            const sorted = sortRows(rows);
+            applyPositions(rows, sorted);
+
+            const byLocation = new Map();
+            let totalScore = 0;
+            for (const rd of rows) {
+                if (!byLocation.has(rd.location)) {
+                    byLocation.set(rd.location, {totalScore: 0, totalCount: 0});
+                }
+                const agg = byLocation.get(rd.location);
+                agg.totalScore += rd.score;
+                agg.totalCount++;
+                totalScore += rd.score;
+            }
+            updateDropdownStats(root, byLocation);
+            updateTotalStats(root, totalScore, rows.length);
+        } finally {
+            isSetupInProgress = false;
+        }
+    }
+
+    while (document.querySelector('html') == null) {
+        await sleep(50);
+    }
+
+    await runSetup();
+    setInterval(runSetup, 500);
 })();
