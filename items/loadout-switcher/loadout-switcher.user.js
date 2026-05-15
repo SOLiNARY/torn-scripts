@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Loadout Switcher
 // @namespace    https://github.com/SOLiNARY
-// @version      0.6.5
+// @version      0.6.6
 // @description  Adds customisable quick loadout change buttons on Items page.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT
@@ -24,7 +24,6 @@
     const getEquippedItemsUrl = "/page.php?sid=itemsLoadouts&step=getEquippedItems";
     let rfcv = localStorage.getItem("silmaril-loadout-switcher-rfcv") ?? null;
     let rfcvUpdatedThisSession = false;
-    let panelAdded = false;
     let loadoutTitles = {};
  
     const { fetch: originalFetch } = isTampermonkeyEnabled ? unsafeWindow : window;
@@ -147,10 +146,10 @@ div.silmaril-torn-loadout-switcher-container a img {
     let selectedLoadoutsArray = selectedLoadouts.split(',');
  
     function tryAttach() {
-        if (panelAdded) return true;
         const titleEl = [...document.querySelectorAll("#loadoutsRoot [class*=title___]")]
             .find(el => Array.from(el.classList).some(c => /^title___[a-zA-Z]{5}$/.test(c)));
-        if (!titleEl) return false;
+        if (!titleEl) return;
+        if (titleEl.querySelector('.silmaril-torn-loadout-switcher-container')) return;
 
         const buttonContainer = document.createElement('div');
         buttonContainer.className = 'silmaril-torn-loadout-switcher-container';
@@ -163,12 +162,9 @@ div.silmaril-torn-loadout-switcher-container a img {
         addLogo(buttonContainer);
 
         titleEl.appendChild(buttonContainer);
-        panelAdded = true;
-        return true;
     }
 
-    const pollId = setInterval(() => { if (tryAttach()) clearInterval(pollId); }, 200);
-    setTimeout(() => clearInterval(pollId), 30000);
+    setInterval(tryAttach, 500);
  
     function addLogo(root){
         if (!includeLogo){ return; }
