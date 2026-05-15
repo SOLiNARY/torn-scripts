@@ -1,15 +1,15 @@
 // ==UserScript==
 // @name         Torn Crimes Card Skimming Extended
 // @namespace    https://github.com/SOLiNARY
-// @version      0.6
+// @version      0.6.1
 // @description  Sorts all installed card skimmers by location, time installed, score or cards skimmed. Adds card/hour stat. Remembers your choice.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT License
 // @match        https://www.torn.com/loader.php?sid=crimes*
 // @match        https://www.torn.com/page.php?sid=crimes*
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=torn.com
-// @grant        none
-// @run-at       document-end
+// @grant        unsafeWindow
+// @run-at       document-start
 // ==/UserScript==
 
 (async function () {
@@ -41,6 +41,46 @@
     let currentSortBy = parseInt(localStorage.getItem(STORAGE_KEY_BY) ?? sortBy.Location, 10);
     let currentSortDirection = parseInt(localStorage.getItem(STORAGE_KEY_DIR) ?? sortDirection.Descending, 10);
     let isSetupInProgress = false;
+
+    // Cached skimmer data captured from the crimes API. This is the source of truth for total/aggregate
+    // stats, because the visible DOM only contains the virtualized subset (Torn only renders ~16 of 20
+    // skimmer rows at any one time).
+    let apiSkimmers = null;
+    const CRIMES_LIST_URL_FRAGMENT = 'crimesData&step=crimesList';
+
+    function tryCacheSkimmersFromResponse(jsonData) {
+        const subCrimes = jsonData && jsonData.DB && jsonData.DB.crimesByType && jsonData.DB.crimesByType.subCrimes;
+        if (!Array.isArray(subCrimes)) return false;
+        apiSkimmers = subCrimes;
+        return true;
+    }
+
+    const isTampermonkeyEnabled = typeof unsafeWindow !== 'undefined';
+    const fetchHost = isTampermonkeyEnabled ? unsafeWindow : window;
+    const originalFetch = fetchHost.fetch;
+
+    fetchHost.fetch = async function (...args) {
+        const response = await originalFetch.apply(this, args);
+        try {
+            const url = response.url || '';
+            if (url.indexOf(CRIMES_LIST_URL_FRAGMENT) >= 0 && window.location.href.indexOf('cardskimming') >= 0) {
+                const cloned = await response.clone().json();
+                tryCacheSkimmersFromResponse(cloned);
+            }
+        } catch (e) {
+            // Swallow — interception is best-effort, the script falls back to DOM extrapolation.
+        }
+        return response;
+    };
+
+    function extractApiRowScore(apiObj) {
+        const ci = apiObj && apiObj.crimeInfo;
+        const cards = ci && typeof ci.cards === 'number' ? ci.cards : 0;
+        const hours = ci && typeof ci.timeActive === 'number' ? ci.timeActive / 3600 : 0;
+        const score = hours > 0 ? cards / hours : 0;
+        const location = typeof apiObj.title === 'string' ? apiObj.title : '';
+        return {cards, hours, score, location};
+    }
 
     function sleep(ms) {
         return new Promise(resolve => setTimeout(resolve, ms));
@@ -221,7 +261,25 @@
         }
     }
 
-    function updateTotalStats(root, totalScore, totalCount) {
+    function getTotalSkimmerCount(virtualList, skimmerItems) {
+        if (!virtualList) return 0;
+        const totalHeight = virtualList.offsetHeight;
+        let firstSkimmerY = Infinity;
+        for (const item of skimmerItems) {
+            const t = item.style.transform;
+            if (!t) continue;
+            const m = t.match(/translateY\(([-\d.]+)px\)/);
+            if (m) {
+                const y = parseFloat(m[1]);
+                if (y < firstSkimmerY) firstSkimmerY = y;
+            }
+        }
+        if (!Number.isFinite(firstSkimmerY)) return skimmerItems.length;
+        const inferred = Math.round((totalHeight - firstSkimmerY) / SKIMMER_ROW_HEIGHT);
+        return Math.max(skimmerItems.length, inferred);
+    }
+
+    function updateTotalStats(root, visibleScore, visibleCount, totalCount) {
         const titleBar = root.querySelector('[class*=currentCrime___] [class*=titleBar___]');
         if (!titleBar) return;
         let totalStatsEl = titleBar.querySelector('.' + TOTAL_STATS_CLASS);
@@ -238,10 +296,13 @@
         const mobile = isMobileView();
         const desiredStyle = `margin-left:${mobile ? '6' : '10'}px;font-size:${mobile ? '.65' : '.75'}rem;opacity:.85;align-self:center;white-space:nowrap;flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;`;
         if (totalStatsEl.style.cssText !== desiredStyle) totalStatsEl.style.cssText = desiredStyle;
-        const scoreText = totalScore.toFixed(2);
+        const isEstimate = totalCount > visibleCount && visibleCount > 0;
+        const displayedScore = isEstimate ? (visibleScore / visibleCount) * totalCount : visibleScore;
+        const prefix = isEstimate ? '~' : '';
+        const scoreText = displayedScore.toFixed(2);
         const text = mobile
-            ? `${scoreText} c/h · ${totalCount}/20`
-            : `${scoreText} card/hour with ${totalCount}/20 skimmers`;
+            ? `${prefix}${scoreText} c/h · ${totalCount}/20`
+            : `${prefix}${scoreText} card/hour with ${totalCount}/20 skimmers`;
         if (totalStatsEl.textContent !== text) totalStatsEl.textContent = text;
     }
 
@@ -273,17 +334,38 @@
 
             const byLocation = new Map();
             let totalScore = 0;
-            for (const rd of rows) {
-                if (!byLocation.has(rd.location)) {
-                    byLocation.set(rd.location, {totalScore: 0, totalCount: 0});
+            let totalCount = 0;
+
+            if (Array.isArray(apiSkimmers) && apiSkimmers.length > 0) {
+                for (const apiObj of apiSkimmers) {
+                    const {score, location} = extractApiRowScore(apiObj);
+                    const locationName = location || 'Unknown';
+                    if (!byLocation.has(locationName)) {
+                        byLocation.set(locationName, {totalScore: 0, totalCount: 0});
+                    }
+                    const agg = byLocation.get(locationName);
+                    agg.totalScore += score;
+                    agg.totalCount++;
+                    totalScore += score;
+                    totalCount++;
                 }
-                const agg = byLocation.get(rd.location);
-                agg.totalScore += rd.score;
-                agg.totalCount++;
-                totalScore += rd.score;
+            } else {
+                for (const rd of rows) {
+                    if (!byLocation.has(rd.location)) {
+                        byLocation.set(rd.location, {totalScore: 0, totalCount: 0});
+                    }
+                    const agg = byLocation.get(rd.location);
+                    agg.totalScore += rd.score;
+                    agg.totalCount++;
+                    totalScore += rd.score;
+                    totalCount++;
+                }
             }
+
             updateDropdownStats(root, byLocation);
-            updateTotalStats(root, totalScore, rows.length);
+            const inferredCount = getTotalSkimmerCount(virtualList, items);
+            const displayTotalCount = Math.max(totalCount, inferredCount);
+            updateTotalStats(root, totalScore, totalCount, displayTotalCount);
         } finally {
             isSetupInProgress = false;
         }
