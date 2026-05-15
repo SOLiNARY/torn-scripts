@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Loadout Switcher
 // @namespace    https://github.com/SOLiNARY
-// @version      0.6.4
+// @version      0.6.5
 // @description  Adds customisable quick loadout change buttons on Items page.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT
@@ -24,7 +24,6 @@
     const getEquippedItemsUrl = "/page.php?sid=itemsLoadouts&step=getEquippedItems";
     let rfcv = localStorage.getItem("silmaril-loadout-switcher-rfcv") ?? null;
     let rfcvUpdatedThisSession = false;
-    let mutationFound = false;
     let panelAdded = false;
     let loadoutTitles = {};
  
@@ -147,20 +146,12 @@ div.silmaril-torn-loadout-switcher-container a img {
     let selectedLoadouts = localStorage.getItem("silmaril-loadout-switcher-selected-loadouts") ?? "1,2,3";
     let selectedLoadoutsArray = selectedLoadouts.split(',');
  
-    const observerTarget = document.querySelector("html");
-    const observerConfig = { attributes: false, childList: true, characterData: false, subtree: true };
- 
-    const observer = new MutationObserver(function() {
-        if (mutationFound || panelAdded){
-            observer.disconnect();
-            return;
-        }
+    function tryAttach() {
+        if (panelAdded) return true;
         const titleEl = [...document.querySelectorAll("#loadoutsRoot [class*=title___]")]
             .find(el => Array.from(el.classList).some(c => /^title___[a-zA-Z]{5}$/.test(c)));
-        if (!titleEl) return;
+        if (!titleEl) return false;
 
-        mutationFound = true;
-        observer.disconnect();
         const buttonContainer = document.createElement('div');
         buttonContainer.className = 'silmaril-torn-loadout-switcher-container';
 
@@ -171,12 +162,13 @@ div.silmaril-torn-loadout-switcher-container a img {
         addLoadoutAndSettingButtons(buttonContainer);
         addLogo(buttonContainer);
 
-        if (!panelAdded){
-            titleEl.appendChild(buttonContainer);
-            panelAdded = true;
-        }
-    });
-    observer.observe(observerTarget, observerConfig);
+        titleEl.appendChild(buttonContainer);
+        panelAdded = true;
+        return true;
+    }
+
+    const pollId = setInterval(() => { if (tryAttach()) clearInterval(pollId); }, 200);
+    setTimeout(() => clearInterval(pollId), 30000);
  
     function addLogo(root){
         if (!includeLogo){ return; }
