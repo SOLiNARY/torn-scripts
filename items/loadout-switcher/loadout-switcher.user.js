@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Loadout Switcher
 // @namespace    https://github.com/SOLiNARY
-// @version      0.6.1
+// @version      0.6.3
 // @description  Adds customisable quick loadout change buttons on Items page.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT
@@ -157,7 +157,7 @@ div.silmaril-torn-loadout-switcher-container a img {
                 return;
             }
             let mutation = mutationItem.target;
-            if (mutation.matches && mutation.matches("div#loadoutsRoot p[class*=title___]")) {
+            if (mutation.classList && Array.from(mutation.classList).some(c => /^title___[a-zA-Z]{5}$/.test(c))) {
                 mutationFound = true;
                 observer.disconnect();
                 const buttonContainer = document.createElement('div');
