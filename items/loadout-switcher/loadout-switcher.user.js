@@ -157,7 +157,7 @@ div.silmaril-torn-loadout-switcher-container a img {
                 return;
             }
             let mutation = mutationItem.target;
-            if (mutation.classList.contains("title___nIMRx")) {
+            if (mutation.matches && mutation.matches("div#loadoutsRoot p[class*=title___]")) {
                 mutationFound = true;
                 observer.disconnect();
                 const buttonContainer = document.createElement('div');
