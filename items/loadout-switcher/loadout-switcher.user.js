@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Loadout Switcher
 // @namespace    https://github.com/SOLiNARY
-// @version      0.6.7
+// @version      0.6.8
 // @description  Adds customisable quick loadout change buttons on Items page.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT
@@ -9,7 +9,7 @@
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=torn.com
 // @grant        unsafeWindow
 // @grant        GM_addStyle
-// @run-at       document-start
+// @run-at       document-end
 // ==/UserScript==
  
 (async function() {
@@ -25,6 +25,10 @@
     let rfcv = localStorage.getItem("silmaril-loadout-switcher-rfcv") ?? null;
     let rfcvUpdatedThisSession = false;
     let loadoutTitles = {};
+    try {
+        const cachedTitles = localStorage.getItem("silmaril-loadout-switcher-titles");
+        if (cachedTitles) loadoutTitles = JSON.parse(cachedTitles);
+    } catch (e) { loadoutTitles = {}; }
  
     const { fetch: originalFetch } = isTampermonkeyEnabled ? unsafeWindow : window;
  
@@ -44,6 +48,7 @@
                 localStorage.setItem("silmaril-loadout-switcher-rfcv", rfcv);
                 document.querySelectorAll("div.silmaril-torn-loadout-switcher-container button").forEach((button) => button.classList.remove("disabled"));
                 rfcvUpdatedThisSession = true;
+                if (Object.keys(loadoutTitles).length == 0) fetchTitlesManually();
             }
         }
         if (Object.keys(loadoutTitles).length == 0){
@@ -56,6 +61,8 @@
                                 loadoutTitles[key] = data.currentLoadouts[key].title;
                             }
                         }
+                        persistTitles();
+                        refreshButtonText();
                     }
                     return data
                 })
@@ -219,7 +226,7 @@ div.silmaril-torn-loadout-switcher-container a img {
             button.type = 'button';
             button.title = showTitles ? loadout : loadoutTitles[loadout] ?? '';
             button.className = rfcv === null ? 'torn-btn disabled' : 'torn-btn';
-            button.textContent = showTitles ? loadoutTitles[loadout] : loadout;
+            button.textContent = showTitles ? (loadoutTitles[loadout] ?? loadout) : loadout;
             button.setAttribute('data-loadout-number', loadout);
             button.addEventListener('click', () => {handleLoadoutClick(root)});
  
@@ -263,4 +270,43 @@ div.silmaril-torn-loadout-switcher-container a img {
     function sleep(ms) {
         return new Promise(resolve => setTimeout(resolve, ms));
     }
+
+    function persistTitles() {
+        try { localStorage.setItem("silmaril-loadout-switcher-titles", JSON.stringify(loadoutTitles)); }
+        catch (e) { /* ignore quota errors */ }
+    }
+
+    function refreshButtonText() {
+        if (!showTitles) return;
+        document.querySelectorAll('div.silmaril-torn-loadout-switcher-container button[data-loadout-number]').forEach(btn => {
+            const loadout = btn.getAttribute('data-loadout-number');
+            const title = loadoutTitles[loadout];
+            if (title) {
+                btn.textContent = title;
+                btn.title = loadout;
+            }
+        });
+    }
+
+    async function fetchTitlesManually() {
+        if (Object.keys(loadoutTitles).length > 0) return;
+        if (rfcv === null) return;
+        try {
+            const response = await originalFetch(`${getEquippedItemsUrl}&rfcv=${rfcv}`);
+            const data = await response.clone().json();
+            if (data && data.currentLoadouts) {
+                for (let key in data.currentLoadouts) {
+                    if (data.currentLoadouts.hasOwnProperty(key)) {
+                        loadoutTitles[key] = data.currentLoadouts[key].title;
+                    }
+                }
+                persistTitles();
+                refreshButtonText();
+            }
+        } catch (e) {
+            console.warn("[TornLoadoutSwitcher] Manual titles fetch failed:", e);
+        }
+    }
+
+    setTimeout(fetchTitlesManually, 1500);
 })();
