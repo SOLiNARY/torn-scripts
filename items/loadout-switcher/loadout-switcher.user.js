@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Loadout Switcher
 // @namespace    https://github.com/SOLiNARY
-// @version      0.6.3
+// @version      0.6.4
 // @description  Adds customisable quick loadout change buttons on Items page.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT
@@ -150,32 +150,31 @@ div.silmaril-torn-loadout-switcher-container a img {
     const observerTarget = document.querySelector("html");
     const observerConfig = { attributes: false, childList: true, characterData: false, subtree: true };
  
-    const observer = new MutationObserver(function(mutations) {
-        mutations.forEach(function(mutationItem) {
-            if (mutationFound || panelAdded){
-                observer.disconnect();
-                return;
-            }
-            let mutation = mutationItem.target;
-            if (mutation.classList && Array.from(mutation.classList).some(c => /^title___[a-zA-Z]{5}$/.test(c))) {
-                mutationFound = true;
-                observer.disconnect();
-                const buttonContainer = document.createElement('div');
-                buttonContainer.className = 'silmaril-torn-loadout-switcher-container';
- 
-                const waveDiv = document.createElement('div');
-                waveDiv.className = 'wave';
- 
-                buttonContainer.appendChild(waveDiv);
-                addLoadoutAndSettingButtons(buttonContainer);
-                addLogo(buttonContainer);
- 
-                if (!panelAdded){
-                    mutation.appendChild(buttonContainer);
-                    panelAdded = true;
-                }
-            }
-        });
+    const observer = new MutationObserver(function() {
+        if (mutationFound || panelAdded){
+            observer.disconnect();
+            return;
+        }
+        const titleEl = [...document.querySelectorAll("#loadoutsRoot [class*=title___]")]
+            .find(el => Array.from(el.classList).some(c => /^title___[a-zA-Z]{5}$/.test(c)));
+        if (!titleEl) return;
+
+        mutationFound = true;
+        observer.disconnect();
+        const buttonContainer = document.createElement('div');
+        buttonContainer.className = 'silmaril-torn-loadout-switcher-container';
+
+        const waveDiv = document.createElement('div');
+        waveDiv.className = 'wave';
+
+        buttonContainer.appendChild(waveDiv);
+        addLoadoutAndSettingButtons(buttonContainer);
+        addLogo(buttonContainer);
+
+        if (!panelAdded){
+            titleEl.appendChild(buttonContainer);
+            panelAdded = true;
+        }
     });
     observer.observe(observerTarget, observerConfig);
  
