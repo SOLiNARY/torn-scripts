@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Loadout Switcher
 // @namespace    https://github.com/SOLiNARY
-// @version      0.6.8
+// @version      0.6.9
 // @description  Adds customisable quick loadout change buttons on Items page.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT
@@ -32,55 +32,30 @@
         loadoutTitles = {};
     }
 
-    const {fetch: originalFetch} = isTampermonkeyEnabled ? unsafeWindow : window;
+    // Capture rfcv via PerformanceObserver instead of monkey-patching fetch.
+    // Works in both the page world (Tampermonkey/Violentmonkey) and the
+    // userscript-isolated world (iOS Safari Userscripts app), because
+    // performance entries are origin-scoped and visible to any same-origin script.
+    function captureRfcvFromUrl(url) {
+        if (rfcvUpdatedThisSession) return;
+        if (typeof url !== 'string') return;
+        const idx = url.indexOf(rfcvArg);
+        if (idx < 0) return;
+        rfcv = url.substring(idx + rfcvArg.length).split('&')[0];
+        localStorage.setItem("silmaril-loadout-switcher-rfcv", rfcv);
+        document.querySelectorAll("div.silmaril-torn-loadout-switcher-container button")
+            .forEach((button) => button.classList.remove("disabled"));
+        rfcvUpdatedThisSession = true;
+        if (Object.keys(loadoutTitles).length === 0) fetchTitlesManually();
+    }
 
-    const customFetch = async (...args) => {
-        let [resource, config] = args;
-        let response = await originalFetch(resource, config);
-
-        if (rfcvUpdatedThisSession && Object.keys(loadoutTitles).length > 0) {
-            return response;
-        }
-
-        let fetchUrl = response.url;
-        if (!rfcvUpdatedThisSession) {
-            let rfcvIdx = fetchUrl.indexOf(rfcvArg);
-            if (rfcvIdx >= 0) {
-                rfcv = fetchUrl.substr(rfcvIdx + rfcvArg.length);
-                localStorage.setItem("silmaril-loadout-switcher-rfcv", rfcv);
-                document.querySelectorAll("div.silmaril-torn-loadout-switcher-container button").forEach((button) => button.classList.remove("disabled"));
-                rfcvUpdatedThisSession = true;
-                if (Object.keys(loadoutTitles).length == 0) fetchTitlesManually();
-            }
-        }
-        if (Object.keys(loadoutTitles).length == 0) {
-            if (fetchUrl.indexOf(getEquippedItemsUrl) >= 0) {
-                const json = () => response.clone().json()
-                    .then((data) => {
-                        if (data.currentLoadouts != null) {
-                            for (let key in data.currentLoadouts) {
-                                if (data.currentLoadouts.hasOwnProperty(key)) {
-                                    loadoutTitles[key] = data.currentLoadouts[key].title;
-                                }
-                            }
-                            persistTitles();
-                            refreshButtonText();
-                        }
-                        return data
-                    })
-
-                response.json = json;
-                response.text = async () => JSON.stringify(await json());
-            }
-        }
-
-        return response;
-    };
-
-    if (isTampermonkeyEnabled) {
-        unsafeWindow.fetch = customFetch;
-    } else {
-        window.fetch = customFetch;
+    try {
+        performance.getEntriesByType('resource').forEach((entry) => captureRfcvFromUrl(entry.name));
+        new PerformanceObserver((list) => {
+            for (const entry of list.getEntries()) captureRfcvFromUrl(entry.name);
+        }).observe({ type: 'resource', buffered: true });
+    } catch (e) {
+        console.warn("[TornLoadoutSwitcher] PerformanceObserver unavailable:", e);
     }
 
     const styles = `
@@ -88,13 +63,13 @@ div#loadoutsRoot p[class^=title___] {
     overflow-y: hidden;
     overflow-x: auto;
     }
- 
+
 div.silmaril-torn-loadout-switcher-container {
     display: inline-flex;
     align-items: center;
     margin-left: 5px;
 }
- 
+
 div.silmaril-torn-loadout-switcher-container a img {
     display: flex;
     height: 50px;
@@ -103,12 +78,12 @@ div.silmaril-torn-loadout-switcher-container a img {
     justify-content: space-around;
     align-items: flex-start;
 }
- 
+
 .wave-animation {
   position: relative;
   overflow: hidden;
 }
- 
+
 .wave {
   pointer-events: none;
   position: absolute;
@@ -119,13 +94,13 @@ div.silmaril-torn-loadout-switcher-container a img {
   transform: translateX(-100%);
   animation: waveAnimation 3s cubic-bezier(0, 0, 0, 1);
 }
- 
+
 @media (max-width: 768px) {
     div[class^=main___] > div[class^=content___] {
         margin-top: 10px;
     }
 }
- 
+
 @keyframes waveAnimation {
   0% {
     opacity: 1;
@@ -300,7 +275,7 @@ div.silmaril-torn-loadout-switcher-container a img {
         if (Object.keys(loadoutTitles).length > 0) return;
         if (rfcv === null) return;
         try {
-            const response = await originalFetch(`${getEquippedItemsUrl}&rfcv=${rfcv}`);
+            const response = await fetch(`${getEquippedItemsUrl}&rfcv=${rfcv}`);
             const data = await response.clone().json();
             if (data && data.currentLoadouts) {
                 for (let key in data.currentLoadouts) {
