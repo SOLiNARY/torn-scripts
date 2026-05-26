@@ -1,0 +1,8 @@
+# Playwright MCP scratch directory (snapshots, console logs, screenshots)
+.playwright-mcp/
+
+# Generated Playwright loader files for injecting userscripts into the MCP-controlled browser
+.playwright-inject-*.js
+
+# Ad-hoc DOM dumps captured while debugging userscripts
+cardskimming-dom.html

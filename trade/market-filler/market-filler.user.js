@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Market Filler
 // @namespace    https://github.com/SOLiNARY
-// @version      0.6.3
+// @version      0.6.4
 // @description  On "Fill" click autofills market item price with lowest market price minus $1 (customizable), fills max quantity, marks checkboxes for guns.
 // @author       Silmaril [2665762]
 // @license      MIT License
@@ -12,10 +12,10 @@
 // @grant        GM_addStyle
 // @grant        GM_registerMenuCommand
 // ==/UserScript==
- 
+
 (async function() {
     'use strict';
- 
+
     const itemUrl = "https://api.torn.com/torn/{itemId}?selections=items&key={apiKey}&comment=MarketFiller";
     const marketUrl = "https://api.torn.com/v2/market/{itemId}?selections=itemMarket&key={apiKey}&comment=MarketFiller";
     const marketUrlV2 = "https://api.torn.com/v2/market?id={itemId}&selections=itemMarket&key={apiKey}&comment=MarketFiller";
@@ -24,7 +24,7 @@
     let priceDeltaRaw = localStorage.getItem("silmaril-torn-market-filler-price-delta") ?? localStorage.getItem("silmaril-torn-bazaar-filler-price-delta") ?? '-1[0]';
     let apiKey = localStorage.getItem("silmaril-torn-bazaar-filler-apikey") ?? '###PDA-APIKEY###';
     let togglePricesPopupMenuId, setPriceDeltaMenuId, setApiKeyMenuId;
- 
+
     try {
         togglePricesPopupMenuId = GM_registerMenuCommand(`Toggle Prices Popup (${showPricesPopup ? 'ON' : 'OFF'})`, togglePricesPopupVisibility);
         setPriceDeltaMenuId = GM_registerMenuCommand(`Set Price Delta: ${priceDeltaRaw}`, setPriceDelta);
@@ -32,18 +32,21 @@
     } catch (error) {
         console.warn('[TornMarketFiller] Tampermonkey not detected!');
     }
- 
+
     let GM_addStyle = function (s) {
         let style = document.createElement("style");
         style.type = "text/css";
         style.innerHTML = s;
         document.head.appendChild(style);
     };
-    GM_addStyle(`#item-market-root [class^=addListingWrapper___] [class^=panels___] [class^=priceInputWrapper___]>.input-money-group>.input-money,#item-market-root [class^=viewListingWrapper___] [class^=priceInputWrapper___]>.input-money-group>.input-money{font-size:smaller!important;border-bottom-left-radius:0!important;border-top-left-radius:0!important}.silmaril-market-filler-popup{background:var(--tooltip-bg-color);padding:12px 18px;border-radius:8px;border:1px solid #888;box-shadow:0 4px 18px 0 #0009;color:var(--info-msg-font-color);z-index:99999;position:absolute;font-size:1em!important;line-height:1.5;pointer-events:auto}.silmaril-market-filler-popup-close{position:absolute;top:4px;right:7px;font-size:1em;color:#aaa;cursor:pointer}.silmaril-market-filler-popup-draggable{user-select:none;cursor:move}.silmaril-torn-market-filler-popup-price{cursor:pointer}`);
- 
+    GM_addStyle(`#item-market-root [class^=addListingWrapper___] [class^=panels___] [class^=priceInputWrapper___]>.input-money-group>.input-money,#item-market-root [class^=viewListingWrapper___] [class^=priceInputWrapper___]>.input-money-group>.input-money{font-size:smaller!important;border-bottom-left-radius:0!important;border-top-left-radius:0!important}.silmaril-market-filler-popup{background:var(--tooltip-bg-color);padding:12px 18px;border-radius:8px;border:1px solid #888;box-shadow:0 4px 18px 0 #0009;color:var(--info-msg-font-color);z-index:99999;position:fixed;font-size:1em!important;line-height:1.5;pointer-events:auto}.silmaril-market-filler-popup-close{position:absolute;top:4px;right:7px;font-size:1em;color:#aaa;cursor:pointer}.silmaril-market-filler-popup-draggable{user-select:none;cursor:move}.silmaril-torn-market-filler-popup-price{cursor:pointer}`);
+
     const pages = { "AddItems": 10, "ViewItems": 20, "Other": 0};
     let recentFilledInput = null;
-    let popupOffsetX = localStorage.getItem("silmaril-torn-market-filler-popup-offset-x") ?? 0, popupOffsetY = 0, isDragging = false;
+    let popupOffsetX = parseFloat(localStorage.getItem("silmaril-torn-market-filler-popup-offset-x")) || 0;
+    let popupOffsetY = parseFloat(localStorage.getItem("silmaril-torn-market-filler-popup-offset-y")) || 100;
+    let isDragging = false;
+    let dragStartX = 0, dragStartY = 0;
     const marketTaxFactor = 1 - getCurrentMarketTax();
     let currentPage = pages.Other;
     let holdTimer;
@@ -71,7 +74,7 @@
     });
     observer.observe(observerTarget, observerConfig);
     addCustomFillPopup();
- 
+
     function AddFillButton(itemPriceElement){
         if (itemPriceElement.querySelector('.silmaril-market-filler-button') != null){
             return;
@@ -98,7 +101,7 @@
         span.appendChild(input);
         itemPriceElement.querySelector('.input-money-group').prepend(span);
     }
- 
+
     async function GetPrices(itemId){
         let requestUrl = priceDeltaRaw.indexOf('[market]') != -1 ? itemUrl : marketUrlV2;
         requestUrl = requestUrl
@@ -107,41 +110,41 @@
         return fetch(requestUrl)
             .then(response => response.json())
             .then(data => {
-            if (data.error != null){
-                switch (data.error.code){
-                    case 2:
-                        apiKey = null;
-                        localStorage.setItem("silmaril-torn-bazaar-filler-apikey", null);
-                        console.error("[TornMarketFiller] Incorrect Api Key:", data);
-                        return {"price": 'Wrong API key!', "amount": 0};
-                    case 9:
+                if (data.error != null){
+                    switch (data.error.code){
+                        case 2:
+                            apiKey = null;
+                            localStorage.setItem("silmaril-torn-bazaar-filler-apikey", null);
+                            console.error("[TornMarketFiller] Incorrect Api Key:", data);
+                            return {"price": 'Wrong API key!', "amount": 0};
+                        case 9:
+                            console.warn("[TornMarketFiller] The API is temporarily disabled, please try again later");
+                            return {"price": 'API is OFF!', "amount": 0};
+                        default:
+                            console.error("[TornMarketFiller] Error:", data.error.error);
+                            return {"price": data.error.error, "amount": 0};
+                    }
+                }
+                if (priceDeltaRaw.indexOf('[market]') != -1){
+                    return {"price": data.items[itemId].market_value, "amount": 1};
+                } else {
+                    if (data.itemmarket.listings[0].price == null){
                         console.warn("[TornMarketFiller] The API is temporarily disabled, please try again later");
                         return {"price": 'API is OFF!', "amount": 0};
-                    default:
-                        console.error("[TornMarketFiller] Error:", data.error.error);
-                        return {"price": data.error.error, "amount": 0};
+                    }
+                    // temporary hotfix to avoid wrong prices
+                    if (data.itemmarket.item.id != itemId){
+                        return {"price": 'API is BROKEN!', "amount": 0};
+                    }
+                    return data.itemmarket.listings;
                 }
-            }
-            if (priceDeltaRaw.indexOf('[market]') != -1){
-                return {"price": data.items[itemId].market_value, "amount": 1};
-            } else {
-                if (data.itemmarket.listings[0].price == null){
-                    console.warn("[TornMarketFiller] The API is temporarily disabled, please try again later");
-                    return {"price": 'API is OFF!', "amount": 0};
-                }
-                // temporary hotfix to avoid wrong prices
-                if (data.itemmarket.item.id != itemId){
-                    return {"price": 'API is BROKEN!', "amount": 0};
-                }
-                return data.itemmarket.listings;
-            }
-        })
+            })
             .catch(error => {
-            console.error("[TornMarketFiller] Error fetching data:", error);
-            return 'Failed!';
-        });
+                console.error("[TornMarketFiller] Error fetching data:", error);
+                return 'Failed!';
+            });
     }
- 
+
     function GetPrice(prices){
         if (prices == null){
             return 'No prices loaded';
@@ -162,58 +165,69 @@
             return Math.round(performOperation(prices[Math.min(marketSlotOffset, prices.length - 1)].price, priceDeltaWithoutMarketOffset));
         }
     }
- 
+
     async function handleFillClick(event, itemId){
         let target = event.currentTarget || event.target;
         let priceInputs = target.parentNode.querySelectorAll('input.input-money');
         recentFilledInput = priceInputs;
         const popup = document.querySelector('.silmaril-market-filler-popup');
         if (popup) {
-            const rect = target.getBoundingClientRect();
-            if (popupOffsetX == 0){
-                popupOffsetX = window.scrollX + rect.left - 300;
+            if (popupOffsetX === 0) {
+                const rect = target.getBoundingClientRect();
+                popupOffsetX = Math.max(10, rect.left - 300);
                 localStorage.setItem("silmaril-torn-market-filler-popup-offset-x", popupOffsetX);
             }
-            popupOffsetY = window.scrollY + rect.top + 4;
- 
+
             let left = popupOffsetX;
             let top = popupOffsetY;
- 
+
             popup.style.display = showPricesPopup ? 'block' : 'none';
             popup.style.visibility = 'hidden';
             popup.style.left = `${left}px`;
             popup.style.top = `${top}px`;
             popup.querySelector('.silmaril-market-filler-popup-body').innerHTML = LOADING_THE_PRICES;
- 
+
             const popupRect = popup.getBoundingClientRect();
             const viewportHeight = window.innerHeight;
             const viewportWidth = window.innerWidth;
- 
+
+            let clamped = false;
             if (popupRect.right > viewportWidth) {
-                left = Math.max(0, viewportWidth - popupRect.width - 10 + scrollX);
+                left = Math.max(0, viewportWidth - popupRect.width - 10);
+                clamped = true;
             }
             if (popupRect.left < 0) {
-                left = 10 + scrollX;
+                left = 10;
+                clamped = true;
             }
             if (popupRect.bottom > viewportHeight) {
-                top = Math.max(0, viewportHeight - popupRect.height - 10 + scrollY);
+                top = Math.max(0, viewportHeight - popupRect.height - 10);
+                clamped = true;
             }
             if (popupRect.top < 0) {
-                top = 10 + scrollY;
+                top = 10;
+                clamped = true;
             }
- 
+
             popup.style.left = `${left}px`;
             popup.style.top = `${top}px`;
             popup.style.visibility = 'visible';
+
+            if (clamped) {
+                popupOffsetX = left;
+                popupOffsetY = top;
+                localStorage.setItem("silmaril-torn-market-filler-popup-offset-x", popupOffsetX);
+                localStorage.setItem("silmaril-torn-market-filler-popup-offset-y", popupOffsetY);
+            }
         }
- 
+
         let action = target.getAttribute('data-action-flag');
         let prices = await GetPrices(itemId);
         const breakdown = GetPricesBreakdown(prices);
- 
+
         // Thanks to Rosti [2840742] for the help with the prices popup component
         showCustomFillPopup(target, breakdown);
- 
+
         let price = action == 'fill' ? GetPrice(prices) : '';
         switchActionFlag(target);
         let parentRow = findParentByCondition(target, (el) => String(el.className).indexOf('info___') > -1);
@@ -236,11 +250,11 @@
         priceInputs.forEach(x => {x.value = price});
         priceInputs[0].dispatchEvent(new Event("input", {bubbles: true}));
     }
- 
+
     function hideAllFillPopups() {
         document.querySelector('.silmaril-market-filler-popup').style.display = 'none';
     }
- 
+
     function showCustomFillPopup(targetElem, contentHTML) {
         const popup = document.querySelector('.silmaril-market-filler-popup');
         popup.querySelector('.silmaril-market-filler-popup-body').innerHTML = contentHTML;
@@ -251,67 +265,69 @@
             });
         });
     }
- 
+
     function addCustomFillPopup() {
         const popup = document.createElement('div');
         popup.className = 'silmaril-market-filler-popup';
         popup.style.display = 'none';
         popup.style.left = popupOffsetX + 'px';
-        popup.style.top = '0px';
+        popup.style.top = popupOffsetY + 'px';
         popup.innerHTML = '<div class="silmaril-market-filler-popup-close" title="Close">&times;</div><b class="silmaril-market-filler-popup-draggable">Drag from here</b><br><div class="silmaril-market-filler-popup-body"></div>';
         popup.querySelector('.silmaril-market-filler-popup-close').onclick = function(){ popup.style.display = 'none'; };
         document.body.appendChild(popup);
- 
+
         const dragHandle = popup.querySelector('.silmaril-market-filler-popup-draggable');
         dragHandle.addEventListener("mousedown", (e) => {
             isDragging = true;
-            popupOffsetX = e.clientX - popup.offsetLeft;
-            popupOffsetY = e.clientY - popup.offsetTop;
+            dragStartX = e.clientX - popup.offsetLeft;
+            dragStartY = e.clientY - popup.offsetTop;
         });
- 
+
         document.addEventListener("mousemove", (e) => {
             if (isDragging) {
-                popup.style.left = (e.clientX - popupOffsetX) + "px";
-                popup.style.top = (e.clientY - popupOffsetY) + "px";
+                popup.style.left = (e.clientX - dragStartX) + "px";
+                popup.style.top = (e.clientY - dragStartY) + "px";
             }
         });
- 
-        document.addEventListener("mouseup", (e) => {
+
+        document.addEventListener("mouseup", () => {
             if (isDragging) {
-                popupOffsetX = e.clientX - popupOffsetX;
-                popupOffsetY = e.clientY - popupOffsetY;
+                popupOffsetX = popup.offsetLeft;
+                popupOffsetY = popup.offsetTop;
                 localStorage.setItem("silmaril-torn-market-filler-popup-offset-x", popupOffsetX);
+                localStorage.setItem("silmaril-torn-market-filler-popup-offset-y", popupOffsetY);
             }
             isDragging = false;
         });
- 
+
         // Touch events (mobile)
         dragHandle.addEventListener("touchstart", (e) => {
             isDragging = true;
             const touch = e.touches[0];
-            popupOffsetX = touch.clientX - popup.offsetLeft;
-            popupOffsetY = touch.clientY - popup.offsetTop;
+            dragStartX = touch.clientX - popup.offsetLeft;
+            dragStartY = touch.clientY - popup.offsetTop;
             e.preventDefault();
         }, { passive: false });
- 
+
         document.addEventListener("touchmove", (e) => {
             if (isDragging) {
                 const touch = e.touches[0];
-                popup.style.left = (touch.clientX - popupOffsetX) + "px";
-                popup.style.top = (touch.clientY - popupOffsetY) + "px";
+                popup.style.left = (touch.clientX - dragStartX) + "px";
+                popup.style.top = (touch.clientY - dragStartY) + "px";
             }
         }, { passive: false });
- 
+
         document.addEventListener("touchend", () => {
             if (isDragging) {
                 popupOffsetX = popup.offsetLeft;
                 popupOffsetY = popup.offsetTop;
                 localStorage.setItem("silmaril-torn-market-filler-popup-offset-x", popupOffsetX);
+                localStorage.setItem("silmaril-torn-market-filler-popup-offset-y", popupOffsetY);
             }
             isDragging = false;
         });
     }
- 
+
     function getItemIdFromString(string){
         const match = string.match(/-(\d+)-/);
         if (match) {
@@ -322,7 +338,7 @@
             return -1;
         }
     }
- 
+
     function getItemIdFromImage(image){
         let numberPattern = /\/(\d+)\//;
         let match = image.src.match(numberPattern);
@@ -333,7 +349,7 @@
             return -1;
         }
     }
- 
+
     function switchActionFlag(target){
         switch (target.getAttribute('data-action-flag')){
             case 'fill':
@@ -345,7 +361,7 @@
                 break;
         }
     }
- 
+
     function findParentByCondition(element, conditionFn){
         let currentElement = element;
         while (currentElement !== null) {
@@ -356,7 +372,7 @@
         }
         return null;
     }
- 
+
     function setPriceDelta() {
         let userInput = prompt('Enter price delta formula (default: -1[0]):', priceDeltaRaw);
         if (userInput !== null) {
@@ -366,7 +382,7 @@
             console.error("[TornMarketFiller] User cancelled the Price Delta input.");
         }
     }
- 
+
     function GetPricesBreakdown(prices){
         if (prices == null) return "No prices loaded";
         if (prices[0] === undefined){
@@ -382,7 +398,7 @@
         }
         return sb.toString();
     }
- 
+
     function performOperation(number, operation) {
         const match = operation.match(/^([-+]?)(\d+(?:\.\d+)?)(%)?$/);
         if (!match) {
@@ -401,11 +417,11 @@
                 throw new Error('Invalid operator');
         }
     }
- 
+
     function formatNumberWithCommas(number) {
         return new Intl.NumberFormat('en-US').format(number);
     }
- 
+
     function checkApiKey(checkExisting = true) {
         if (!checkExisting || apiKey === null || apiKey.indexOf('PDA-APIKEY') > -1 || apiKey.length != 16){
             let userInput = prompt("Please enter a PUBLIC Api Key, it will be used to get current bazaar prices:", apiKey ?? '');
@@ -417,7 +433,7 @@
             }
         }
     }
- 
+
     function askForPricesPopupFlag() {
         let dsf = null;
         let userInput = prompt("Please choose to show or hide the lowest 5 prices popup, enter 1 to SHOW or 0 to HIDE:", showPricesPopup ? '1' : '0');
@@ -432,12 +448,12 @@
             console.error("[TornMarketFiller] User cancelled the Prices Popup input.");
         }
     }
- 
+
     function togglePricesPopupVisibility() {
         showPricesPopup = !showPricesPopup;
         localStorage.setItem('silmaril-torn-market-filler-show-prices-popup', showPricesPopup ? '1' : '0');
     }
- 
+
     function getMedianPrice(items) {
         const prices = items.flatMap(item => Array(item.amount).fill(item.price));
         prices.sort((a, b) => a - b);
@@ -448,7 +464,7 @@
             return prices[mid];
         }
     }
- 
+
     function getCurrentPage(){
         if (window.location.href.indexOf('#/addListing') > -1){
             return pages.AddItems;
@@ -458,22 +474,22 @@
             return pages.Other;
         }
     }
- 
+
     function getCurrentMarketTax() {
         return 0.05;
     }
- 
+
     // function getTornToday() {
     //     const now = document.querySelector('span.server-date-time').textContent.split(' ');
     //     return now[now.length - 1];
     // }
- 
+
     function parseDate(str) {
         const [dd, mm, yy] = str.split('/').map(Number);
         const fullYear = yy < 50 ? 2000 + yy : 1900 + yy;
         return new Date(fullYear, mm - 1, dd);
     }
- 
+
     const startHold = () => {
         holdTimer = setTimeout(() => {
             askForPricesPopupFlag();
@@ -481,11 +497,11 @@
             checkApiKey(false);
         }, 2000);
     };
- 
+
     const cancelHold = () => {
         clearTimeout(holdTimer);
     };
- 
+
     class StringBuilder {
         constructor() {
             this.parts = [];
