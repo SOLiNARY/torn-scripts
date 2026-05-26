@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Loadout Switcher
 // @namespace    https://github.com/SOLiNARY
-// @version      0.6.9
+// @version      0.6.10
 // @description  Adds customisable quick loadout change buttons on Items page.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT
@@ -46,7 +46,6 @@
         document.querySelectorAll("div.silmaril-torn-loadout-switcher-container button")
             .forEach((button) => button.classList.remove("disabled"));
         rfcvUpdatedThisSession = true;
-        if (Object.keys(loadoutTitles).length === 0) fetchTitlesManually();
     }
 
     try {
@@ -56,6 +55,86 @@
         }).observe({ type: 'resource', buffered: true });
     } catch (e) {
         console.warn("[TornLoadoutSwitcher] PerformanceObserver unavailable:", e);
+    }
+
+    let titlesReceivedThisSession = false;
+
+    function urlMatchesLoadoutsEndpoint(url) {
+        if (!url) return false;
+        const s = typeof url === 'string' ? url : (url.href || url.url || String(url));
+        return s.indexOf('sid=itemsLoadouts') >= 0 && s.indexOf('step=getEquippedItems') >= 0;
+    }
+
+    function consumeLoadoutResponse(payload) {
+        if (!payload || !payload.currentLoadouts) return;
+        let changed = false;
+        for (const key in payload.currentLoadouts) {
+            if (payload.currentLoadouts.hasOwnProperty(key)) {
+                const title = payload.currentLoadouts[key].title;
+                if (title && loadoutTitles[key] !== title) {
+                    loadoutTitles[key] = title;
+                    changed = true;
+                }
+            }
+        }
+        titlesReceivedThisSession = true;
+        if (changed) {
+            persistTitles();
+            refreshButtonText();
+        }
+    }
+
+    // Passively observe Torn's periodic equipped-items polls and pull titles out of them,
+    // so renames propagate without us issuing a request. Patches unsafeWindow when the
+    // script runs in an isolated world (Tampermonkey/Violentmonkey with @grant unsafeWindow);
+    // otherwise patches the script's own window, which only reaches page traffic in
+    // page-world managers. A 15s fallback (see end of script) handles the case where
+    // neither approach catches a response.
+    const netTarget = isTampermonkeyEnabled ? unsafeWindow : window;
+
+    try {
+        const originalFetch = netTarget.fetch;
+        if (typeof originalFetch === 'function') {
+            netTarget.fetch = function (...args) {
+                const result = originalFetch.apply(this, args);
+                try {
+                    if (urlMatchesLoadoutsEndpoint(args[0])) {
+                        result.then(resp => {
+                            resp.clone().json().then(consumeLoadoutResponse).catch(() => {});
+                        }).catch(() => {});
+                    }
+                } catch (e) { /* ignore */ }
+                return result;
+            };
+        }
+    } catch (e) {
+        console.warn("[TornLoadoutSwitcher] fetch wrap failed:", e);
+    }
+
+    try {
+        const XHR = netTarget.XMLHttpRequest;
+        if (XHR && XHR.prototype) {
+            const originalOpen = XHR.prototype.open;
+            const originalSend = XHR.prototype.send;
+            XHR.prototype.open = function (method, url) {
+                this.__silmarilLoadoutUrl = url;
+                return originalOpen.apply(this, arguments);
+            };
+            XHR.prototype.send = function () {
+                try {
+                    if (urlMatchesLoadoutsEndpoint(this.__silmarilLoadoutUrl)) {
+                        this.addEventListener('load', () => {
+                            try {
+                                consumeLoadoutResponse(JSON.parse(this.responseText));
+                            } catch (e) { /* ignore */ }
+                        });
+                    }
+                } catch (e) { /* ignore */ }
+                return originalSend.apply(this, arguments);
+            };
+        }
+    } catch (e) {
+        console.warn("[TornLoadoutSwitcher] XHR wrap failed:", e);
     }
 
     const styles = `
@@ -272,24 +351,16 @@ div.silmaril-torn-loadout-switcher-container a img {
     }
 
     async function fetchTitlesManually() {
-        if (Object.keys(loadoutTitles).length > 0) return;
         if (rfcv === null) return;
         try {
             const response = await fetch(`${getEquippedItemsUrl}&rfcv=${rfcv}`);
-            const data = await response.clone().json();
-            if (data && data.currentLoadouts) {
-                for (let key in data.currentLoadouts) {
-                    if (data.currentLoadouts.hasOwnProperty(key)) {
-                        loadoutTitles[key] = data.currentLoadouts[key].title;
-                    }
-                }
-                persistTitles();
-                refreshButtonText();
-            }
+            consumeLoadoutResponse(await response.clone().json());
         } catch (e) {
             console.warn("[TornLoadoutSwitcher] Manual titles fetch failed:", e);
         }
     }
 
-    setTimeout(fetchTitlesManually, 1500);
+    setTimeout(() => {
+        if (!titlesReceivedThisSession) fetchTitlesManually();
+    }, 15000);
 })();
