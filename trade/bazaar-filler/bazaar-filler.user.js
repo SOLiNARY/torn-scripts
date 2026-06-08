@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Torn Bazaar Filler
 // @namespace    https://github.com/SOLiNARY
-// @version      1.1.2
-// @description  On "Fill" click autofills bazaar item price with lowest market price currently minus $1 (can be customised), shows current price coefficient compared to 3rd lowest, fills max quantity for items, marks checkboxes for guns.
+// @version      1.2.0
+// @description  On "Fill" click autofills bazaar item price with lowest market price currently minus $1 (can be customised), shows current price coefficient compared to 3rd lowest, fills max quantity for items, marks checkboxes for guns. Hold a Fill/Update button for 3s to open the Price Delta and API Key settings dialogs.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT License
 // @match        https://www.torn.com/bazaar.php*
@@ -37,7 +37,7 @@
         document.head.appendChild(style);
     };
 
-    GM_addStyle(`.btn-wrap.torn-bazaar-fill-qty-price{float:right;margin-left:auto;z-index:99999}.btn-wrap.torn-bazaar-clear-qty-price{z-index:99999}div.title-wrap div.name-wrap{display:flex;justify-content:flex-end}.wave-animation{position:relative;overflow:hidden}.wave{pointer-events:none;position:absolute;width:100%;height:33px;background-color:transparent;opacity:0;transform:translateX(-100%);animation:waveAnimation 1s cubic-bezier(0, 0, 0, 1)}@keyframes waveAnimation{0%{opacity:1;transform:translateX(-100%)}100%{opacity:0;transform:translateX(100%)}}.overlay-percentage{position:absolute;top:0;background-color:rgba(0, 0, 0, 0.9);padding:0 5px;border-radius:15px;font-size:10px}.overlay-percentage-add{right:-30px}.overlay-percentage-manage{right:0}`);
+    GM_addStyle(`.btn-wrap.torn-bazaar-fill-qty-price{float:right;margin-left:auto;z-index:99999}.btn-wrap.torn-bazaar-clear-qty-price{z-index:99999}div.title-wrap div.name-wrap{display:flex;justify-content:flex-end}.wave-animation{position:relative;overflow:hidden}.wave{pointer-events:none;position:absolute;width:100%;height:33px;background-color:transparent;opacity:0;transform:translateX(-100%);animation:waveAnimation 1s cubic-bezier(0, 0, 0, 1)}@keyframes waveAnimation{0%{opacity:1;transform:translateX(-100%)}100%{opacity:0;transform:translateX(100%)}}.overlay-percentage{position:absolute;top:0;background-color:rgba(0, 0, 0, 0.9);padding:0 5px;border-radius:15px;font-size:10px}.overlay-percentage-add{right:-30px}.overlay-percentage-manage{right:0}.torn-bazaar-fill-qty-price input{-webkit-touch-callout:none;-webkit-user-select:none;user-select:none;transition:box-shadow 0s}.torn-bazaar-fill-qty-price input.tbf-holding{box-shadow:inset 0 0 0 40px rgba(0,180,255,.35);transition:box-shadow 3s linear}`);
 
     const pages = { "AddItems": 10, "ManageItems": 20};
     const addItemsLabels = ["Fill", "Clear"];
@@ -122,6 +122,7 @@
         inputElementFill.type = 'button';
         inputElementFill.value = buttonLabels[0];
         inputElementFill.className = 'torn-btn';
+        attachSettingsLongPress(inputElementFill);
         const inputElementClear = document.createElement('input');
         inputElementClear.type = 'button';
         inputElementClear.value = buttonLabels[1];
@@ -491,6 +492,68 @@
             default:
                 throw new Error('Invalid operator');
         }
+    }
+
+    const LONG_PRESS_MS = 3000;
+
+    // Re-open both settings dialogs in sequence, for the user to update.
+    function openAllSettingsDialogs() {
+        setPriceDelta();        // Price delta dialog first
+        checkApiKey(false);     // then API key dialog (force prompt regardless of stored key)
+    }
+
+    // Attach a 3s press-and-hold gesture (mouse + touch) to a FILL/UPDATE input.
+    // Holding 3s opens the settings dialogs; the click that follows the hold is suppressed
+    // so it does NOT also run fill/update.
+    function attachSettingsLongPress(inputEl) {
+        let timer = null;
+        let fired = false;
+        let startX = 0, startY = 0;
+        const MOVE_TOLERANCE = 10; // px — tolerate finger tremor during a long hold
+
+        const start = function(e) {
+            fired = false;
+            clearTimeout(timer);
+            const t = e.touches && e.touches[0];
+            if (t) { startX = t.clientX; startY = t.clientY; }
+            inputEl.classList.add('tbf-holding');   // start visual cue
+            timer = setTimeout(function() {
+                fired = true;
+                inputEl.classList.remove('tbf-holding');
+                openAllSettingsDialogs();
+            }, LONG_PRESS_MS);
+        };
+        const cancel = function() {
+            clearTimeout(timer);
+            timer = null;
+            inputEl.classList.remove('tbf-holding');
+        };
+        const onMove = function(e) {
+            if (!timer) return;
+            const t = e.touches && e.touches[0];
+            if (t && (Math.abs(t.clientX - startX) > MOVE_TOLERANCE ||
+                      Math.abs(t.clientY - startY) > MOVE_TOLERANCE)) {
+                cancel(); // treat as scroll/drag, not a hold
+            }
+        };
+
+        inputEl.addEventListener('mousedown', start);
+        inputEl.addEventListener('touchstart', start, { passive: true });
+        inputEl.addEventListener('mouseup', cancel);
+        inputEl.addEventListener('mouseleave', cancel);
+        inputEl.addEventListener('touchend', cancel);
+        inputEl.addEventListener('touchcancel', cancel);
+        inputEl.addEventListener('touchmove', onMove, { passive: true });
+
+        // Capture-phase: runs BEFORE the jQuery-delegated fill/update click handler on the
+        // wrapper, so stopImmediatePropagation prevents an unwanted fill after a long-press.
+        inputEl.addEventListener('click', function(e) {
+            if (fired) {
+                fired = false;
+                e.stopImmediatePropagation();
+                e.preventDefault();
+            }
+        }, true);
     }
 
     function setPriceDelta() {
