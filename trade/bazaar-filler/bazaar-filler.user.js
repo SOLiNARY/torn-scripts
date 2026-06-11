@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Bazaar Filler
 // @namespace    https://github.com/SOLiNARY
-// @version      1.3.0
+// @version      1.3.1
 // @description  On "Fill" click autofills bazaar item price with lowest market price currently minus $1 (can be customised), shows current price coefficient compared to 3rd lowest, fills max quantity for items, marks checkboxes for guns. Hold a Fill/Update button for 3s to open the Price Delta and API Key settings dialogs. Mark items as favourites (star next to Fill) and use "Fill All" to auto-fill every favourite row, including ones appearing later via infinite scroll or category switches.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT License
@@ -37,7 +37,7 @@
         document.head.appendChild(style);
     };
 
-    GM_addStyle(`.btn-wrap.torn-bazaar-fill-qty-price{float:right;margin-left:auto;z-index:99999}.btn-wrap.torn-bazaar-clear-qty-price{z-index:99999}div.title-wrap div.name-wrap{display:flex;justify-content:flex-end}.wave-animation{position:relative;overflow:hidden}.wave{pointer-events:none;position:absolute;width:100%;height:33px;background-color:transparent;opacity:0;transform:translateX(-100%);animation:waveAnimation 1s cubic-bezier(0, 0, 0, 1)}@keyframes waveAnimation{0%{opacity:1;transform:translateX(-100%)}100%{opacity:0;transform:translateX(100%)}}.overlay-percentage{position:absolute;top:0;background-color:rgba(0, 0, 0, 0.9);padding:0 5px;border-radius:15px;font-size:10px}.overlay-percentage-add{right:-30px}.overlay-percentage-manage{right:0}.torn-bazaar-fill-qty-price input{-webkit-touch-callout:none;-webkit-user-select:none;user-select:none;transition:box-shadow 0s}.torn-bazaar-fill-qty-price input.tbf-holding{box-shadow:inset 0 0 0 40px rgba(0,180,255,.35);transition:box-shadow 3s linear}.tbf-fav{cursor:pointer;font-size:16px;line-height:1;margin:0 4px;color:#888;align-self:center;user-select:none;-webkit-user-select:none;z-index:99999}.tbf-fav.tbf-fav--on{color:gold;text-shadow:0 0 3px rgba(255,215,0,.7)}.tbf-fillall-bar{display:flex;align-items:center;gap:6px;margin:4px 0;padding:2px 4px}.tbf-autofill-dot{display:none;width:10px;height:10px;border-radius:50%;background:gold;box-shadow:0 0 4px gold;animation:tbfPulse 1s ease-in-out infinite}.tbf-fillall-bar--active .tbf-autofill-dot{display:inline-block}.tbf-fillall-bar--active .tbf-fillall-btn{box-shadow:0 0 5px gold}@keyframes tbfPulse{0%,100%{opacity:.3;transform:scale(.8)}50%{opacity:1;transform:scale(1.2)}}.tbf-autofill-panel{border:2px solid gold!important;border-radius:4px;box-shadow:0 0 6px rgba(255,215,0,.6)}`);
+    GM_addStyle(`.btn-wrap.torn-bazaar-fill-qty-price{float:right;margin-left:auto;z-index:99999}.btn-wrap.torn-bazaar-clear-qty-price{z-index:99999}div.title-wrap div.name-wrap{display:flex;justify-content:flex-end}.wave-animation{position:relative;overflow:hidden}.wave{pointer-events:none;position:absolute;width:100%;height:33px;background-color:transparent;opacity:0;transform:translateX(-100%);animation:waveAnimation 1s cubic-bezier(0, 0, 0, 1)}@keyframes waveAnimation{0%{opacity:1;transform:translateX(-100%)}100%{opacity:0;transform:translateX(100%)}}.overlay-percentage{position:absolute;top:0;background-color:rgba(0, 0, 0, 0.9);padding:0 5px;border-radius:15px;font-size:10px}.overlay-percentage-add{right:-30px}.overlay-percentage-manage{right:0}.torn-bazaar-fill-qty-price input{-webkit-touch-callout:none;-webkit-user-select:none;user-select:none;transition:box-shadow 0s}.torn-bazaar-fill-qty-price input.tbf-holding{box-shadow:inset 0 0 0 40px rgba(0,180,255,.35);transition:box-shadow 3s linear}.tbf-fav{cursor:pointer;font-size:16px;line-height:1;margin:0 4px;color:#888;align-self:center;user-select:none;-webkit-user-select:none;z-index:99999}.tbf-fav.tbf-fav--on{color:gold;text-shadow:0 0 3px rgba(255,215,0,.7)}.tbf-fillall-bar{position:fixed;bottom:16px;right:16px;display:flex;align-items:center;gap:6px;padding:6px 8px;background:rgba(0,0,0,.55);border-radius:20px;z-index:999999}.tbf-autofill-dot{display:none;width:10px;height:10px;border-radius:50%;background:gold;box-shadow:0 0 4px gold;animation:tbfPulse 1s ease-in-out infinite}.tbf-fillall-bar--active .tbf-autofill-dot{display:inline-block}.tbf-fillall-bar--active .tbf-fillall-btn{box-shadow:0 0 5px gold}@keyframes tbfPulse{0%,100%{opacity:.3;transform:scale(.8)}50%{opacity:1;transform:scale(1.2)}}.tbf-viewport-border{display:none;position:fixed;inset:0;border:3px solid gold;box-shadow:inset 0 0 12px rgba(255,215,0,.6);pointer-events:none;z-index:999998}.tbf-viewport-border--active{display:block}`);
 
     const favouritesStorageKey = "silmaril-torn-bazaar-filler-favourites";
     let favourites = loadFavourites();
@@ -571,23 +571,9 @@
         return getItemIdFromImage(image) ?? null;
     }
 
-    // The container the fill buttons live in: the Add Items list or the Manage Items rows' parent.
-    function getItemsPanel(){
-        let addPanel = document.querySelector("ul.items-cont");
-        if (addPanel != null) {
-            return addPanel;
-        }
-        let manageRow = document.querySelector('div[data-testid="sortable-item"], div[class*="row___"]');
-        return manageRow != null ? manageRow.parentElement : null;
-    }
-
     function ensureFillAllUI(){
-        let panel = getItemsPanel();
-        if (panel == null) {
-            return;
-        }
         let bar = document.querySelector(".tbf-fillall-bar");
-        if (bar == null || !bar.isConnected) {
+        if (bar == null) {
             bar = document.createElement('div');
             bar.className = 'tbf-fillall-bar';
             const btn = document.createElement('input');
@@ -604,9 +590,12 @@
                     startAutoFill();
                 }
             });
+            document.body.appendChild(bar);
         }
-        if (bar.nextElementSibling !== panel) {
-            panel.parentElement.insertBefore(bar, panel);
+        if (document.querySelector(".tbf-viewport-border") == null) {
+            const border = document.createElement('div');
+            border.className = 'tbf-viewport-border';
+            document.body.appendChild(border);
         }
         updateAutoFillUI();
     }
@@ -617,14 +606,9 @@
             bar.querySelector(".tbf-fillall-btn").value = autoFillActive ? "Stop fill" : "Fill All ★";
             bar.classList.toggle("tbf-fillall-bar--active", autoFillActive);
         }
-        document.querySelectorAll(".tbf-autofill-panel").forEach(function(el){
-            el.classList.remove("tbf-autofill-panel");
-        });
-        if (autoFillActive) {
-            let panel = getItemsPanel();
-            if (panel != null) {
-                panel.classList.add("tbf-autofill-panel");
-            }
+        let border = document.querySelector(".tbf-viewport-border");
+        if (border != null) {
+            border.classList.toggle("tbf-viewport-border--active", autoFillActive);
         }
     }
 
