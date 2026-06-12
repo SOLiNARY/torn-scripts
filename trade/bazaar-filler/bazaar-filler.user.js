@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Torn Bazaar Filler
 // @namespace    https://github.com/SOLiNARY
-// @version      1.2.0
-// @description  On "Fill" click autofills bazaar item price with lowest market price currently minus $1 (can be customised), shows current price coefficient compared to 3rd lowest, fills max quantity for items, marks checkboxes for guns. Hold a Fill/Update button for 3s to open the Price Delta and API Key settings dialogs.
+// @version      1.3.3
+// @description  On "Fill" click autofills bazaar item price with lowest market price currently minus $1 (can be customised), shows current price coefficient compared to 3rd lowest, fills max quantity for items, marks checkboxes for guns. Hold a Fill/Update button for 3s to open the Price Delta and API Key settings dialogs. Mark items as favourites (star next to Fill) and use "Fill All" to auto-fill every favourite row, including ones appearing later via infinite scroll or category switches.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT License
 // @match        https://www.torn.com/bazaar.php*
@@ -37,7 +37,22 @@
         document.head.appendChild(style);
     };
 
-    GM_addStyle(`.btn-wrap.torn-bazaar-fill-qty-price{float:right;margin-left:auto;z-index:99999}.btn-wrap.torn-bazaar-clear-qty-price{z-index:99999}div.title-wrap div.name-wrap{display:flex;justify-content:flex-end}.wave-animation{position:relative;overflow:hidden}.wave{pointer-events:none;position:absolute;width:100%;height:33px;background-color:transparent;opacity:0;transform:translateX(-100%);animation:waveAnimation 1s cubic-bezier(0, 0, 0, 1)}@keyframes waveAnimation{0%{opacity:1;transform:translateX(-100%)}100%{opacity:0;transform:translateX(100%)}}.overlay-percentage{position:absolute;top:0;background-color:rgba(0, 0, 0, 0.9);padding:0 5px;border-radius:15px;font-size:10px}.overlay-percentage-add{right:-30px}.overlay-percentage-manage{right:0}.torn-bazaar-fill-qty-price input{-webkit-touch-callout:none;-webkit-user-select:none;user-select:none;transition:box-shadow 0s}.torn-bazaar-fill-qty-price input.tbf-holding{box-shadow:inset 0 0 0 40px rgba(0,180,255,.35);transition:box-shadow 3s linear}`);
+    GM_addStyle(`.btn-wrap.torn-bazaar-fill-qty-price{float:right;margin-left:auto;z-index:99999}.btn-wrap.torn-bazaar-clear-qty-price{z-index:99999}div.title-wrap div.name-wrap{display:flex;justify-content:flex-end}.wave-animation{position:relative;overflow:hidden}.wave{pointer-events:none;position:absolute;width:100%;height:33px;background-color:transparent;opacity:0;transform:translateX(-100%);animation:waveAnimation 1s cubic-bezier(0, 0, 0, 1)}@keyframes waveAnimation{0%{opacity:1;transform:translateX(-100%)}100%{opacity:0;transform:translateX(100%)}}.overlay-percentage{position:absolute;top:0;background-color:rgba(0, 0, 0, 0.9);padding:0 5px;border-radius:15px;font-size:10px}.overlay-percentage-add{right:-30px}.overlay-percentage-manage{right:0}.torn-bazaar-fill-qty-price input{-webkit-touch-callout:none;-webkit-user-select:none;user-select:none;transition:box-shadow 0s}.torn-bazaar-fill-qty-price input.tbf-holding{box-shadow:inset 0 0 0 40px rgba(0,180,255,.35);transition:box-shadow 3s linear}.tbf-fav{cursor:pointer;font-size:16px;line-height:1;margin-left:auto;margin-right:6px;width:16px;text-align:center;color:#888;align-self:center;user-select:none;-webkit-user-select:none;z-index:99999}.tbf-fav~.btn-wrap.torn-bazaar-fill-qty-price{margin-left:0}.tbf-fav.tbf-fav--on{color:gold;text-shadow:0 0 3px rgba(255,215,0,.7)}.tbf-fillall-bar{position:fixed;bottom:16px;right:16px;display:flex;align-items:center;gap:6px;padding:6px 8px;background:rgba(0,0,0,.55);border-radius:20px;z-index:999999}@media (max-width:784px){.tbf-fillall-bar{bottom:110px}}.tbf-autofill-dot{display:none;width:10px;height:10px;border-radius:50%;background:gold;box-shadow:0 0 4px gold;animation:tbfPulse 1s ease-in-out infinite}.tbf-fillall-bar--active .tbf-autofill-dot{display:inline-block}.tbf-fillall-bar--active .tbf-fillall-btn{box-shadow:0 0 5px gold}@keyframes tbfPulse{0%,100%{opacity:.3;transform:scale(.8)}50%{opacity:1;transform:scale(1.2)}}.tbf-viewport-border{display:none;position:fixed;top:0;right:0;bottom:0;left:0;border:3px solid gold;box-shadow:inset 0 0 12px rgba(255,215,0,.6);pointer-events:none;z-index:999998}.tbf-viewport-border--active{display:block}`);
+
+    const favouritesStorageKey = "silmaril-torn-bazaar-filler-favourites";
+    let favourites = loadFavourites();
+
+    // "Fill All" auto-fill mode state. One activation fills each favourite item once;
+    // rows appearing later (infinite scroll, category switch) are picked up by the scan.
+    const FILL_COOLDOWN_MIN_MS = 600;
+    const FILL_COOLDOWN_MAX_MS = 1000;
+    const RATE_LIMIT_PAUSE_MIN_MS = 3000;
+    const RATE_LIMIT_PAUSE_MAX_MS = 10000;
+    let autoFillActive = false;
+    let autoFillLoopRunning = false;
+    let autoFillQueue = [];
+    let autoFillQueuedIds = new Set();
+    let autoFillDoneIds = new Set();
 
     const pages = { "AddItems": 10, "ManageItems": 20};
     const addItemsLabels = ["Fill", "Clear"];
@@ -69,6 +84,11 @@
                 insertFillAndWaveBtn(this, updateItemsLabels, pages.ManageItems);
             }
         });
+
+        ensureFillAllUI();
+        if (autoFillActive) {
+            enqueueVisibleFavourites();
+        }
     }
 
     function scheduleScan() {
@@ -132,6 +152,27 @@
         innerSpanClear.appendChild(inputElementClear);
         outerSpanFill.appendChild(innerSpanFill);
         outerSpanClear.appendChild(innerSpanClear);
+
+        const itemId = getRowItemId(element, pageType);
+        if (itemId) {
+            element.dataset.tbfItemId = itemId;
+            element.dataset.tbfPageType = pageType;
+
+            const favBtn = document.createElement('span');
+            favBtn.className = 'tbf-fav';
+            favBtn.dataset.tbfItemId = itemId;
+            favBtn.title = 'Toggle favourite (used by Fill All)';
+            renderFavIcon(favBtn, favourites.has(itemId));
+            favBtn.addEventListener('click', function(event) {
+                event.preventDefault();
+                event.stopPropagation();
+                toggleFavourite(itemId);
+                if (autoFillActive && favourites.has(itemId)) {
+                    enqueueFavouriteRow(element);
+                }
+            });
+            element.append(favBtn);
+        }
 
         element.append(outerSpanFill, outerSpanClear, waveDiv);
 
@@ -214,16 +255,17 @@
             .replace("{apiKey}", apiKey);
 
         let wave = element.parentElement.parentElement.parentElement.querySelector("div.wave");
-        fetch(requestUrl)
+        wave.style.animation = 'none';
+        wave.offsetHeight;
+        wave.style.animation = null;
+        wave.style.backgroundColor = "transparent";
+        wave.style.animationDuration = "1s";
+        return fetch(requestUrl)
             .then(response => response.json())
             .then(data => {
-            if (data.error != null && data.error.code === 2){
-                apiKey = null;
-                localStorage.setItem("silmaril-torn-bazaar-filler-apikey", null);
-                wave.style.backgroundColor = "red";
-                wave.style.animationDuration = "5s";
-                console.error("[TornBazaarFiller] Incorrect Api Key:", data);
-                return;
+            let apiErrorStatus = handleApiError(data, wave);
+            if (apiErrorStatus !== null){
+                return apiErrorStatus;
             }
             let lowBallPrice = Number.MAX_VALUE;
             if (priceDeltaRaw.indexOf('[market]') != -1) {
@@ -278,20 +320,17 @@
                 quantityInput.value = getQuantity(element, pageType);
                 quantityInput.dispatchEvent(keyupEvent);
             }
+            return "ok";
         })
             .catch(error => {
             wave.style.backgroundColor = "red";
             wave.style.animationDuration = "5s";
             console.error("[TornBazaarFiller] Error fetching data:", error);
+            return "error";
         })
             .finally(() => {
             element.parentNode.parentNode.parentNode.querySelector("span.btn-wrap.torn-bazaar-clear-qty-price span.btn").style.display = "inline-block";
         });
-        wave.style.animation = 'none';
-        wave.offsetHeight;
-        wave.style.animation = null;
-        wave.style.backgroundColor = "transparent";
-        wave.style.animationDuration = "1s";
     }
 
     function updatePrice(element){
@@ -304,7 +343,7 @@
             moneyGroupDiv = parentNode4.parentNode.querySelector("[class*=bottomMobileMenu___] [class*=priceMobile___]");
             if (moneyGroupDiv == null) {
                 console.warn("[TornBazaarFiller] Mobile price container not found — '[class*=bottomMobileMenu___] [class*=priceMobile___]' returned null. Mobile DOM may have changed.");
-                return;
+                return Promise.resolve("error");
             }
         } else {
             moneyGroupDiv = element.parentNode.parentNode.parentNode.parentNode.querySelector("div[class*=price___]");
@@ -321,16 +360,17 @@
             .replace("{apiKey}", apiKey);
 
         let wave = element.parentElement.parentElement.parentElement.querySelector("div.wave");
-        fetch(requestUrl)
+        wave.style.animation = 'none';
+        wave.offsetHeight;
+        wave.style.animation = null;
+        wave.style.backgroundColor = "transparent";
+        wave.style.animationDuration = "1s";
+        return fetch(requestUrl)
             .then(response => response.json())
             .then(data => {
-            if (data.error != null && data.error.code === 2){
-                apiKey = null;
-                localStorage.setItem("silmaril-torn-bazaar-filler-apikey", null);
-                wave.style.backgroundColor = "red";
-                wave.style.animationDuration = "5s";
-                console.error("[TornBazaarFiller] Incorrect Api Key:", data);
-                return;
+            let apiErrorStatus = handleApiError(data, wave);
+            if (apiErrorStatus !== null){
+                return apiErrorStatus;
             }
             let lowBallPrice = Number.MAX_VALUE;
             if (priceDeltaRaw.indexOf('[market]') != -1) {
@@ -376,20 +416,14 @@
             priceInputs[0].value = lowBallPrice;
             priceInputs[1].value = lowBallPrice;
             priceInputs[0].dispatchEvent(inputEvent);
+            return "ok";
         })
             .catch(error => {
             wave.style.backgroundColor = "red";
             wave.style.animationDuration = "5s";
             console.error("[TornBazaarFiller] Error fetching data:", error);
-        })
-            .finally(() => {
-            // element.parentNode.parentNode.parentNode.querySelector("span.btn-wrap.torn-bazaar-clear-qty-price span.btn").style.display = "inline-block";
+            return "error";
         });
-        wave.style.animation = 'none';
-        wave.offsetHeight;
-        wave.style.animation = null;
-        wave.style.backgroundColor = "transparent";
-        wave.style.animationDuration = "1s";
     }
 
     function clearQuantityAndPrice(element){
@@ -466,6 +500,214 @@
         } else {
             console.error("[TornBazaarFiller] ItemId not found!");
         }
+    }
+
+    // Maps a Torn API error payload to a fill status ("invalid-key" | "rate-limited" | "error"),
+    // or null when the response carries no error.
+    function handleApiError(data, wave){
+        if (data.error == null) {
+            return null;
+        }
+        if (data.error.code === 2) {
+            apiKey = null;
+            localStorage.setItem("silmaril-torn-bazaar-filler-apikey", null);
+            wave.style.backgroundColor = "red";
+            wave.style.animationDuration = "5s";
+            console.error("[TornBazaarFiller] Incorrect Api Key:", data);
+            return "invalid-key";
+        }
+        if (data.error.code === 5) {
+            wave.style.backgroundColor = "orange";
+            wave.style.animationDuration = "3s";
+            console.warn("[TornBazaarFiller] API rate limit reached:", data);
+            return "rate-limited";
+        }
+        wave.style.backgroundColor = "red";
+        wave.style.animationDuration = "5s";
+        console.error("[TornBazaarFiller] API error:", data);
+        return "error";
+    }
+
+    function loadFavourites(){
+        try {
+            let stored = JSON.parse(localStorage.getItem(favouritesStorageKey) ?? "[]");
+            return new Set(Array.isArray(stored) ? stored : []);
+        } catch (error) {
+            console.error("[TornBazaarFiller] Failed to load favourites:", error);
+            return new Set();
+        }
+    }
+
+    function saveFavourites(){
+        localStorage.setItem(favouritesStorageKey, JSON.stringify([...favourites]));
+    }
+
+    function toggleFavourite(itemId){
+        if (favourites.has(itemId)) {
+            favourites.delete(itemId);
+        } else {
+            favourites.add(itemId);
+        }
+        saveFavourites();
+        document.querySelectorAll('.tbf-fav[data-tbf-item-id="' + itemId + '"]').forEach(function(el){
+            renderFavIcon(el, favourites.has(itemId));
+        });
+    }
+
+    function renderFavIcon(el, isOn){
+        el.textContent = isOn ? '★' : '☆';
+        el.classList.toggle('tbf-fav--on', isOn);
+    }
+
+    // element is the row's name-wrap (Add Items) or desc (Manage Items) container,
+    // i.e. the same node insertFillAndWaveBtn injects into.
+    function getRowItemId(element, pageType){
+        let image = pageType === pages.AddItems
+            ? element.parentElement.querySelector("div.image-wrap img")
+            : element.parentElement.querySelector("div[class*=imgContainer___] img");
+        if (image == null) {
+            return null;
+        }
+        return getItemIdFromImage(image) ?? null;
+    }
+
+    function ensureFillAllUI(){
+        let bar = document.querySelector(".tbf-fillall-bar");
+        if (bar == null) {
+            bar = document.createElement('div');
+            bar.className = 'tbf-fillall-bar';
+            const btn = document.createElement('input');
+            btn.type = 'button';
+            btn.className = 'torn-btn tbf-fillall-btn';
+            const dot = document.createElement('span');
+            dot.className = 'tbf-autofill-dot';
+            bar.append(btn, dot);
+            btn.addEventListener('click', function(event){
+                event.stopPropagation();
+                if (autoFillActive) {
+                    stopAutoFill();
+                } else {
+                    startAutoFill();
+                }
+            });
+            document.body.appendChild(bar);
+        }
+        if (document.querySelector(".tbf-viewport-border") == null) {
+            const border = document.createElement('div');
+            border.className = 'tbf-viewport-border';
+            document.body.appendChild(border);
+        }
+        updateAutoFillUI();
+    }
+
+    function updateAutoFillUI(){
+        let bar = document.querySelector(".tbf-fillall-bar");
+        if (bar != null) {
+            bar.querySelector(".tbf-fillall-btn").value = autoFillActive ? "Stop fill" : "Fill All ★";
+            bar.classList.toggle("tbf-fillall-bar--active", autoFillActive);
+        }
+        let border = document.querySelector(".tbf-viewport-border");
+        if (border != null) {
+            border.classList.toggle("tbf-viewport-border--active", autoFillActive);
+        }
+    }
+
+    function startAutoFill(){
+        checkApiKey();
+        autoFillActive = true;
+        autoFillQueue = [];
+        autoFillQueuedIds = new Set();
+        autoFillDoneIds = new Set();
+        updateAutoFillUI();
+        enqueueVisibleFavourites();
+        runAutoFillLoop();
+    }
+
+    function stopAutoFill(){
+        autoFillActive = false;
+        autoFillQueue = [];
+        autoFillQueuedIds.clear();
+        updateAutoFillUI();
+    }
+
+    function enqueueVisibleFavourites(){
+        // Row containers carry both attributes; the star icons only carry the item id.
+        document.querySelectorAll("[data-tbf-item-id][data-tbf-page-type]").forEach(enqueueFavouriteRow);
+    }
+
+    function enqueueFavouriteRow(wrapper){
+        if (!autoFillActive) {
+            return;
+        }
+        let itemId = parseInt(wrapper.dataset.tbfItemId, 10);
+        if (!favourites.has(itemId) || autoFillDoneIds.has(itemId) || autoFillQueuedIds.has(itemId)) {
+            return;
+        }
+        autoFillQueuedIds.add(itemId);
+        autoFillQueue.push(wrapper);
+        runAutoFillLoop();
+    }
+
+    async function runAutoFillLoop(){
+        if (autoFillLoopRunning) {
+            return;
+        }
+        autoFillLoopRunning = true;
+        try {
+            while (autoFillActive && autoFillQueue.length > 0) {
+                let wrapper = autoFillQueue.shift();
+                let itemId = parseInt(wrapper.dataset.tbfItemId, 10);
+                if (!wrapper.isConnected || !favourites.has(itemId)) {
+                    // Row unmounted (virtualized list) or unfavourited meanwhile; it will be
+                    // re-queued by the scan if it mounts again.
+                    autoFillQueuedIds.delete(itemId);
+                    continue;
+                }
+                let fillInput = wrapper.querySelector(".btn-wrap.torn-bazaar-fill-qty-price input");
+                if (fillInput == null) {
+                    autoFillQueuedIds.delete(itemId);
+                    continue;
+                }
+                let pageType = parseInt(wrapper.dataset.tbfPageType, 10);
+                let status;
+                if (pageType === pages.AddItems) {
+                    fillInput.parentNode.style.display = "none";
+                    status = await fillQuantityAndPrice(fillInput, pageType);
+                } else {
+                    status = await updatePrice(fillInput);
+                }
+                if (status === "rate-limited") {
+                    autoFillQueue.unshift(wrapper); // retry the same row after the pause
+                    await sleep(randomBetween(RATE_LIMIT_PAUSE_MIN_MS, RATE_LIMIT_PAUSE_MAX_MS));
+                    continue;
+                }
+                if (status === "invalid-key") {
+                    console.error("[TornBazaarFiller] Stopping Fill All: API key is invalid.");
+                    stopAutoFill();
+                    break;
+                }
+                autoFillQueuedIds.delete(itemId);
+                autoFillDoneIds.add(itemId);
+                if (status !== "ok") {
+                    console.warn("[TornBazaarFiller] Fill All skipped item " + itemId + " after error.");
+                }
+                await sleep(randomBetween(FILL_COOLDOWN_MIN_MS, FILL_COOLDOWN_MAX_MS));
+            }
+        } finally {
+            autoFillLoopRunning = false;
+        }
+        // Rows enqueued while the loop was winding down (e.g. during the last cooldown)
+        if (autoFillActive && autoFillQueue.length > 0) {
+            runAutoFillLoop();
+        }
+    }
+
+    function sleep(ms){
+        return new Promise(function(resolve){ setTimeout(resolve, ms); });
+    }
+
+    function randomBetween(min, max){
+        return min + Math.random() * (max - min);
     }
 
     function performOperation(number, operation) {
