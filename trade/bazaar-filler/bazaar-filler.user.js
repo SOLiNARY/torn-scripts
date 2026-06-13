@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Bazaar Filler
 // @namespace    https://github.com/SOLiNARY
-// @version      1.3.5
+// @version      1.3.6
 // @description  On "Fill" click autofills bazaar item price with lowest market price currently minus $1 (can be customised), shows current price coefficient compared to 3rd lowest, fills max quantity for items, marks checkboxes for guns. Hold a Fill/Update button for 3s to open the Price Delta and API Key settings dialogs. Mark items as favourites (star next to Fill) and use "Fill All" to auto-fill every favourite row, including ones appearing later via infinite scroll or category switches.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT License
@@ -481,19 +481,41 @@
     function getQuantity(element, pageType){
         let rgx = /x(\d+)$/;
         let rgxMobile = /^x(\d+)/
-        let quantityText = 0;
+        let quantityText = '';
         switch(pageType){
             case pages.AddItems:
-                quantityText = element.parentNode.parentNode.parentNode.innerText;
-                console.log('quantityText:', quantityText);
+                // Read the row's text but skip the nodes we inject (favourite star, fill/clear
+                // buttons, wave). The star adds a trailing ★/☆ character that would otherwise
+                // break the end-anchored desktop regex and silently fall back to qty 1.
+                quantityText = getRowTextExcludingInjected(element.parentNode.parentNode.parentNode).trim();
                 break;
             case pages.ManageItems:
                 quantityText = element.parentNode.parentNode.parentNode.querySelector("span").innerText;
                 break;
         }
         let match = isMobileView ? rgxMobile.exec(quantityText) : rgx.exec(quantityText);
-        let quantity = match === null ? 1 : match[1];
-        return quantity;
+        if (match === null){
+            console.warn("[TornBazaarFiller] Quantity not found in row text, defaulting to 1:", quantityText);
+            return 1;
+        }
+        return match[1];
+    }
+
+    // Concatenate a container's text content while ignoring the elements this script injects,
+    // so quantity parsing sees only Torn's original row text.
+    function getRowTextExcludingInjected(container){
+        let text = '';
+        container.childNodes.forEach(function(node){
+            if (node.nodeType === Node.ELEMENT_NODE &&
+                (node.classList.contains('tbf-fav') ||
+                 node.classList.contains('torn-bazaar-fill-qty-price') ||
+                 node.classList.contains('torn-bazaar-clear-qty-price') ||
+                 node.classList.contains('wave'))){
+                return;
+            }
+            text += node.nodeType === Node.ELEMENT_NODE ? node.innerText : node.textContent;
+        });
+        return text;
     }
 
     function getItemIdFromImage(image){
