@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Torn Bazaar Filler
 // @namespace    https://github.com/SOLiNARY
-// @version      1.4.1
-// @description  On "Fill" click autofills bazaar item price with lowest market price currently minus $1 (can be customised), shows current price coefficient compared to 3rd lowest, fills max quantity for items, marks checkboxes for guns. Hold a Fill/Update button for 3s to open the Price Delta and API Key settings dialogs. Mark items as favourites (star next to Fill) and use "Fill All" to auto-fill every favourite row, including ones appearing later via infinite scroll or category switches. Drag the Fill All bar anywhere; drop it near a screen edge to clamp and minimise it — its position and state are remembered.
+// @version      1.5.0
+// @description  On "Fill" click autofills bazaar item price with lowest market price currently minus $1 (can be customised), shows current price coefficient compared to 3rd lowest, fills max quantity for items, marks checkboxes for guns. Hold a Fill/Update button for 3s to open the settings modal (price delta, API key, and per-category delta overrides — set different discounts/sources for Clothing, Other, Drug, etc.). Mark items as favourites (star next to Fill) and use "Fill All" to auto-fill every favourite row, including ones appearing later via infinite scroll or category switches. Drag the Fill All bar anywhere; drop it near a screen edge to clamp and minimise it — its position and state are remembered.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT License
 // @match        https://www.torn.com/bazaar.php*
@@ -23,8 +23,7 @@
     let apiKey = localStorage.getItem("silmaril-torn-bazaar-filler-apikey");
 
     try {
-        GM_registerMenuCommand('Set Price Delta', setPriceDelta);
-        GM_registerMenuCommand('Set Api Key', function() { checkApiKey(false); });
+        GM_registerMenuCommand('Open Settings', openSettingsModal);
     } catch (error) {
         console.log('[TornBazaarFiller] Tampermonkey not detected!');
     }
@@ -39,8 +38,19 @@
 
     GM_addStyle(`.btn-wrap.torn-bazaar-fill-qty-price{float:right;margin-left:auto;z-index:99999}.btn-wrap.torn-bazaar-clear-qty-price{z-index:99999}div.title-wrap div.name-wrap{display:flex;justify-content:flex-end}.wave-animation{position:relative;overflow:hidden}.wave{pointer-events:none;position:absolute;width:100%;height:33px;background-color:transparent;opacity:0;transform:translateX(-100%);animation:waveAnimation 1s cubic-bezier(0, 0, 0, 1)}@keyframes waveAnimation{0%{opacity:1;transform:translateX(-100%)}100%{opacity:0;transform:translateX(100%)}}.overlay-percentage{position:absolute;top:0;background-color:rgba(0, 0, 0, 0.9);padding:0 5px;border-radius:15px;font-size:10px}.overlay-percentage-add{right:-30px}.overlay-percentage-manage{right:0}.torn-bazaar-fill-qty-price input{-webkit-touch-callout:none;-webkit-user-select:none;user-select:none;transition:box-shadow 0s}.torn-bazaar-fill-qty-price input.tbf-holding{box-shadow:inset 0 0 0 40px rgba(0,180,255,.35);transition:box-shadow 3s linear}.tbf-fav{cursor:pointer;font-size:16px;line-height:1;margin-left:auto;margin-right:6px;width:16px;text-align:center;color:#888;align-self:center;user-select:none;-webkit-user-select:none;z-index:99999}.tbf-fav~.btn-wrap.torn-bazaar-fill-qty-price{margin-left:0}.tbf-fav.tbf-fav--on{color:gold;text-shadow:0 0 3px rgba(255,215,0,.7)}.tbf-fillall-bar{position:fixed;bottom:110px;right:16px;display:flex;align-items:center;gap:6px;padding:6px 8px;background:rgba(0,0,0,.55);border-radius:20px;z-index:999999;touch-action:none;transition:box-shadow .2s ease}.tbf-fillall-grip{cursor:grab;color:#bbb;font-size:14px;line-height:1;letter-spacing:-2px;min-width:12px;text-align:center;align-self:center;user-select:none;-webkit-user-select:none}.tbf-fillall-bar--dragging{cursor:grabbing;opacity:.92}.tbf-fillall-bar--dragging .tbf-fillall-grip{cursor:grabbing}.tbf-fillall-bar--min{padding:5px 7px;gap:4px}.tbf-fillall-bar--min .tbf-fillall-btn{display:none}.tbf-fillall-bar--min .tbf-fillall-grip{font-size:16px}.tbf-autofill-dot{display:none;width:10px;height:10px;border-radius:50%;background:gold;box-shadow:0 0 4px gold;animation:tbfPulse 1s ease-in-out infinite}.tbf-fillall-bar--active .tbf-autofill-dot{display:inline-block}.tbf-fillall-bar--active{box-shadow:0 0 10px 2px rgba(255,215,0,.75)}@keyframes tbfPulse{0%,100%{opacity:.3;transform:scale(.8)}50%{opacity:1;transform:scale(1.2)}}.tbf-viewport-border{display:none;position:fixed;top:0;right:0;bottom:0;left:0;border:3px solid gold;box-shadow:inset 0 0 12px rgba(255,215,0,.6);pointer-events:none;z-index:999998}.tbf-viewport-border--active{display:block}.tbf-toast{position:fixed;bottom:158px;right:16px;max-width:280px;background:rgba(0,0,0,.85);color:#fff;padding:10px 14px;border-radius:8px;border:1px solid gold;font-size:13px;line-height:1.4;z-index:1000000;opacity:0;visibility:hidden;transition:opacity .3s,visibility .3s}.tbf-toast--visible{opacity:1;visibility:visible}`);
 
+    GM_addStyle(`.tbf-modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:2147483000;justify-content:center;align-items:flex-start;overflow:auto;padding:24px 12px;box-sizing:border-box}.tbf-modal-overlay--open{display:flex}.tbf-modal{background:#1f1f1f;color:#e6e6e6;width:100%;max-width:420px;border:1px solid #666;border-radius:10px;box-shadow:0 10px 40px rgba(0,0,0,.6);padding:16px 18px;box-sizing:border-box;font-size:13px;line-height:1.5}.tbf-modal h3{margin:0 0 12px;font-size:15px;display:flex;justify-content:space-between;align-items:center;color:#fff}.tbf-modal-close{cursor:pointer;color:#bbb;font-size:22px;line-height:1}.tbf-modal label{display:block;margin:10px 0 3px;font-weight:bold;color:#cfcfcf}.tbf-modal input[type=text]{width:100%;box-sizing:border-box;padding:7px 9px;border-radius:5px;border:1px solid #666;background:#111;color:#eee;font-size:13px}.tbf-modal-cats{margin-top:4px}.tbf-modal-cat-row{display:flex;gap:6px;margin-bottom:6px;align-items:center}.tbf-modal-cat-row .tbf-modal-cat-name{flex:1 1 55%}.tbf-modal-cat-row .tbf-modal-cat-formula{flex:1 1 45%}.tbf-modal-cat-del{cursor:pointer;color:#ff6b6b;font-size:20px;line-height:1;flex:0 0 auto;width:22px;text-align:center}.tbf-modal-addcat{margin-top:2px;cursor:pointer;background:#333;color:#eee;border:1px solid #666;border-radius:5px;padding:5px 10px;font-size:12px}.tbf-modal-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:16px}.tbf-modal-actions button{cursor:pointer;padding:7px 16px;border-radius:5px;border:1px solid #666;background:#333;color:#eee;font-size:13px}.tbf-modal-save{background:#2e7d32!important;border-color:#2e7d32!important;color:#fff!important}.tbf-modal-help{margin-top:12px;font-size:11px;color:#9a9a9a;line-height:1.5}.tbf-modal-help code{background:#000;padding:1px 4px;border-radius:3px;color:#cfc}`);
+
     const favouritesStorageKey = "silmaril-torn-bazaar-filler-favourites";
     let favourites = loadFavourites();
+
+    // Per-category price-delta overrides + a persistent item→category(type) cache.
+    // Item categories are immutable, so caching them avoids extra API calls when picking
+    // which price source a category's formula needs.
+    const categoryDeltasKey = "silmaril-torn-bazaar-filler-category-deltas";
+    const itemCategoryCacheKey = "silmaril-torn-bazaar-filler-item-categories";
+    const SETTINGS_CATEGORIES = ["Melee","Primary","Secondary","Defensive","Temporary","Drug","Medical","Booster","Energy Drink","Alcohol","Enhancer","Clothing","Jewelry","Material","Flower","Plushie","Car","Supply Pack","Special","Collectible","Artifact","Tool","Other"];
+    let categoryDeltas = loadCategoryDeltas();
+    let itemCategoryCache = loadItemCategoryCache();
 
     // "Fill All" auto-fill mode state. One activation fills each favourite item once;
     // rows appearing later (infinite scroll, category switch) are picked up by the scan.
@@ -252,7 +262,7 @@
         return moneyGroupDiv.querySelector("span.overlay-percentage");
     }
 
-    function fillQuantityAndPrice(element, pageType){
+    async function fillQuantityAndPrice(element, pageType){
         let amountDiv = element.parentElement.parentElement.parentElement.parentElement.parentElement.querySelector("div.amount-main-wrap");
         let priceInputs = amountDiv.querySelectorAll("div.price div input");
         let keyupEvent = new Event("keyup", {bubbles: true});
@@ -268,31 +278,26 @@
             console.error("[TornBazaarFiller] ItemId not found!");
         }
 
-        let requestUrl = priceDeltaRaw.indexOf('[market]') != -1 ? itemUrl : marketUrl;
-        requestUrl = requestUrl
-            .replace("{itemId}", extractedItemId)
-            .replace("{apiKey}", apiKey);
-
         let wave = element.parentElement.parentElement.parentElement.querySelector("div.wave");
         wave.style.animation = 'none';
         wave.offsetHeight;
         wave.style.animation = null;
         wave.style.backgroundColor = "transparent";
         wave.style.animationDuration = "1s";
-        return fetch(requestUrl)
-            .then(response => response.json())
-            .then(data => {
+        try {
+            let pricing = await fetchPricingForItem(extractedItemId);
+            let data = pricing.data;
             let apiErrorStatus = handleApiError(data, wave);
             if (apiErrorStatus !== null){
                 return apiErrorStatus;
             }
+            let formula = pricing.formula;
             let lowBallPrice = Number.MAX_VALUE;
-            if (priceDeltaRaw.indexOf('[market]') != -1) {
-                let priceDelta = priceDeltaRaw.indexOf('[') == -1 ? priceDeltaRaw : priceDeltaRaw.substring(0, priceDeltaRaw.indexOf('['));
+            if (pricing.useItems) {
+                let priceDelta = stripDeltaBracket(formula);
                 let price = data.items[extractedItemId].market_value;
                 lowBallPrice = Math.round(performOperation(price, priceDelta));
             } else {
-                let price = 999_999_999;
                 if (data.itemmarket.listings[0].price == null){
                     console.warn("[TornBazaarFiller] The API is temporarily disabled, please try again later");
                 }
@@ -300,8 +305,8 @@
                     console.warn("[TornBazaarFiller] The API is BROKEN!");
                 }
                 let priceListings = data.itemmarket.listings;
-                let bazaarSlotOffset = priceDeltaRaw.indexOf('[') == -1 ? 0 : parseInt(priceDeltaRaw.substring(priceDeltaRaw.indexOf('[') + 1, priceDeltaRaw.indexOf(']')));
-                let priceDeltaWithoutBazaarOffset = priceDeltaRaw.indexOf('[') == -1 ? priceDeltaRaw : priceDeltaRaw.substring(0, priceDeltaRaw.indexOf('['));
+                let bazaarSlotOffset = getDeltaSlotOffset(formula);
+                let priceDeltaWithoutBazaarOffset = stripDeltaBracket(formula);
                 lowBallPrice = Math.round(performOperation(priceListings[Math.min(bazaarSlotOffset, priceListings.length - 1)].price, priceDeltaWithoutBazaarOffset));
                 let price3rd = priceListings[Math.min(2, priceListings.length - 1)].price;
                 let priceCoefficient = ((lowBallPrice / price3rd) * 100).toFixed(0);
@@ -340,19 +345,17 @@
                 quantityInput.dispatchEvent(keyupEvent);
             }
             return "ok";
-        })
-            .catch(error => {
+        } catch (error) {
             wave.style.backgroundColor = "red";
             wave.style.animationDuration = "5s";
             console.error("[TornBazaarFiller] Error fetching data:", error);
             return "error";
-        })
-            .finally(() => {
+        } finally {
             element.parentNode.parentNode.parentNode.querySelector("span.btn-wrap.torn-bazaar-clear-qty-price span.btn").style.display = "inline-block";
-        });
+        }
     }
 
-    function updatePrice(element){
+    async function updatePrice(element){
         let moneyGroupDiv;
         let parentNode4 = element.parentNode.parentNode.parentNode.parentNode;
         if (isMobileView){
@@ -362,7 +365,7 @@
             moneyGroupDiv = parentNode4.parentNode.querySelector("[class*=bottomMobileMenu___] [class*=priceMobile___]");
             if (moneyGroupDiv == null) {
                 console.warn("[TornBazaarFiller] Mobile price container not found — '[class*=bottomMobileMenu___] [class*=priceMobile___]' returned null. Mobile DOM may have changed.");
-                return Promise.resolve("error");
+                return "error";
             }
         } else {
             moneyGroupDiv = element.parentNode.parentNode.parentNode.parentNode.querySelector("div[class*=price___]");
@@ -373,31 +376,26 @@
         let image = element.parentElement.parentElement.parentElement.parentElement.querySelector("div[class*=imgContainer___] img");
         let extractedItemId = getItemIdFromImage(image);
 
-        let requestUrl = priceDeltaRaw.indexOf('[market]') != -1 ? itemUrl : marketUrl;
-        requestUrl = requestUrl
-            .replace("{itemId}", extractedItemId)
-            .replace("{apiKey}", apiKey);
-
         let wave = element.parentElement.parentElement.parentElement.querySelector("div.wave");
         wave.style.animation = 'none';
         wave.offsetHeight;
         wave.style.animation = null;
         wave.style.backgroundColor = "transparent";
         wave.style.animationDuration = "1s";
-        return fetch(requestUrl)
-            .then(response => response.json())
-            .then(data => {
+        try {
+            let pricing = await fetchPricingForItem(extractedItemId);
+            let data = pricing.data;
             let apiErrorStatus = handleApiError(data, wave);
             if (apiErrorStatus !== null){
                 return apiErrorStatus;
             }
+            let formula = pricing.formula;
             let lowBallPrice = Number.MAX_VALUE;
-            if (priceDeltaRaw.indexOf('[market]') != -1) {
-                let priceDelta = priceDeltaRaw.indexOf('[') == -1 ? priceDeltaRaw : priceDeltaRaw.substring(0, priceDeltaRaw.indexOf('['));
+            if (pricing.useItems) {
+                let priceDelta = stripDeltaBracket(formula);
                 let price = data.items[extractedItemId].market_value;
                 lowBallPrice = Math.round(performOperation(price, priceDelta));
             } else {
-                let price = 999_999_999;
                 if (data.itemmarket.listings[0].price == null){
                     console.warn("[TornBazaarFiller] The API is temporarily disabled, please try again later");
                 }
@@ -405,8 +403,8 @@
                     console.warn("[TornBazaarFiller] The API is BROKEN!");
                 }
                 let priceListings = data.itemmarket.listings;
-                let bazaarSlotOffset = priceDeltaRaw.indexOf('[') == -1 ? 0 : parseInt(priceDeltaRaw.substring(priceDeltaRaw.indexOf('[') + 1, priceDeltaRaw.indexOf(']')));
-                let priceDeltaWithoutBazaarOffset = priceDeltaRaw.indexOf('[') == -1 ? priceDeltaRaw : priceDeltaRaw.substring(0, priceDeltaRaw.indexOf('['));
+                let bazaarSlotOffset = getDeltaSlotOffset(formula);
+                let priceDeltaWithoutBazaarOffset = stripDeltaBracket(formula);
                 lowBallPrice = Math.round(performOperation(priceListings[Math.min(bazaarSlotOffset, priceListings.length - 1)].price, priceDeltaWithoutBazaarOffset));
                 let price3rd = priceListings[Math.min(2, priceListings.length - 1)].cost;
                 let priceCoefficient = ((lowBallPrice / price3rd) * 100).toFixed(0);
@@ -436,13 +434,12 @@
             priceInputs[1].value = lowBallPrice;
             priceInputs[0].dispatchEvent(inputEvent);
             return "ok";
-        })
-            .catch(error => {
+        } catch (error) {
             wave.style.backgroundColor = "red";
             wave.style.animationDuration = "5s";
             console.error("[TornBazaarFiller] Error fetching data:", error);
             return "error";
-        });
+        }
     }
 
     function clearQuantityAndPrice(element){
@@ -1032,14 +1029,202 @@
 
     const LONG_PRESS_MS = 3000;
 
-    // Re-open both settings dialogs in sequence, for the user to update.
-    function openAllSettingsDialogs() {
-        setPriceDelta();        // Price delta dialog first
-        checkApiKey(false);     // then API key dialog (force prompt regardless of stored key)
+    function stripDeltaBracket(formula){
+        return formula.indexOf('[') == -1 ? formula : formula.substring(0, formula.indexOf('['));
+    }
+
+    function getDeltaSlotOffset(formula){
+        if (formula.indexOf('[') == -1) {
+            return 0;
+        }
+        let parsed = parseInt(formula.substring(formula.indexOf('[') + 1, formula.indexOf(']')), 10);
+        return isNaN(parsed) ? 0 : parsed;
+    }
+
+    function loadCategoryDeltas(){
+        try {
+            let parsed = JSON.parse(localStorage.getItem(categoryDeltasKey) ?? "{}");
+            return (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) ? parsed : {};
+        } catch (error) {
+            console.error("[TornBazaarFiller] Failed to load category deltas:", error);
+            return {};
+        }
+    }
+
+    function saveCategoryDeltas(){
+        localStorage.setItem(categoryDeltasKey, JSON.stringify(categoryDeltas));
+    }
+
+    function loadItemCategoryCache(){
+        try {
+            let parsed = JSON.parse(localStorage.getItem(itemCategoryCacheKey) ?? "{}");
+            return (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) ? parsed : {};
+        } catch (error) {
+            return {};
+        }
+    }
+
+    function cacheItemCategory(itemId, type){
+        itemCategoryCache[itemId] = type;
+        try {
+            localStorage.setItem(itemCategoryCacheKey, JSON.stringify(itemCategoryCache));
+        } catch (error) {
+            // Ignore storage quota errors; the in-memory cache still helps this session.
+        }
+    }
+
+    // Resolve the formula to use for an item: a per-category override (matched on the item's
+    // type, case-insensitively) if set, otherwise the global default.
+    function getEffectiveDelta(category){
+        if (category != null){
+            let override = categoryDeltas[String(category).trim().toLowerCase()];
+            if (override != null && String(override).trim() !== ''){
+                return String(override).trim();
+            }
+        }
+        return priceDeltaRaw;
+    }
+
+    function buildPriceUrl(useItems, itemId){
+        return (useItems ? itemUrl : marketUrl)
+            .replace("{itemId}", itemId)
+            .replace("{apiKey}", apiKey);
+    }
+
+    function readCategoryFromData(data, itemId, useItems){
+        try {
+            if (useItems){
+                return (data.items && data.items[itemId]) ? (data.items[itemId].type ?? null) : null;
+            }
+            return (data.itemmarket && data.itemmarket.item) ? (data.itemmarket.item.type ?? null) : null;
+        } catch (error) {
+            return null;
+        }
+    }
+
+    // Fetch pricing data for an item using the price source its (possibly per-category)
+    // formula needs. The item's category is read from the first response and cached; only the
+    // first ever fill of an item whose category overrides the source costs a second request.
+    async function fetchPricingForItem(itemId){
+        let knownCategory = itemCategoryCache[itemId];
+        let firstFormula = getEffectiveDelta(knownCategory);
+        let firstUseItems = firstFormula.indexOf('[market]') != -1;
+        let data = await fetch(buildPriceUrl(firstUseItems, itemId)).then(response => response.json());
+        if (data.error != null){
+            return { data: data, formula: firstFormula, useItems: firstUseItems };
+        }
+        let category = knownCategory != null ? knownCategory : readCategoryFromData(data, itemId, firstUseItems);
+        if (category != null && knownCategory == null){
+            cacheItemCategory(itemId, category);
+        }
+        let formula = getEffectiveDelta(category);
+        let useItems = formula.indexOf('[market]') != -1;
+        if (useItems !== firstUseItems){
+            let data2 = await fetch(buildPriceUrl(useItems, itemId)).then(response => response.json());
+            return { data: data2, formula: formula, useItems: useItems };
+        }
+        return { data: data, formula: formula, useItems: useItems };
+    }
+
+    function ensureSettingsModal(){
+        if (document.querySelector('.tbf-modal-overlay') != null){
+            return;
+        }
+        const overlay = document.createElement('div');
+        overlay.className = 'tbf-modal-overlay';
+        overlay.innerHTML =
+            '<div class="tbf-modal">' +
+                '<h3>Bazaar Filler Settings<span class="tbf-modal-close" title="Close">&times;</span></h3>' +
+                '<label>Default price delta</label>' +
+                '<input type="text" class="tbf-modal-delta" placeholder="-1">' +
+                '<label>Public API key</label>' +
+                '<input type="text" class="tbf-modal-apikey" placeholder="16-character key">' +
+                '<label>Per-category overrides</label>' +
+                '<div class="tbf-modal-cats"></div>' +
+                '<button type="button" class="tbf-modal-addcat">+ Add category</button>' +
+                '<div class="tbf-modal-actions">' +
+                    '<button type="button" class="tbf-modal-cancel">Cancel</button>' +
+                    '<button type="button" class="tbf-modal-save">Save</button>' +
+                '</div>' +
+                '<div class="tbf-modal-help">Examples: <code>-1</code> (lowest − $1), <code>-5%</code>, <code>-1[1]</code> (2nd lowest listing), <code>[market]</code> (item market value). Category rows accept the same syntax — including a different source — and fall back to the default when blank.</div>' +
+            '</div>' +
+            '<datalist id="tbf-modal-cat-list">' + SETTINGS_CATEGORIES.map(c => '<option value="' + c + '"></option>').join('') + '</datalist>';
+        document.body.appendChild(overlay);
+
+        overlay.querySelector('.tbf-modal-close').addEventListener('click', closeSettingsModal);
+        overlay.querySelector('.tbf-modal-cancel').addEventListener('click', closeSettingsModal);
+        overlay.addEventListener('click', function(event){ if (event.target === overlay){ closeSettingsModal(); } });
+        overlay.querySelector('.tbf-modal-addcat').addEventListener('click', function(){ addCategoryRow('', ''); });
+        overlay.querySelector('.tbf-modal-save').addEventListener('click', saveSettingsModal);
+    }
+
+    function addCategoryRow(name, formula){
+        const list = document.querySelector('.tbf-modal-cats');
+        if (list == null){
+            return;
+        }
+        const row = document.createElement('div');
+        row.className = 'tbf-modal-cat-row';
+        row.innerHTML =
+            '<input type="text" class="tbf-modal-cat-name" list="tbf-modal-cat-list" placeholder="Category">' +
+            '<input type="text" class="tbf-modal-cat-formula" placeholder="-5%">' +
+            '<span class="tbf-modal-cat-del" title="Remove">&times;</span>';
+        row.querySelector('.tbf-modal-cat-name').value = name;
+        row.querySelector('.tbf-modal-cat-formula').value = formula;
+        row.querySelector('.tbf-modal-cat-del').addEventListener('click', function(){ row.remove(); });
+        list.appendChild(row);
+    }
+
+    function openSettingsModal(){
+        ensureSettingsModal();
+        const overlay = document.querySelector('.tbf-modal-overlay');
+        overlay.querySelector('.tbf-modal-delta').value = priceDeltaRaw;
+        overlay.querySelector('.tbf-modal-apikey').value = apiKey ?? '';
+        const list = overlay.querySelector('.tbf-modal-cats');
+        list.innerHTML = '';
+        Object.keys(categoryDeltas).forEach(function(key){ addCategoryRow(key, categoryDeltas[key]); });
+        overlay.classList.add('tbf-modal-overlay--open');
+    }
+
+    function closeSettingsModal(){
+        const overlay = document.querySelector('.tbf-modal-overlay');
+        if (overlay != null){
+            overlay.classList.remove('tbf-modal-overlay--open');
+        }
+    }
+
+    function saveSettingsModal(){
+        const overlay = document.querySelector('.tbf-modal-overlay');
+        if (overlay == null){
+            return;
+        }
+        let deltaVal = overlay.querySelector('.tbf-modal-delta').value.trim();
+        if (deltaVal !== ''){
+            priceDeltaRaw = deltaVal;
+            localStorage.setItem("silmaril-torn-bazaar-filler-price-delta", priceDeltaRaw);
+        }
+        let keyVal = overlay.querySelector('.tbf-modal-apikey').value.trim();
+        if (keyVal.length === 16){
+            apiKey = keyVal;
+            localStorage.setItem("silmaril-torn-bazaar-filler-apikey", keyVal);
+        } else if (keyVal !== ''){
+            console.warn("[TornBazaarFiller] API key must be 16 characters; ignored.");
+        }
+        let map = {};
+        overlay.querySelectorAll('.tbf-modal-cat-row').forEach(function(row){
+            let name = row.querySelector('.tbf-modal-cat-name').value.trim().toLowerCase();
+            let formula = row.querySelector('.tbf-modal-cat-formula').value.trim();
+            if (name !== '' && formula !== ''){
+                map[name] = formula;
+            }
+        });
+        categoryDeltas = map;
+        saveCategoryDeltas();
+        closeSettingsModal();
     }
 
     // Attach a 3s press-and-hold gesture (mouse + touch) to a FILL/UPDATE input.
-    // Holding 3s opens the settings dialogs; the click that follows the hold is suppressed
+    // Holding 3s opens the settings modal; the click that follows the hold is suppressed
     // so it does NOT also run fill/update.
     function attachSettingsLongPress(inputEl) {
         let timer = null;
@@ -1056,7 +1241,7 @@
             timer = setTimeout(function() {
                 fired = true;
                 inputEl.classList.remove('tbf-holding');
-                openAllSettingsDialogs();
+                openSettingsModal();
             }, LONG_PRESS_MS);
         };
         const cancel = function() {
@@ -1090,16 +1275,6 @@
                 e.preventDefault();
             }
         }, true);
-    }
-
-    function setPriceDelta() {
-        let userInput = prompt('Enter price delta formula (default: -1):', priceDeltaRaw);
-        if (userInput !== null) {
-            priceDeltaRaw = userInput;
-            localStorage.setItem("silmaril-torn-bazaar-filler-price-delta", userInput);
-        } else {
-            console.error("[TornBazaarFiller] User cancelled the Price Delta input.");
-        }
     }
 
     function checkApiKey(checkExisting = true) {

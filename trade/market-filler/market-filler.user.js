@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Torn Market Filler
 // @namespace    https://github.com/SOLiNARY
-// @version      0.8.1
-// @description  On "Fill" click autofills market item price with lowest market price minus $1 (customizable), fills max quantity, marks checkboxes for guns. Mark items as favourites (star next to the fill button) and use "Fill All" to auto-fill every favourite row, including ones appearing later when switching categories. Drag the Fill All bar anywhere; drop it near a screen edge to clamp and minimise it — its position and state are remembered.
+// @version      0.9.0
+// @description  On "Fill" click autofills market item price with lowest market price minus $1 (customizable), fills max quantity, marks checkboxes for guns. Hold the fill button for 2s to open the settings modal (price delta, API key, prices popup, and per-category delta overrides — set different discounts/sources for Clothing, Other, Drug, etc.). Mark items as favourites (star next to the fill button) and use "Fill All" to auto-fill every favourite row, including ones appearing later when switching categories. Drag the Fill All bar anywhere; drop it near a screen edge to clamp and minimise it — its position and state are remembered.
 // @author       Silmaril [2665762]
 // @license      MIT License
 // @match        https://www.torn.com/page.php?sid=ItemMarket*
@@ -23,12 +23,8 @@
     showPricesPopup = Boolean(parseInt(showPricesPopup));
     let priceDeltaRaw = localStorage.getItem("silmaril-torn-market-filler-price-delta") ?? localStorage.getItem("silmaril-torn-bazaar-filler-price-delta") ?? '-1[0]';
     let apiKey = localStorage.getItem("silmaril-torn-bazaar-filler-apikey") ?? '###PDA-APIKEY###';
-    let togglePricesPopupMenuId, setPriceDeltaMenuId, setApiKeyMenuId;
-
     try {
-        togglePricesPopupMenuId = GM_registerMenuCommand(`Toggle Prices Popup (${showPricesPopup ? 'ON' : 'OFF'})`, togglePricesPopupVisibility);
-        setPriceDeltaMenuId = GM_registerMenuCommand(`Set Price Delta: ${priceDeltaRaw}`, setPriceDelta);
-        setApiKeyMenuId = GM_registerMenuCommand(`Set Api Key: ${apiKey}`, function() { checkApiKey(false); });
+        GM_registerMenuCommand('Open Settings', openSettingsModal);
     } catch (error) {
         console.warn('[TornMarketFiller] Tampermonkey not detected!');
     }
@@ -41,12 +37,23 @@
     };
     GM_addStyle(`#item-market-root [class^=addListingWrapper___] [class^=panels___] [class^=priceInputWrapper___]>.input-money-group>.input-money,#item-market-root [class^=viewListingWrapper___] [class^=priceInputWrapper___]>.input-money-group>.input-money{font-size:smaller!important;border-bottom-left-radius:0!important;border-top-left-radius:0!important}.silmaril-market-filler-popup{background:var(--tooltip-bg-color);padding:12px 18px;border-radius:8px;border:1px solid #888;box-shadow:0 4px 18px 0 #0009;color:var(--info-msg-font-color);z-index:99999;position:fixed;font-size:1em!important;line-height:1.5;pointer-events:auto}.silmaril-market-filler-popup-close{position:absolute;top:4px;right:7px;font-size:1em;color:#aaa;cursor:pointer}.silmaril-market-filler-popup-draggable{user-select:none;cursor:move}.silmaril-torn-market-filler-popup-price{cursor:pointer}.tmf-fav{cursor:pointer;display:inline-flex;align-items:center;justify-content:center;width:18px;font-size:16px;line-height:1;color:#888;align-self:center;margin-right:2px;user-select:none;-webkit-user-select:none}.tmf-fav.tmf-fav--on{color:gold;text-shadow:0 0 3px rgba(255,215,0,.7)}.tmf-fillall-bar{position:fixed;bottom:110px;right:16px;display:flex;align-items:center;gap:6px;padding:6px 8px;background:rgba(0,0,0,.55);border-radius:20px;z-index:999999;touch-action:none;transition:box-shadow .2s ease}.tmf-fillall-grip{cursor:grab;color:#bbb;font-size:14px;line-height:1;letter-spacing:-2px;min-width:12px;text-align:center;align-self:center;user-select:none;-webkit-user-select:none}.tmf-fillall-bar--dragging{cursor:grabbing;opacity:.92}.tmf-fillall-bar--dragging .tmf-fillall-grip{cursor:grabbing}.tmf-fillall-bar--min{padding:5px 7px;gap:4px}.tmf-fillall-bar--min .tmf-fillall-btn{display:none}.tmf-fillall-bar--min .tmf-fillall-grip{font-size:16px}.tmf-autofill-dot{display:none;width:10px;height:10px;border-radius:50%;background:gold;box-shadow:0 0 4px gold;animation:tmfPulse 1s ease-in-out infinite}.tmf-fillall-bar--active .tmf-autofill-dot{display:inline-block}.tmf-fillall-bar--active{box-shadow:0 0 10px 2px rgba(255,215,0,.75)}@keyframes tmfPulse{0%,100%{opacity:.3;transform:scale(.8)}50%{opacity:1;transform:scale(1.2)}}.tmf-viewport-border{display:none;position:fixed;top:0;right:0;bottom:0;left:0;border:3px solid gold;box-shadow:inset 0 0 12px rgba(255,215,0,.6);pointer-events:none;z-index:999998}.tmf-viewport-border--active{display:block}.tmf-toast{position:fixed;bottom:158px;right:16px;max-width:280px;background:rgba(0,0,0,.85);color:#fff;padding:10px 14px;border-radius:8px;border:1px solid gold;font-size:13px;line-height:1.4;z-index:1000000;opacity:0;visibility:hidden;transition:opacity .3s,visibility .3s}.tmf-toast--visible{opacity:1;visibility:visible}`);
 
+    GM_addStyle(`.tmf-modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:2147483000;justify-content:center;align-items:flex-start;overflow:auto;padding:24px 12px;box-sizing:border-box}.tmf-modal-overlay--open{display:flex}.tmf-modal{background:#1f1f1f;color:#e6e6e6;width:100%;max-width:420px;border:1px solid #666;border-radius:10px;box-shadow:0 10px 40px rgba(0,0,0,.6);padding:16px 18px;box-sizing:border-box;font-size:13px;line-height:1.5}.tmf-modal h3{margin:0 0 12px;font-size:15px;display:flex;justify-content:space-between;align-items:center;color:#fff}.tmf-modal-close{cursor:pointer;color:#bbb;font-size:22px;line-height:1}.tmf-modal label{display:block;margin:10px 0 3px;font-weight:bold;color:#cfcfcf}.tmf-modal input[type=text]{width:100%;box-sizing:border-box;padding:7px 9px;border-radius:5px;border:1px solid #666;background:#111;color:#eee;font-size:13px}.tmf-modal-toggle{display:flex;align-items:center;gap:8px;margin-top:10px;font-weight:bold;color:#cfcfcf}.tmf-modal-toggle input{width:auto}.tmf-modal-cats{margin-top:4px}.tmf-modal-cat-row{display:flex;gap:6px;margin-bottom:6px;align-items:center}.tmf-modal-cat-row .tmf-modal-cat-name{flex:1 1 55%}.tmf-modal-cat-row .tmf-modal-cat-formula{flex:1 1 45%}.tmf-modal-cat-del{cursor:pointer;color:#ff6b6b;font-size:20px;line-height:1;flex:0 0 auto;width:22px;text-align:center}.tmf-modal-addcat{margin-top:2px;cursor:pointer;background:#333;color:#eee;border:1px solid #666;border-radius:5px;padding:5px 10px;font-size:12px}.tmf-modal-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:16px}.tmf-modal-actions button{cursor:pointer;padding:7px 16px;border-radius:5px;border:1px solid #666;background:#333;color:#eee;font-size:13px}.tmf-modal-save{background:#2e7d32!important;border-color:#2e7d32!important;color:#fff!important}.tmf-modal-help{margin-top:12px;font-size:11px;color:#9a9a9a;line-height:1.5}.tmf-modal-help code{background:#000;padding:1px 4px;border-radius:3px;color:#cfc}`);
+
     const pages = { "AddItems": 10, "ViewItems": 20, "Other": 0};
 
     // Favourites are deliberately stored under a market-filler-specific key,
     // separate from the bazaar-filler favourites list.
     const favouritesStorageKey = "silmaril-torn-market-filler-favourites";
     let favourites = loadFavourites();
+
+    // Per-category price-delta overrides + a persistent item→category(type) cache.
+    // Item categories are immutable, so caching them avoids extra API calls when picking
+    // which price source a category's formula needs.
+    const categoryDeltasKey = "silmaril-torn-market-filler-category-deltas";
+    const itemCategoryCacheKey = "silmaril-torn-market-filler-item-categories";
+    const SETTINGS_CATEGORIES = ["Melee","Primary","Secondary","Defensive","Temporary","Drug","Medical","Booster","Energy Drink","Alcohol","Enhancer","Clothing","Jewelry","Material","Flower","Plushie","Car","Supply Pack","Special","Collectible","Artifact","Tool","Other"];
+    let categoryDeltas = loadCategoryDeltas();
+    let itemCategoryCache = loadItemCategoryCache();
 
     // "Fill All" auto-fill mode state. One activation fills each favourite item once;
     // rows appearing later (category/tab switches) are picked up by the mutation observer.
@@ -167,69 +174,127 @@
         }
     }
 
-    async function GetPrices(itemId){
-        let requestUrl = priceDeltaRaw.indexOf('[market]') != -1 ? itemUrl : marketUrlV2;
-        requestUrl = requestUrl
+    function buildPriceUrl(useItems, itemId){
+        return (useItems ? itemUrl : marketUrlV2)
             .replace("{itemId}", itemId)
             .replace("{apiKey}", apiKey);
-        return fetch(requestUrl)
-            .then(response => response.json())
-            .then(data => {
-                if (data.error != null){
-                    switch (data.error.code){
-                        case 2:
-                            apiKey = null;
-                            localStorage.setItem("silmaril-torn-bazaar-filler-apikey", null);
-                            console.error("[TornMarketFiller] Incorrect Api Key:", data);
-                            return {"price": 'Wrong API key!', "amount": 0, "status": 'invalid-key'};
-                        case 5:
-                            console.warn("[TornMarketFiller] API rate limit reached:", data);
-                            return {"price": 'Rate limited!', "amount": 0, "status": 'rate-limited'};
-                        case 9:
-                            console.warn("[TornMarketFiller] The API is temporarily disabled, please try again later");
-                            return {"price": 'API is OFF!', "amount": 0, "status": 'error'};
-                        default:
-                            console.error("[TornMarketFiller] Error:", data.error.error);
-                            return {"price": data.error.error, "amount": 0, "status": 'error'};
-                    }
-                }
-                if (priceDeltaRaw.indexOf('[market]') != -1){
-                    return {"price": data.items[itemId].market_value, "amount": 1};
-                } else {
-                    if (data.itemmarket.listings[0].price == null){
-                        console.warn("[TornMarketFiller] The API is temporarily disabled, please try again later");
-                        return {"price": 'API is OFF!', "amount": 0, "status": 'error'};
-                    }
-                    // temporary hotfix to avoid wrong prices
-                    if (data.itemmarket.item.id != itemId){
-                        return {"price": 'API is BROKEN!', "amount": 0, "status": 'error'};
-                    }
-                    return data.itemmarket.listings;
-                }
-            })
-            .catch(error => {
-                console.error("[TornMarketFiller] Error fetching data:", error);
-                return 'Failed!';
-            });
     }
 
-    function GetPrice(prices){
+    // Maps a Torn API error payload to the popup-friendly {price, amount:0, status} object,
+    // or null when the response carries no error.
+    function mapApiError(data){
+        if (data.error == null){
+            return null;
+        }
+        switch (data.error.code){
+            case 2:
+                apiKey = null;
+                localStorage.setItem("silmaril-torn-bazaar-filler-apikey", null);
+                console.error("[TornMarketFiller] Incorrect Api Key:", data);
+                return {"price": 'Wrong API key!', "amount": 0, "status": 'invalid-key'};
+            case 5:
+                console.warn("[TornMarketFiller] API rate limit reached:", data);
+                return {"price": 'Rate limited!', "amount": 0, "status": 'rate-limited'};
+            case 9:
+                console.warn("[TornMarketFiller] The API is temporarily disabled, please try again later");
+                return {"price": 'API is OFF!', "amount": 0, "status": 'error'};
+            default:
+                console.error("[TornMarketFiller] Error:", data.error.error);
+                return {"price": data.error.error, "amount": 0, "status": 'error'};
+        }
+    }
+
+    // Turns a (non-error) response into the price shape consumed by GetPrice/GetPricesBreakdown:
+    // a {price, amount:1} object for the [market] source, otherwise the listings array.
+    function parsePrices(data, itemId, useItems){
+        if (useItems){
+            return {"price": data.items[itemId].market_value, "amount": 1};
+        }
+        if (data.itemmarket.listings[0].price == null){
+            console.warn("[TornMarketFiller] The API is temporarily disabled, please try again later");
+            return {"price": 'API is OFF!', "amount": 0, "status": 'error'};
+        }
+        // temporary hotfix to avoid wrong prices
+        if (data.itemmarket.item.id != itemId){
+            return {"price": 'API is BROKEN!', "amount": 0, "status": 'error'};
+        }
+        return data.itemmarket.listings;
+    }
+
+    function readCategoryFromData(data, itemId, useItems){
+        try {
+            if (useItems){
+                return (data.items && data.items[itemId]) ? (data.items[itemId].type ?? null) : null;
+            }
+            return (data.itemmarket && data.itemmarket.item) ? (data.itemmarket.item.type ?? null) : null;
+        } catch (error) {
+            return null;
+        }
+    }
+
+    // Resolve the formula to use for an item: a per-category override (matched on the item's
+    // type, case-insensitively) if set, otherwise the global default.
+    function getEffectiveDelta(category){
+        if (category != null){
+            let override = categoryDeltas[String(category).trim().toLowerCase()];
+            if (override != null && String(override).trim() !== ''){
+                return String(override).trim();
+            }
+        }
+        return priceDeltaRaw;
+    }
+
+    // Fetch pricing for an item using the price source its (possibly per-category) formula needs.
+    // The item's category is read from the first response and cached; only the first ever fill of
+    // an item whose category overrides the source costs a second request. Returns {prices, formula}.
+    async function fetchPricingForItem(itemId){
+        try {
+            let knownCategory = itemCategoryCache[itemId];
+            let firstFormula = getEffectiveDelta(knownCategory);
+            let firstUseItems = firstFormula.indexOf('[market]') != -1;
+            let data = await fetch(buildPriceUrl(firstUseItems, itemId)).then(response => response.json());
+            let error = mapApiError(data);
+            if (error != null){
+                return { prices: error, formula: firstFormula };
+            }
+            let category = knownCategory != null ? knownCategory : readCategoryFromData(data, itemId, firstUseItems);
+            if (category != null && knownCategory == null){
+                cacheItemCategory(itemId, category);
+            }
+            let formula = getEffectiveDelta(category);
+            let useItems = formula.indexOf('[market]') != -1;
+            if (useItems !== firstUseItems){
+                data = await fetch(buildPriceUrl(useItems, itemId)).then(response => response.json());
+                let error2 = mapApiError(data);
+                if (error2 != null){
+                    return { prices: error2, formula: formula };
+                }
+            }
+            return { prices: parsePrices(data, itemId, useItems), formula: formula };
+        } catch (error) {
+            console.error("[TornMarketFiller] Error fetching data:", error);
+            return { prices: 'Failed!', formula: priceDeltaRaw };
+        }
+    }
+
+    function GetPrice(prices, formula){
         if (prices == null){
             return 'No prices loaded';
         }
         if (prices.amount == 0){
             return prices.price;
         }
-        if (priceDeltaRaw.indexOf('[market]') != -1) {
+        if (formula.indexOf('[market]') != -1) {
             prices = Array(prices);
-            let priceDelta = priceDeltaRaw.indexOf('[') == -1 ? priceDeltaRaw : priceDeltaRaw.substring(0, priceDeltaRaw.indexOf('['));
+            let priceDelta = formula.indexOf('[') == -1 ? formula : formula.substring(0, formula.indexOf('['));
             return Math.round(performOperation(prices[0].price, priceDelta));
-        } else if (priceDeltaRaw.indexOf('[median]') != -1) {
-            let priceDelta = priceDeltaRaw.indexOf('[') == -1 ? priceDeltaRaw : priceDeltaRaw.substring(0, priceDeltaRaw.indexOf('['));
+        } else if (formula.indexOf('[median]') != -1) {
+            let priceDelta = formula.indexOf('[') == -1 ? formula : formula.substring(0, formula.indexOf('['));
             return Math.round(performOperation(getMedianPrice(prices), priceDelta));
         } else {
-            let marketSlotOffset = priceDeltaRaw.indexOf('[') == -1 ? 0 : parseInt(priceDeltaRaw.substring(priceDeltaRaw.indexOf('[') + 1, priceDeltaRaw.indexOf(']')));
-            let priceDeltaWithoutMarketOffset = priceDeltaRaw.indexOf('[') == -1 ? priceDeltaRaw : priceDeltaRaw.substring(0, priceDeltaRaw.indexOf('['));
+            let marketSlotOffset = formula.indexOf('[') == -1 ? 0 : parseInt(formula.substring(formula.indexOf('[') + 1, formula.indexOf(']')));
+            if (isNaN(marketSlotOffset)) { marketSlotOffset = 0; }
+            let priceDeltaWithoutMarketOffset = formula.indexOf('[') == -1 ? formula : formula.substring(0, formula.indexOf('['));
             return Math.round(performOperation(prices[Math.min(marketSlotOffset, prices.length - 1)].price, priceDeltaWithoutMarketOffset));
         }
     }
@@ -296,7 +361,8 @@
         }
 
         let action = target.getAttribute('data-action-flag');
-        let prices = await GetPrices(itemId);
+        let pricing = await fetchPricingForItem(itemId);
+        let prices = pricing.prices;
         let status = getPricesStatus(prices);
 
         if (showPopup) {
@@ -308,7 +374,7 @@
             return status;
         }
 
-        let price = action == 'fill' ? GetPrice(prices) : '';
+        let price = action == 'fill' ? GetPrice(prices, pricing.formula) : '';
         switchActionFlag(target);
         let parentRow = findParentByCondition(target, (el) => String(el.className).indexOf('info___') > -1);
         let quantityInputs = parentRow.querySelectorAll('[class^=amountInputWrapper___] .input-money-group > .input-money');
@@ -881,14 +947,137 @@
         return min + Math.random() * (max - min);
     }
 
-    function setPriceDelta() {
-        let userInput = prompt('Enter price delta formula (default: -1[0]):', priceDeltaRaw);
-        if (userInput !== null) {
-            priceDeltaRaw = userInput;
-            localStorage.setItem("silmaril-torn-market-filler-price-delta", userInput);
-        } else {
-            console.error("[TornMarketFiller] User cancelled the Price Delta input.");
+    function loadCategoryDeltas(){
+        try {
+            let parsed = JSON.parse(localStorage.getItem(categoryDeltasKey) ?? "{}");
+            return (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) ? parsed : {};
+        } catch (error) {
+            console.error("[TornMarketFiller] Failed to load category deltas:", error);
+            return {};
         }
+    }
+
+    function saveCategoryDeltas(){
+        localStorage.setItem(categoryDeltasKey, JSON.stringify(categoryDeltas));
+    }
+
+    function loadItemCategoryCache(){
+        try {
+            let parsed = JSON.parse(localStorage.getItem(itemCategoryCacheKey) ?? "{}");
+            return (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) ? parsed : {};
+        } catch (error) {
+            return {};
+        }
+    }
+
+    function cacheItemCategory(itemId, type){
+        itemCategoryCache[itemId] = type;
+        try {
+            localStorage.setItem(itemCategoryCacheKey, JSON.stringify(itemCategoryCache));
+        } catch (error) {
+            // Ignore storage quota errors; the in-memory cache still helps this session.
+        }
+    }
+
+    function ensureSettingsModal(){
+        if (document.querySelector('.tmf-modal-overlay') != null){
+            return;
+        }
+        const overlay = document.createElement('div');
+        overlay.className = 'tmf-modal-overlay';
+        overlay.innerHTML =
+            '<div class="tmf-modal">' +
+                '<h3>Market Filler Settings<span class="tmf-modal-close" title="Close">&times;</span></h3>' +
+                '<label>Default price delta</label>' +
+                '<input type="text" class="tmf-modal-delta" placeholder="-1[0]">' +
+                '<label>Public API key</label>' +
+                '<input type="text" class="tmf-modal-apikey" placeholder="16-character key">' +
+                '<label class="tmf-modal-toggle"><input type="checkbox" class="tmf-modal-popup">Show lowest-prices popup</label>' +
+                '<label>Per-category overrides</label>' +
+                '<div class="tmf-modal-cats"></div>' +
+                '<button type="button" class="tmf-modal-addcat">+ Add category</button>' +
+                '<div class="tmf-modal-actions">' +
+                    '<button type="button" class="tmf-modal-cancel">Cancel</button>' +
+                    '<button type="button" class="tmf-modal-save">Save</button>' +
+                '</div>' +
+                '<div class="tmf-modal-help">Examples: <code>-1[0]</code> (lowest − $1), <code>-5%</code>, <code>-1[1]</code> (2nd lowest listing), <code>[market]</code> (item market value), <code>-1[median]</code> (median listing). Category rows accept the same syntax — including a different source — and fall back to the default when blank.</div>' +
+            '</div>' +
+            '<datalist id="tmf-modal-cat-list">' + SETTINGS_CATEGORIES.map(c => '<option value="' + c + '"></option>').join('') + '</datalist>';
+        document.body.appendChild(overlay);
+
+        overlay.querySelector('.tmf-modal-close').addEventListener('click', closeSettingsModal);
+        overlay.querySelector('.tmf-modal-cancel').addEventListener('click', closeSettingsModal);
+        overlay.addEventListener('click', function(event){ if (event.target === overlay){ closeSettingsModal(); } });
+        overlay.querySelector('.tmf-modal-addcat').addEventListener('click', function(){ addCategoryRow('', ''); });
+        overlay.querySelector('.tmf-modal-save').addEventListener('click', saveSettingsModal);
+    }
+
+    function addCategoryRow(name, formula){
+        const list = document.querySelector('.tmf-modal-cats');
+        if (list == null){
+            return;
+        }
+        const row = document.createElement('div');
+        row.className = 'tmf-modal-cat-row';
+        row.innerHTML =
+            '<input type="text" class="tmf-modal-cat-name" list="tmf-modal-cat-list" placeholder="Category">' +
+            '<input type="text" class="tmf-modal-cat-formula" placeholder="-5%">' +
+            '<span class="tmf-modal-cat-del" title="Remove">&times;</span>';
+        row.querySelector('.tmf-modal-cat-name').value = name;
+        row.querySelector('.tmf-modal-cat-formula').value = formula;
+        row.querySelector('.tmf-modal-cat-del').addEventListener('click', function(){ row.remove(); });
+        list.appendChild(row);
+    }
+
+    function openSettingsModal(){
+        ensureSettingsModal();
+        const overlay = document.querySelector('.tmf-modal-overlay');
+        overlay.querySelector('.tmf-modal-delta').value = priceDeltaRaw;
+        overlay.querySelector('.tmf-modal-apikey').value = (apiKey != null && apiKey.indexOf('PDA-APIKEY') === -1) ? apiKey : '';
+        overlay.querySelector('.tmf-modal-popup').checked = showPricesPopup;
+        const list = overlay.querySelector('.tmf-modal-cats');
+        list.innerHTML = '';
+        Object.keys(categoryDeltas).forEach(function(key){ addCategoryRow(key, categoryDeltas[key]); });
+        overlay.classList.add('tmf-modal-overlay--open');
+    }
+
+    function closeSettingsModal(){
+        const overlay = document.querySelector('.tmf-modal-overlay');
+        if (overlay != null){
+            overlay.classList.remove('tmf-modal-overlay--open');
+        }
+    }
+
+    function saveSettingsModal(){
+        const overlay = document.querySelector('.tmf-modal-overlay');
+        if (overlay == null){
+            return;
+        }
+        let deltaVal = overlay.querySelector('.tmf-modal-delta').value.trim();
+        if (deltaVal !== ''){
+            priceDeltaRaw = deltaVal;
+            localStorage.setItem("silmaril-torn-market-filler-price-delta", priceDeltaRaw);
+        }
+        let keyVal = overlay.querySelector('.tmf-modal-apikey').value.trim();
+        if (keyVal.length === 16){
+            apiKey = keyVal;
+            localStorage.setItem("silmaril-torn-bazaar-filler-apikey", keyVal);
+        } else if (keyVal !== ''){
+            console.warn("[TornMarketFiller] API key must be 16 characters; ignored.");
+        }
+        showPricesPopup = overlay.querySelector('.tmf-modal-popup').checked;
+        localStorage.setItem('silmaril-torn-market-filler-show-prices-popup', showPricesPopup ? '1' : '0');
+        let map = {};
+        overlay.querySelectorAll('.tmf-modal-cat-row').forEach(function(row){
+            let name = row.querySelector('.tmf-modal-cat-name').value.trim().toLowerCase();
+            let formula = row.querySelector('.tmf-modal-cat-formula').value.trim();
+            if (name !== '' && formula !== ''){
+                map[name] = formula;
+            }
+        });
+        categoryDeltas = map;
+        saveCategoryDeltas();
+        closeSettingsModal();
     }
 
     function GetPricesBreakdown(prices){
@@ -942,26 +1131,6 @@
         }
     }
 
-    function askForPricesPopupFlag() {
-        let dsf = null;
-        let userInput = prompt("Please choose to show or hide the lowest 5 prices popup, enter 1 to SHOW or 0 to HIDE:", showPricesPopup ? '1' : '0');
-        if (userInput !== null && userInput.length == 1) {
-            if (userInput != '1' && userInput != '0'){
-                console.error("[TornMarketFiller] User entered invalid value for the Prices Popup input.");
-                return;
-            }
-            showPricesPopup = Boolean(parseInt(userInput));
-            localStorage.setItem('silmaril-torn-market-filler-show-prices-popup', showPricesPopup ? '1' : '0');
-        } else {
-            console.error("[TornMarketFiller] User cancelled the Prices Popup input.");
-        }
-    }
-
-    function togglePricesPopupVisibility() {
-        showPricesPopup = !showPricesPopup;
-        localStorage.setItem('silmaril-torn-market-filler-show-prices-popup', showPricesPopup ? '1' : '0');
-    }
-
     function getMedianPrice(items) {
         const prices = items.flatMap(item => Array(item.amount).fill(item.price));
         prices.sort((a, b) => a - b);
@@ -1000,9 +1169,7 @@
 
     const startHold = () => {
         holdTimer = setTimeout(() => {
-            askForPricesPopupFlag();
-            setPriceDelta();
-            checkApiKey(false);
+            openSettingsModal();
         }, 2000);
     };
 
