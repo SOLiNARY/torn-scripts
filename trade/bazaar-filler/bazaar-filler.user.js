@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Bazaar Filler
 // @namespace    https://github.com/SOLiNARY
-// @version      1.5.0
+// @version      1.5.1
 // @description  On "Fill" click autofills bazaar item price with lowest market price currently minus $1 (can be customised), shows current price coefficient compared to 3rd lowest, fills max quantity for items, marks checkboxes for guns. Hold a Fill/Update button for 3s to open the settings modal (price delta, API key, and per-category delta overrides — set different discounts/sources for Clothing, Other, Drug, etc.). Mark items as favourites (star next to Fill) and use "Fill All" to auto-fill every favourite row, including ones appearing later via infinite scroll or category switches. Drag the Fill All bar anywhere; drop it near a screen edge to clamp and minimise it — its position and state are remembered.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT License
@@ -38,7 +38,7 @@
 
     GM_addStyle(`.btn-wrap.torn-bazaar-fill-qty-price{float:right;margin-left:auto;z-index:99999}.btn-wrap.torn-bazaar-clear-qty-price{z-index:99999}div.title-wrap div.name-wrap{display:flex;justify-content:flex-end}.wave-animation{position:relative;overflow:hidden}.wave{pointer-events:none;position:absolute;width:100%;height:33px;background-color:transparent;opacity:0;transform:translateX(-100%);animation:waveAnimation 1s cubic-bezier(0, 0, 0, 1)}@keyframes waveAnimation{0%{opacity:1;transform:translateX(-100%)}100%{opacity:0;transform:translateX(100%)}}.overlay-percentage{position:absolute;top:0;background-color:rgba(0, 0, 0, 0.9);padding:0 5px;border-radius:15px;font-size:10px}.overlay-percentage-add{right:-30px}.overlay-percentage-manage{right:0}.torn-bazaar-fill-qty-price input{-webkit-touch-callout:none;-webkit-user-select:none;user-select:none;transition:box-shadow 0s}.torn-bazaar-fill-qty-price input.tbf-holding{box-shadow:inset 0 0 0 40px rgba(0,180,255,.35);transition:box-shadow 3s linear}.tbf-fav{cursor:pointer;font-size:16px;line-height:1;margin-left:auto;margin-right:6px;width:16px;text-align:center;color:#888;align-self:center;user-select:none;-webkit-user-select:none;z-index:99999}.tbf-fav~.btn-wrap.torn-bazaar-fill-qty-price{margin-left:0}.tbf-fav.tbf-fav--on{color:gold;text-shadow:0 0 3px rgba(255,215,0,.7)}.tbf-fillall-bar{position:fixed;bottom:110px;right:16px;display:flex;align-items:center;gap:6px;padding:6px 8px;background:rgba(0,0,0,.55);border-radius:20px;z-index:999999;touch-action:none;transition:box-shadow .2s ease}.tbf-fillall-grip{cursor:grab;color:#bbb;font-size:14px;line-height:1;letter-spacing:-2px;min-width:12px;text-align:center;align-self:center;user-select:none;-webkit-user-select:none}.tbf-fillall-bar--dragging{cursor:grabbing;opacity:.92}.tbf-fillall-bar--dragging .tbf-fillall-grip{cursor:grabbing}.tbf-fillall-bar--min{padding:5px 7px;gap:4px}.tbf-fillall-bar--min .tbf-fillall-btn{display:none}.tbf-fillall-bar--min .tbf-fillall-grip{font-size:16px}.tbf-autofill-dot{display:none;width:10px;height:10px;border-radius:50%;background:gold;box-shadow:0 0 4px gold;animation:tbfPulse 1s ease-in-out infinite}.tbf-fillall-bar--active .tbf-autofill-dot{display:inline-block}.tbf-fillall-bar--active{box-shadow:0 0 10px 2px rgba(255,215,0,.75)}@keyframes tbfPulse{0%,100%{opacity:.3;transform:scale(.8)}50%{opacity:1;transform:scale(1.2)}}.tbf-viewport-border{display:none;position:fixed;top:0;right:0;bottom:0;left:0;border:3px solid gold;box-shadow:inset 0 0 12px rgba(255,215,0,.6);pointer-events:none;z-index:999998}.tbf-viewport-border--active{display:block}.tbf-toast{position:fixed;bottom:158px;right:16px;max-width:280px;background:rgba(0,0,0,.85);color:#fff;padding:10px 14px;border-radius:8px;border:1px solid gold;font-size:13px;line-height:1.4;z-index:1000000;opacity:0;visibility:hidden;transition:opacity .3s,visibility .3s}.tbf-toast--visible{opacity:1;visibility:visible}`);
 
-    GM_addStyle(`.tbf-modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:2147483000;justify-content:center;align-items:flex-start;overflow:auto;padding:24px 12px;box-sizing:border-box}.tbf-modal-overlay--open{display:flex}.tbf-modal{background:#1f1f1f;color:#e6e6e6;width:100%;max-width:420px;border:1px solid #666;border-radius:10px;box-shadow:0 10px 40px rgba(0,0,0,.6);padding:16px 18px;box-sizing:border-box;font-size:13px;line-height:1.5}.tbf-modal h3{margin:0 0 12px;font-size:15px;display:flex;justify-content:space-between;align-items:center;color:#fff}.tbf-modal-close{cursor:pointer;color:#bbb;font-size:22px;line-height:1}.tbf-modal label{display:block;margin:10px 0 3px;font-weight:bold;color:#cfcfcf}.tbf-modal input[type=text]{width:100%;box-sizing:border-box;padding:7px 9px;border-radius:5px;border:1px solid #666;background:#111;color:#eee;font-size:13px}.tbf-modal-cats{margin-top:4px}.tbf-modal-cat-row{display:flex;gap:6px;margin-bottom:6px;align-items:center}.tbf-modal-cat-row .tbf-modal-cat-name{flex:1 1 55%}.tbf-modal-cat-row .tbf-modal-cat-formula{flex:1 1 45%}.tbf-modal-cat-del{cursor:pointer;color:#ff6b6b;font-size:20px;line-height:1;flex:0 0 auto;width:22px;text-align:center}.tbf-modal-addcat{margin-top:2px;cursor:pointer;background:#333;color:#eee;border:1px solid #666;border-radius:5px;padding:5px 10px;font-size:12px}.tbf-modal-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:16px}.tbf-modal-actions button{cursor:pointer;padding:7px 16px;border-radius:5px;border:1px solid #666;background:#333;color:#eee;font-size:13px}.tbf-modal-save{background:#2e7d32!important;border-color:#2e7d32!important;color:#fff!important}.tbf-modal-help{margin-top:12px;font-size:11px;color:#9a9a9a;line-height:1.5}.tbf-modal-help code{background:#000;padding:1px 4px;border-radius:3px;color:#cfc}`);
+    GM_addStyle(`.tbf-modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:2147483000;justify-content:center;align-items:flex-start;overflow:auto;padding:24px 12px;box-sizing:border-box}.tbf-modal-overlay--open{display:flex}.tbf-modal{background:#1f1f1f;color:#e6e6e6;width:100%;max-width:420px;border:1px solid #666;border-radius:10px;box-shadow:0 10px 40px rgba(0,0,0,.6);padding:16px 18px;box-sizing:border-box;font-size:13px;line-height:1.5}.tbf-modal h3{margin:0 0 12px;font-size:15px;display:flex;justify-content:space-between;align-items:center;color:#fff}.tbf-modal-close{cursor:pointer;color:#bbb;font-size:22px;line-height:1}.tbf-modal label{display:block;margin:10px 0 3px;font-weight:bold;color:#cfcfcf}.tbf-modal input[type=text]{width:100%;box-sizing:border-box;padding:7px 9px;border-radius:5px;border:1px solid #666;background:#111;color:#eee;font-size:13px}.tbf-modal-cats{margin-top:4px}.tbf-modal-cat-row{display:flex;gap:6px;margin-bottom:6px;align-items:center}.tbf-modal-cat-row .tbf-modal-cat-name{flex:1 1 55%}.tbf-modal-cat-row .tbf-modal-cat-formula{flex:1 1 45%}.tbf-modal-cat-del{cursor:pointer;color:#ff6b6b;font-size:20px;line-height:1;flex:0 0 auto;width:22px;text-align:center}.tbf-modal-addcat{margin-top:2px;cursor:pointer;background:#333;color:#eee;border:1px solid #666;border-radius:5px;padding:5px 10px;font-size:12px}.tbf-modal-resetcat{margin:2px 0 0 8px;cursor:pointer;background:#3a2a2a;color:#ddd;border:1px solid #774;border-radius:5px;padding:5px 10px;font-size:12px}.tbf-modal-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:16px}.tbf-modal-actions button{cursor:pointer;padding:7px 16px;border-radius:5px;border:1px solid #666;background:#333;color:#eee;font-size:13px}.tbf-modal-save{background:#2e7d32!important;border-color:#2e7d32!important;color:#fff!important}.tbf-modal-help{margin-top:12px;font-size:11px;color:#9a9a9a;line-height:1.5}.tbf-modal-help code{background:#000;padding:1px 4px;border-radius:3px;color:#cfc}`);
 
     const favouritesStorageKey = "silmaril-torn-bazaar-filler-favourites";
     let favourites = loadFavourites();
@@ -48,6 +48,9 @@
     // which price source a category's formula needs.
     const categoryDeltasKey = "silmaril-torn-bazaar-filler-category-deltas";
     const itemCategoryCacheKey = "silmaril-torn-bazaar-filler-item-categories";
+    // Item types are mostly immutable but Torn occasionally recategorises an item, so cached
+    // categories are re-verified from each response and forcibly refreshed once past this TTL.
+    const CATEGORY_TTL_MS = 14 * 24 * 60 * 60 * 1000;
     const SETTINGS_CATEGORIES = ["Melee","Primary","Secondary","Defensive","Temporary","Drug","Medical","Booster","Energy Drink","Alcohol","Enhancer","Clothing","Jewelry","Material","Flower","Plushie","Car","Supply Pack","Special","Collectible","Artifact","Tool","Other"];
     let categoryDeltas = loadCategoryDeltas();
     let itemCategoryCache = loadItemCategoryCache();
@@ -1064,12 +1067,37 @@
         }
     }
 
+    // Returns the cached {type, ts} for an item, normalising legacy bare-string entries
+    // (which predate timestamps) to an immediately-stale ts so they get re-verified.
+    function getCachedCategory(itemId){
+        let entry = itemCategoryCache[itemId];
+        if (entry == null){
+            return null;
+        }
+        if (typeof entry === 'string'){
+            return { type: entry, ts: 0 };
+        }
+        if (typeof entry === 'object' && typeof entry.type === 'string'){
+            return { type: entry.type, ts: typeof entry.ts === 'number' ? entry.ts : 0 };
+        }
+        return null;
+    }
+
     function cacheItemCategory(itemId, type){
-        itemCategoryCache[itemId] = type;
+        itemCategoryCache[itemId] = { type: type, ts: Date.now() };
         try {
             localStorage.setItem(itemCategoryCacheKey, JSON.stringify(itemCategoryCache));
         } catch (error) {
             // Ignore storage quota errors; the in-memory cache still helps this session.
+        }
+    }
+
+    function clearItemCategoryCache(){
+        itemCategoryCache = {};
+        try {
+            localStorage.removeItem(itemCategoryCacheKey);
+        } catch (error) {
+            // Ignore storage errors; the in-memory cache is cleared regardless.
         }
     }
 
@@ -1102,20 +1130,33 @@
         }
     }
 
-    // Fetch pricing data for an item using the price source its (possibly per-category)
-    // formula needs. The item's category is read from the first response and cached; only the
-    // first ever fill of an item whose category overrides the source costs a second request.
+    // Fetch pricing data for an item using the price source its (possibly per-category) formula
+    // needs. The cached category is only a hint for which endpoint to hit first: the true type is
+    // re-read from every response and the cache self-corrects, so a rare Torn recategorisation is
+    // picked up on the next fill. Past the TTL we refresh via the items endpoint (always carries
+    // type). Only the first fill after a change whose category also flips the source costs 2 calls.
     async function fetchPricingForItem(itemId){
-        let knownCategory = itemCategoryCache[itemId];
-        let firstFormula = getEffectiveDelta(knownCategory);
-        let firstUseItems = firstFormula.indexOf('[market]') != -1;
+        // No per-category overrides → category is irrelevant; behave exactly like the default path.
+        if (Object.keys(categoryDeltas).length === 0){
+            let useItems = priceDeltaRaw.indexOf('[market]') != -1;
+            let data = await fetch(buildPriceUrl(useItems, itemId)).then(response => response.json());
+            return { data: data, formula: priceDeltaRaw, useItems: useItems };
+        }
+
+        let cached = getCachedCategory(itemId);
+        let expired = cached == null || (Date.now() - cached.ts) > CATEGORY_TTL_MS;
+        let guessCategory = cached != null ? cached.type : null;
+        // When stale/unknown, force the items endpoint so we definitively re-learn the type even if
+        // the listings response omits it; otherwise guess from the cached category to stay 1 call.
+        let firstUseItems = expired ? true : (getEffectiveDelta(guessCategory).indexOf('[market]') != -1);
         let data = await fetch(buildPriceUrl(firstUseItems, itemId)).then(response => response.json());
         if (data.error != null){
-            return { data: data, formula: firstFormula, useItems: firstUseItems };
+            return { data: data, formula: getEffectiveDelta(guessCategory), useItems: firstUseItems };
         }
-        let category = knownCategory != null ? knownCategory : readCategoryFromData(data, itemId, firstUseItems);
-        if (category != null && knownCategory == null){
-            cacheItemCategory(itemId, category);
+        let actualType = readCategoryFromData(data, itemId, firstUseItems);
+        let category = actualType != null ? actualType : guessCategory;
+        if (actualType != null && (cached == null || cached.type !== actualType || expired)){
+            cacheItemCategory(itemId, actualType);
         }
         let formula = getEffectiveDelta(category);
         let useItems = formula.indexOf('[market]') != -1;
@@ -1142,6 +1183,7 @@
                 '<label>Per-category overrides</label>' +
                 '<div class="tbf-modal-cats"></div>' +
                 '<button type="button" class="tbf-modal-addcat">+ Add category</button>' +
+                '<button type="button" class="tbf-modal-resetcat" title="Forget cached item categories. Use if Torn recategorised an item and a wrong discount is being applied.">Reset learned categories</button>' +
                 '<div class="tbf-modal-actions">' +
                     '<button type="button" class="tbf-modal-cancel">Cancel</button>' +
                     '<button type="button" class="tbf-modal-save">Save</button>' +
@@ -1155,6 +1197,12 @@
         overlay.querySelector('.tbf-modal-cancel').addEventListener('click', closeSettingsModal);
         overlay.addEventListener('click', function(event){ if (event.target === overlay){ closeSettingsModal(); } });
         overlay.querySelector('.tbf-modal-addcat').addEventListener('click', function(){ addCategoryRow('', ''); });
+        overlay.querySelector('.tbf-modal-resetcat').addEventListener('click', function(event){
+            clearItemCategoryCache();
+            let btn = event.target;
+            btn.textContent = 'Cleared ✓';
+            setTimeout(function(){ btn.textContent = 'Reset learned categories'; }, 1500);
+        });
         overlay.querySelector('.tbf-modal-save').addEventListener('click', saveSettingsModal);
     }
 
