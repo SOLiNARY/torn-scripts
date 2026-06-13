@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Bazaar Filler
 // @namespace    https://github.com/SOLiNARY
-// @version      1.3.4
+// @version      1.3.5
 // @description  On "Fill" click autofills bazaar item price with lowest market price currently minus $1 (can be customised), shows current price coefficient compared to 3rd lowest, fills max quantity for items, marks checkboxes for guns. Hold a Fill/Update button for 3s to open the Price Delta and API Key settings dialogs. Mark items as favourites (star next to Fill) and use "Fill All" to auto-fill every favourite row, including ones appearing later via infinite scroll or category switches.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT License
@@ -37,7 +37,7 @@
         document.head.appendChild(style);
     };
 
-    GM_addStyle(`.btn-wrap.torn-bazaar-fill-qty-price{float:right;margin-left:auto;z-index:99999}.btn-wrap.torn-bazaar-clear-qty-price{z-index:99999}div.title-wrap div.name-wrap{display:flex;justify-content:flex-end}.wave-animation{position:relative;overflow:hidden}.wave{pointer-events:none;position:absolute;width:100%;height:33px;background-color:transparent;opacity:0;transform:translateX(-100%);animation:waveAnimation 1s cubic-bezier(0, 0, 0, 1)}@keyframes waveAnimation{0%{opacity:1;transform:translateX(-100%)}100%{opacity:0;transform:translateX(100%)}}.overlay-percentage{position:absolute;top:0;background-color:rgba(0, 0, 0, 0.9);padding:0 5px;border-radius:15px;font-size:10px}.overlay-percentage-add{right:-30px}.overlay-percentage-manage{right:0}.torn-bazaar-fill-qty-price input{-webkit-touch-callout:none;-webkit-user-select:none;user-select:none;transition:box-shadow 0s}.torn-bazaar-fill-qty-price input.tbf-holding{box-shadow:inset 0 0 0 40px rgba(0,180,255,.35);transition:box-shadow 3s linear}.tbf-fav{cursor:pointer;font-size:16px;line-height:1;margin-left:auto;margin-right:6px;width:16px;text-align:center;color:#888;align-self:center;user-select:none;-webkit-user-select:none;z-index:99999}.tbf-fav~.btn-wrap.torn-bazaar-fill-qty-price{margin-left:0}.tbf-fav.tbf-fav--on{color:gold;text-shadow:0 0 3px rgba(255,215,0,.7)}.tbf-fillall-bar{position:fixed;bottom:16px;right:16px;display:flex;align-items:center;gap:6px;padding:6px 8px;background:rgba(0,0,0,.55);border-radius:20px;z-index:999999}@media (max-width:784px){.tbf-fillall-bar{bottom:110px}}.tbf-autofill-dot{display:none;width:10px;height:10px;border-radius:50%;background:gold;box-shadow:0 0 4px gold;animation:tbfPulse 1s ease-in-out infinite}.tbf-fillall-bar--active .tbf-autofill-dot{display:inline-block}.tbf-fillall-bar--active .tbf-fillall-btn{box-shadow:0 0 5px gold}@keyframes tbfPulse{0%,100%{opacity:.3;transform:scale(.8)}50%{opacity:1;transform:scale(1.2)}}.tbf-viewport-border{display:none;position:fixed;top:0;right:0;bottom:0;left:0;border:3px solid gold;box-shadow:inset 0 0 12px rgba(255,215,0,.6);pointer-events:none;z-index:999998}.tbf-viewport-border--active{display:block}.tbf-toast{position:fixed;bottom:64px;right:16px;max-width:280px;background:rgba(0,0,0,.85);color:#fff;padding:10px 14px;border-radius:8px;border:1px solid gold;font-size:13px;line-height:1.4;z-index:1000000;opacity:0;visibility:hidden;transition:opacity .3s,visibility .3s}@media (max-width:784px){.tbf-toast{bottom:158px}}.tbf-toast--visible{opacity:1;visibility:visible}`);
+    GM_addStyle(`.btn-wrap.torn-bazaar-fill-qty-price{float:right;margin-left:auto;z-index:99999}.btn-wrap.torn-bazaar-clear-qty-price{z-index:99999}div.title-wrap div.name-wrap{display:flex;justify-content:flex-end}.wave-animation{position:relative;overflow:hidden}.wave{pointer-events:none;position:absolute;width:100%;height:33px;background-color:transparent;opacity:0;transform:translateX(-100%);animation:waveAnimation 1s cubic-bezier(0, 0, 0, 1)}@keyframes waveAnimation{0%{opacity:1;transform:translateX(-100%)}100%{opacity:0;transform:translateX(100%)}}.overlay-percentage{position:absolute;top:0;background-color:rgba(0, 0, 0, 0.9);padding:0 5px;border-radius:15px;font-size:10px}.overlay-percentage-add{right:-30px}.overlay-percentage-manage{right:0}.torn-bazaar-fill-qty-price input{-webkit-touch-callout:none;-webkit-user-select:none;user-select:none;transition:box-shadow 0s}.torn-bazaar-fill-qty-price input.tbf-holding{box-shadow:inset 0 0 0 40px rgba(0,180,255,.35);transition:box-shadow 3s linear}.tbf-fav{cursor:pointer;font-size:16px;line-height:1;margin-left:auto;margin-right:6px;width:16px;text-align:center;color:#888;align-self:center;user-select:none;-webkit-user-select:none;z-index:99999}.tbf-fav~.btn-wrap.torn-bazaar-fill-qty-price{margin-left:0}.tbf-fav.tbf-fav--on{color:gold;text-shadow:0 0 3px rgba(255,215,0,.7)}.tbf-fillall-bar{position:fixed;bottom:110px;right:16px;display:flex;align-items:center;gap:6px;padding:6px 8px;background:rgba(0,0,0,.55);border-radius:20px;z-index:999999}.tbf-autofill-dot{display:none;width:10px;height:10px;border-radius:50%;background:gold;box-shadow:0 0 4px gold;animation:tbfPulse 1s ease-in-out infinite}.tbf-fillall-bar--active .tbf-autofill-dot{display:inline-block}.tbf-fillall-bar--active .tbf-fillall-btn{box-shadow:0 0 5px gold}@keyframes tbfPulse{0%,100%{opacity:.3;transform:scale(.8)}50%{opacity:1;transform:scale(1.2)}}.tbf-viewport-border{display:none;position:fixed;top:0;right:0;bottom:0;left:0;border:3px solid gold;box-shadow:inset 0 0 12px rgba(255,215,0,.6);pointer-events:none;z-index:999998}.tbf-viewport-border--active{display:block}.tbf-toast{position:fixed;bottom:158px;right:16px;max-width:280px;background:rgba(0,0,0,.85);color:#fff;padding:10px 14px;border-radius:8px;border:1px solid gold;font-size:13px;line-height:1.4;z-index:1000000;opacity:0;visibility:hidden;transition:opacity .3s,visibility .3s}.tbf-toast--visible{opacity:1;visibility:visible}`);
 
     const favouritesStorageKey = "silmaril-torn-bazaar-filler-favourites";
     let favourites = loadFavourites();
@@ -54,6 +54,9 @@
     let autoFillQueuedIds = new Set();
     let autoFillDoneIds = new Set();
     let toastTimer = null;
+    // Set once Torn's chat z-index is detected, so our floating UI sits just below the
+    // chat (an open chat window covers it instead of the button overshadowing the chat).
+    let chatRelativeZBase = null;
 
     const pages = { "AddItems": 10, "ManageItems": 20};
     const addItemsLabels = ["Fill", "Clear"];
@@ -598,7 +601,47 @@
             border.className = 'tbf-viewport-border';
             document.body.appendChild(border);
         }
+        applyChatRelativeZIndex();
         updateAutoFillUI();
+    }
+
+    // Torn's chat is a body-level overlay anchored bottom-right. Read its z-index and
+    // drop our floating UI just below it so an open chat window is never overshadowed.
+    function detectChatZIndex(){
+        let el = document.querySelector("#chatRoot");
+        while (el && el !== document.body) {
+            let z = parseInt(window.getComputedStyle(el).zIndex, 10);
+            if (!isNaN(z)) {
+                return z;
+            }
+            el = el.parentElement;
+        }
+        return null;
+    }
+
+    function applyChatRelativeZIndex(){
+        let bar = document.querySelector(".tbf-fillall-bar");
+        if (bar == null) {
+            return;
+        }
+        if (chatRelativeZBase == null) {
+            let chatZ = detectChatZIndex();
+            if (chatZ == null) {
+                // Chat may not have mounted yet; retry shortly without blocking.
+                setTimeout(applyChatRelativeZIndex, 1500);
+                return;
+            }
+            chatRelativeZBase = Math.max(chatZ - 1, 1);
+        }
+        bar.style.zIndex = chatRelativeZBase;
+        let border = document.querySelector(".tbf-viewport-border");
+        if (border != null) {
+            border.style.zIndex = Math.max(chatRelativeZBase - 1, 1);
+        }
+        let toast = document.querySelector(".tbf-toast");
+        if (toast != null) {
+            toast.style.zIndex = chatRelativeZBase;
+        }
     }
 
     function updateAutoFillUI(){
@@ -619,6 +662,9 @@
             toast = document.createElement('div');
             toast.className = 'tbf-toast';
             document.body.appendChild(toast);
+            if (chatRelativeZBase != null) {
+                toast.style.zIndex = chatRelativeZBase;
+            }
         }
         toast.textContent = message;
         toast.classList.add('tbf-toast--visible');
