@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Torn Bazaar Filler
 // @namespace    https://github.com/SOLiNARY
-// @version      1.3.6
-// @description  On "Fill" click autofills bazaar item price with lowest market price currently minus $1 (can be customised), shows current price coefficient compared to 3rd lowest, fills max quantity for items, marks checkboxes for guns. Hold a Fill/Update button for 3s to open the Price Delta and API Key settings dialogs. Mark items as favourites (star next to Fill) and use "Fill All" to auto-fill every favourite row, including ones appearing later via infinite scroll or category switches.
+// @version      1.4.0
+// @description  On "Fill" click autofills bazaar item price with lowest market price currently minus $1 (can be customised), shows current price coefficient compared to 3rd lowest, fills max quantity for items, marks checkboxes for guns. Hold a Fill/Update button for 3s to open the Price Delta and API Key settings dialogs. Mark items as favourites (star next to Fill) and use "Fill All" to auto-fill every favourite row, including ones appearing later via infinite scroll or category switches. Drag the Fill All bar anywhere; drop it near a screen edge to clamp and minimise it — its position and state are remembered.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT License
 // @match        https://www.torn.com/bazaar.php*
@@ -37,7 +37,7 @@
         document.head.appendChild(style);
     };
 
-    GM_addStyle(`.btn-wrap.torn-bazaar-fill-qty-price{float:right;margin-left:auto;z-index:99999}.btn-wrap.torn-bazaar-clear-qty-price{z-index:99999}div.title-wrap div.name-wrap{display:flex;justify-content:flex-end}.wave-animation{position:relative;overflow:hidden}.wave{pointer-events:none;position:absolute;width:100%;height:33px;background-color:transparent;opacity:0;transform:translateX(-100%);animation:waveAnimation 1s cubic-bezier(0, 0, 0, 1)}@keyframes waveAnimation{0%{opacity:1;transform:translateX(-100%)}100%{opacity:0;transform:translateX(100%)}}.overlay-percentage{position:absolute;top:0;background-color:rgba(0, 0, 0, 0.9);padding:0 5px;border-radius:15px;font-size:10px}.overlay-percentage-add{right:-30px}.overlay-percentage-manage{right:0}.torn-bazaar-fill-qty-price input{-webkit-touch-callout:none;-webkit-user-select:none;user-select:none;transition:box-shadow 0s}.torn-bazaar-fill-qty-price input.tbf-holding{box-shadow:inset 0 0 0 40px rgba(0,180,255,.35);transition:box-shadow 3s linear}.tbf-fav{cursor:pointer;font-size:16px;line-height:1;margin-left:auto;margin-right:6px;width:16px;text-align:center;color:#888;align-self:center;user-select:none;-webkit-user-select:none;z-index:99999}.tbf-fav~.btn-wrap.torn-bazaar-fill-qty-price{margin-left:0}.tbf-fav.tbf-fav--on{color:gold;text-shadow:0 0 3px rgba(255,215,0,.7)}.tbf-fillall-bar{position:fixed;bottom:110px;right:16px;display:flex;align-items:center;gap:6px;padding:6px 8px;background:rgba(0,0,0,.55);border-radius:20px;z-index:999999}.tbf-autofill-dot{display:none;width:10px;height:10px;border-radius:50%;background:gold;box-shadow:0 0 4px gold;animation:tbfPulse 1s ease-in-out infinite}.tbf-fillall-bar--active .tbf-autofill-dot{display:inline-block}.tbf-fillall-bar--active .tbf-fillall-btn{box-shadow:0 0 5px gold}@keyframes tbfPulse{0%,100%{opacity:.3;transform:scale(.8)}50%{opacity:1;transform:scale(1.2)}}.tbf-viewport-border{display:none;position:fixed;top:0;right:0;bottom:0;left:0;border:3px solid gold;box-shadow:inset 0 0 12px rgba(255,215,0,.6);pointer-events:none;z-index:999998}.tbf-viewport-border--active{display:block}.tbf-toast{position:fixed;bottom:158px;right:16px;max-width:280px;background:rgba(0,0,0,.85);color:#fff;padding:10px 14px;border-radius:8px;border:1px solid gold;font-size:13px;line-height:1.4;z-index:1000000;opacity:0;visibility:hidden;transition:opacity .3s,visibility .3s}.tbf-toast--visible{opacity:1;visibility:visible}`);
+    GM_addStyle(`.btn-wrap.torn-bazaar-fill-qty-price{float:right;margin-left:auto;z-index:99999}.btn-wrap.torn-bazaar-clear-qty-price{z-index:99999}div.title-wrap div.name-wrap{display:flex;justify-content:flex-end}.wave-animation{position:relative;overflow:hidden}.wave{pointer-events:none;position:absolute;width:100%;height:33px;background-color:transparent;opacity:0;transform:translateX(-100%);animation:waveAnimation 1s cubic-bezier(0, 0, 0, 1)}@keyframes waveAnimation{0%{opacity:1;transform:translateX(-100%)}100%{opacity:0;transform:translateX(100%)}}.overlay-percentage{position:absolute;top:0;background-color:rgba(0, 0, 0, 0.9);padding:0 5px;border-radius:15px;font-size:10px}.overlay-percentage-add{right:-30px}.overlay-percentage-manage{right:0}.torn-bazaar-fill-qty-price input{-webkit-touch-callout:none;-webkit-user-select:none;user-select:none;transition:box-shadow 0s}.torn-bazaar-fill-qty-price input.tbf-holding{box-shadow:inset 0 0 0 40px rgba(0,180,255,.35);transition:box-shadow 3s linear}.tbf-fav{cursor:pointer;font-size:16px;line-height:1;margin-left:auto;margin-right:6px;width:16px;text-align:center;color:#888;align-self:center;user-select:none;-webkit-user-select:none;z-index:99999}.tbf-fav~.btn-wrap.torn-bazaar-fill-qty-price{margin-left:0}.tbf-fav.tbf-fav--on{color:gold;text-shadow:0 0 3px rgba(255,215,0,.7)}.tbf-fillall-bar{position:fixed;bottom:110px;right:16px;display:flex;align-items:center;gap:6px;padding:6px 8px;background:rgba(0,0,0,.55);border-radius:20px;z-index:999999;touch-action:none}.tbf-fillall-grip{cursor:grab;color:#bbb;font-size:14px;line-height:1;letter-spacing:-2px;min-width:12px;text-align:center;align-self:center;user-select:none;-webkit-user-select:none}.tbf-fillall-bar--dragging{cursor:grabbing;opacity:.92}.tbf-fillall-bar--dragging .tbf-fillall-grip{cursor:grabbing}.tbf-fillall-bar--min{padding:5px 7px;gap:4px}.tbf-fillall-bar--min .tbf-fillall-btn{display:none}.tbf-fillall-bar--min .tbf-fillall-grip{font-size:16px}.tbf-autofill-dot{display:none;width:10px;height:10px;border-radius:50%;background:gold;box-shadow:0 0 4px gold;animation:tbfPulse 1s ease-in-out infinite}.tbf-fillall-bar--active .tbf-autofill-dot{display:inline-block}.tbf-fillall-bar--active .tbf-fillall-btn{box-shadow:0 0 5px gold}@keyframes tbfPulse{0%,100%{opacity:.3;transform:scale(.8)}50%{opacity:1;transform:scale(1.2)}}.tbf-viewport-border{display:none;position:fixed;top:0;right:0;bottom:0;left:0;border:3px solid gold;box-shadow:inset 0 0 12px rgba(255,215,0,.6);pointer-events:none;z-index:999998}.tbf-viewport-border--active{display:block}.tbf-toast{position:fixed;bottom:158px;right:16px;max-width:280px;background:rgba(0,0,0,.85);color:#fff;padding:10px 14px;border-radius:8px;border:1px solid gold;font-size:13px;line-height:1.4;z-index:1000000;opacity:0;visibility:hidden;transition:opacity .3s,visibility .3s}.tbf-toast--visible{opacity:1;visibility:visible}`);
 
     const favouritesStorageKey = "silmaril-torn-bazaar-filler-favourites";
     let favourites = loadFavourites();
@@ -57,6 +57,13 @@
     // Set once Torn's chat z-index is detected, so our floating UI sits just below the
     // chat (an open chat window covers it instead of the button overshadowing the chat).
     let chatRelativeZBase = null;
+
+    // Draggable / minimisable Fill All bar. Position + minimised state persist across visits.
+    const fillAllStateKey = "silmaril-torn-bazaar-filler-fillall-pos";
+    const FILLALL_EDGE_SNAP_PX = 40;       // drop within this of an edge → clamp + minimise
+    const FILLALL_DRAG_THRESHOLD_PX = 6;   // movement before a press counts as a drag
+    const FILLALL_VIEWPORT_MARGIN_PX = 4;  // keep this gap from the edge when not snapped
+    let fillAllState = loadFillAllState();
 
     const pages = { "AddItems": 10, "ManageItems": 20};
     const addItemsLabels = ["Fill", "Clear"];
@@ -114,6 +121,14 @@
 
     // Self-heal across tab navigation. Hash changes when switching #/add, #/manage, #/personalize, #/.
     window.addEventListener("hashchange", scheduleScan);
+
+    // Keep the Fill All bar on-screen (and flush to its edge if minimised) after a resize/rotate.
+    window.addEventListener("resize", function() {
+        let bar = document.querySelector(".tbf-fillall-bar");
+        if (bar != null && fillAllState != null) {
+            applyFillAllState(bar);
+        }
+    });
 
     // Belt-and-braces: tab-link clicks. The old aria-labelledby IDs are now dynamic
     // (e.g. link-aria-label-1) so we delegate on the stable `href` instead.
@@ -597,17 +612,206 @@
         return getItemIdFromImage(image) ?? null;
     }
 
+    function loadFillAllState(){
+        try {
+            let raw = localStorage.getItem(fillAllStateKey);
+            if (!raw) {
+                return null;
+            }
+            let parsed = JSON.parse(raw);
+            if (parsed && typeof parsed.left === 'number' && typeof parsed.top === 'number') {
+                return parsed;
+            }
+        } catch (error) {
+            console.error("[TornBazaarFiller] Failed to load Fill All position:", error);
+        }
+        return null;
+    }
+
+    function saveFillAllState(){
+        localStorage.setItem(fillAllStateKey, JSON.stringify(fillAllState));
+    }
+
+    function setBarLeftTop(bar, left, top){
+        bar.style.right = 'auto';
+        bar.style.bottom = 'auto';
+        bar.style.left = left + 'px';
+        bar.style.top = top + 'px';
+    }
+
+    // Clamp the bar's top-left so it stays fully on-screen with a small margin.
+    function clampBarLeftTop(bar, left, top){
+        let maxLeft = Math.max(FILLALL_VIEWPORT_MARGIN_PX, window.innerWidth - bar.offsetWidth - FILLALL_VIEWPORT_MARGIN_PX);
+        let maxTop = Math.max(FILLALL_VIEWPORT_MARGIN_PX, window.innerHeight - bar.offsetHeight - FILLALL_VIEWPORT_MARGIN_PX);
+        return {
+            left: Math.min(Math.max(FILLALL_VIEWPORT_MARGIN_PX, left), maxLeft),
+            top: Math.min(Math.max(FILLALL_VIEWPORT_MARGIN_PX, top), maxTop)
+        };
+    }
+
+    // Nearest viewport edge if the bar is within the snap threshold of it (or past it), else null.
+    function nearestSnapEdge(bar){
+        let r = bar.getBoundingClientRect();
+        let distLeft = r.left;
+        let distRight = window.innerWidth - r.right;
+        let distTop = r.top;
+        let distBottom = window.innerHeight - r.bottom;
+        let min = Math.min(distLeft, distRight, distTop, distBottom);
+        if (min > FILLALL_EDGE_SNAP_PX) {
+            return null;
+        }
+        if (min === distLeft) { return 'left'; }
+        if (min === distRight) { return 'right'; }
+        if (min === distTop) { return 'top'; }
+        return 'bottom';
+    }
+
+    // Push the bar flush against the given edge, keeping its cross-axis position on-screen.
+    function snapBarToEdge(bar, edge){
+        let maxLeft = Math.max(0, window.innerWidth - bar.offsetWidth);
+        let maxTop = Math.max(0, window.innerHeight - bar.offsetHeight);
+        let r = bar.getBoundingClientRect();
+        let left = Math.min(Math.max(0, r.left), maxLeft);
+        let top = Math.min(Math.max(0, r.top), maxTop);
+        switch (edge) {
+            case 'left': left = 0; break;
+            case 'right': left = maxLeft; break;
+            case 'top': top = 0; break;
+            case 'bottom': top = maxTop; break;
+        }
+        setBarLeftTop(bar, left, top);
+    }
+
+    // Re-apply the persisted position/minimised state. Safe to call again on resize.
+    function applyFillAllState(bar){
+        if (fillAllState == null) {
+            return; // never moved — keep the default CSS anchor (bottom-right)
+        }
+        bar.classList.toggle('tbf-fillall-bar--min', !!fillAllState.minimised);
+        if (fillAllState.minimised && fillAllState.edge) {
+            setBarLeftTop(bar, fillAllState.left, fillAllState.top);
+            snapBarToEdge(bar, fillAllState.edge);
+        } else {
+            let clamped = clampBarLeftTop(bar, fillAllState.left, fillAllState.top);
+            setBarLeftTop(bar, clamped.left, clamped.top);
+        }
+    }
+
+    // Restore a minimised bar to its full size near where its handle sits.
+    function expandFillAllBar(bar){
+        bar.classList.remove('tbf-fillall-bar--min');
+        let r = bar.getBoundingClientRect();
+        let clamped = clampBarLeftTop(bar, r.left, r.top);
+        setBarLeftTop(bar, clamped.left, clamped.top);
+        fillAllState = { left: clamped.left, top: clamped.top, minimised: false, edge: null };
+        saveFillAllState();
+    }
+
+    // End of a drag gesture: snap + minimise when dropped near an edge, otherwise stay expanded.
+    function finishFillAllDrag(bar){
+        bar.classList.remove('tbf-fillall-bar--dragging');
+        let edge = nearestSnapEdge(bar);
+        if (edge) {
+            bar.classList.add('tbf-fillall-bar--min'); // changes size before we measure/snap
+            snapBarToEdge(bar, edge);
+            let r = bar.getBoundingClientRect();
+            fillAllState = { left: r.left, top: r.top, minimised: true, edge: edge };
+        } else {
+            bar.classList.remove('tbf-fillall-bar--min');
+            let r = bar.getBoundingClientRect();
+            let clamped = clampBarLeftTop(bar, r.left, r.top);
+            setBarLeftTop(bar, clamped.left, clamped.top);
+            fillAllState = { left: clamped.left, top: clamped.top, minimised: false, edge: null };
+        }
+        saveFillAllState();
+    }
+
+    // Whole-bar drag with click/drag disambiguation: a clean tap still triggers the button
+    // (or expands a minimised bar), while a drag moves it and suppresses the trailing click.
+    function attachFillAllDrag(bar, btn){
+        let startX = 0, startY = 0, baseLeft = 0, baseTop = 0;
+        let candidate = false, dragging = false, suppressClick = false;
+
+        function begin(clientX, clientY){
+            candidate = true;
+            dragging = false;
+            let r = bar.getBoundingClientRect();
+            baseLeft = r.left;
+            baseTop = r.top;
+            startX = clientX;
+            startY = clientY;
+        }
+        function move(clientX, clientY){
+            if (!candidate) {
+                return;
+            }
+            let dx = clientX - startX, dy = clientY - startY;
+            if (!dragging) {
+                if (Math.abs(dx) + Math.abs(dy) < FILLALL_DRAG_THRESHOLD_PX) {
+                    return;
+                }
+                dragging = true;
+                bar.classList.add('tbf-fillall-bar--dragging');
+            }
+            setBarLeftTop(bar, baseLeft + dx, baseTop + dy);
+        }
+        function end(){
+            if (!candidate) {
+                return;
+            }
+            candidate = false;
+            if (dragging) {
+                dragging = false;
+                suppressClick = true;
+                finishFillAllDrag(bar);
+            } else if (bar.classList.contains('tbf-fillall-bar--min')) {
+                expandFillAllBar(bar);
+            }
+        }
+
+        bar.addEventListener('mousedown', function(e){ begin(e.clientX, e.clientY); });
+        document.addEventListener('mousemove', function(e){ if (candidate) { move(e.clientX, e.clientY); } });
+        document.addEventListener('mouseup', end);
+
+        bar.addEventListener('touchstart', function(e){ let t = e.touches[0]; begin(t.clientX, t.clientY); }, { passive: true });
+        document.addEventListener('touchmove', function(e){
+            if (!candidate) {
+                return;
+            }
+            let t = e.touches[0];
+            move(t.clientX, t.clientY);
+            if (dragging) {
+                e.preventDefault(); // stop the page scrolling while dragging
+            }
+        }, { passive: false });
+        document.addEventListener('touchend', end);
+        document.addEventListener('touchcancel', end);
+
+        // Capture-phase: cancel the click that follows a drag so it doesn't also start/stop fill.
+        btn.addEventListener('click', function(e){
+            if (suppressClick) {
+                suppressClick = false;
+                e.stopImmediatePropagation();
+                e.preventDefault();
+            }
+        }, true);
+    }
+
     function ensureFillAllUI(){
         let bar = document.querySelector(".tbf-fillall-bar");
         if (bar == null) {
             bar = document.createElement('div');
             bar.className = 'tbf-fillall-bar';
+            const grip = document.createElement('span');
+            grip.className = 'tbf-fillall-grip';
+            grip.textContent = '⠿';
+            grip.title = 'Drag to move; drop near an edge to minimise';
             const btn = document.createElement('input');
             btn.type = 'button';
             btn.className = 'torn-btn tbf-fillall-btn';
             const dot = document.createElement('span');
             dot.className = 'tbf-autofill-dot';
-            bar.append(btn, dot);
+            bar.append(grip, btn, dot);
             btn.addEventListener('click', function(event){
                 event.stopPropagation();
                 if (autoFillActive) {
@@ -617,6 +821,8 @@
                 }
             });
             document.body.appendChild(bar);
+            attachFillAllDrag(bar, btn);
+            applyFillAllState(bar);
         }
         if (document.querySelector(".tbf-viewport-border") == null) {
             const border = document.createElement('div');
