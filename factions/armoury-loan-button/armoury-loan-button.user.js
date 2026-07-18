@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Torn Armoury Loan Button
 // @namespace    https://github.com/SOLiNARY
-// @version      0.3.0
-// @description  Caches loanable faction armoury items and adds a "Loan" button next to organized crime roles that require an item, loaning it to you in one click.
+// @version      0.4.0
+// @description  Caches loanable faction armoury items and adds a "Loan" button on your own organized crime role when it requires an item, loaning it to you in one click.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT License
 // @match        https://www.torn.com/factions.php*
@@ -289,24 +289,39 @@
         return null;
     }
 
-    // Torn's OC role slots use CSS-module class names ("localName___hash");
-    // the hash suffix rotates on deploy but the local name stays put, so
-    // matching goes against the "name___" prefix rather than an exact class.
-    function moduleChild(root, name) {
-        return root.querySelector(`:scope > [class*="${name}___"]`);
-    }
-
-    // Every role slot renders as a stable card with a "slotHeader" button and
-    // a "slotBody" div as direct children - unlike the "Used item" tooltip,
-    // that card stays visible regardless of hover state, so climb up to it
-    // from wherever the item requirement was found and anchor the button there.
-    function findSlotCard(startEl) {
-        let node = startEl;
-        for (let depth = 0; node && node !== document.body && depth < 15; depth++) {
-            if (moduleChild(node, 'slotHeader') && moduleChild(node, 'slotBody')) return node;
+    // Climbs from a descendant up to the smallest ancestor that represents
+    // exactly one role slot (role name, skill value, member name, View
+    // Profile / Leave Role) - the permanent card that stays visible
+    // regardless of hover state, unlike the "Used item" tooltip, which Torn
+    // only shows while hovering and can vanish before a click registers.
+    // Bails out (returns null) if climbing ever passes a single slot into a
+    // multi-slot container (more than one title found) - which happens when
+    // starting from a tooltip that renders as a portal disconnected from its
+    // slot's own subtree - rather than risk anchoring to the wrong role.
+    function findRoleCard(el) {
+        let node = el.parentElement;
+        for (let depth = 0; node && node !== document.body && depth < 12; depth++) {
+            const titles = node.querySelectorAll('[class*="title___"]');
+            if (titles.length > 1) return null;
+            if (titles.length === 1 && node.querySelector('[class*="successChance___"]')) return node;
             node = node.parentElement;
         }
         return null;
+    }
+
+    // Only a role the current user occupies shows a "Leave Role" action -
+    // that is the one reliable, always-visible signal for "this is my slot".
+    function findOwnRoleSlots() {
+        const slots = [];
+        const seenCards = new Set();
+        document.querySelectorAll('button, a').forEach((el) => {
+            if (el.textContent.trim().toLowerCase() !== 'leave role') return;
+            const card = findRoleCard(el);
+            if (!card || seenCards.has(card)) return;
+            seenCards.add(card);
+            slots.push({ card, leaveBtn: el });
+        });
+        return slots;
     }
 
     // Identifies a slot across scans/rescans: the OC id disambiguates between
@@ -336,9 +351,14 @@
         const slotCache = getSlotItemCache();
         let slotCacheChanged = false;
 
-        // Pass 1: read every "Used item" tooltip currently in the DOM (visible
-        // or not) and remember its item against the stable slot card it
-        // belongs to, so the mapping survives even after the tooltip is gone.
+        // Discovery: correlate a currently-visible "Used item" tooltip to a
+        // role. Climbing up from the tooltip text is precise and preferred
+        // when it resolves (handles multiple tooltips coexisting in the DOM);
+        // the header Torn itself marks as open (data-is-tooltip-opened="true")
+        // is the fallback for when the tooltip renders as a portal
+        // disconnected from its slot's own subtree, since that marker works
+        // no matter where the tooltip content actually renders.
+        const activeHeader = document.querySelector('[data-is-tooltip-opened="true"]');
         const imgs = document.querySelectorAll('img[src*="images/items/"], img[srcset*="images/items/"]');
         for (const img of imgs) {
             if (img.closest('.img-wrap[data-armoryid], .silmaril-oc-loan-wrap, #chatRoot, [class^="chat-box"]')) continue;
@@ -347,30 +367,24 @@
             const itemId = extractItemId(img) ?? findItemIdByName(textBlock.textContent);
             if (!itemId) continue;
 
-            const slotCard = findSlotCard(textBlock);
-            if (slotCard) {
-                const key = getSlotKey(slotCard);
-                if (slotCache[key] !== itemId) {
-                    slotCache[key] = itemId;
-                    slotCacheChanged = true;
-                }
-            } else if (!textBlock.querySelector('.silmaril-oc-loan-btn')) {
-                // Couldn't map the tooltip to a stable slot card - fall back to
-                // injecting right where the item was found rather than nothing.
-                injectButton(textBlock, itemId);
+            const source = findRoleCard(textBlock) ?? activeHeader;
+            if (!source) continue;
+            const key = getSlotKey(source);
+            if (slotCache[key] !== itemId) {
+                slotCache[key] = itemId;
+                slotCacheChanged = true;
             }
         }
         if (slotCacheChanged) saveSlotItemCache(slotCache);
 
-        // Pass 2: render (or restore) the button in every currently-mounted
-        // slot card whose item requirement is known, whether just discovered
-        // above or cached from an earlier scan when its tooltip wasn't showing.
-        document.querySelectorAll('[class*="slotHeader___"]').forEach((header) => {
-            const slotCard = findSlotCard(header);
-            if (!slotCard || slotCard.querySelector('.silmaril-oc-loan-btn')) return;
-            const itemId = slotCache[getSlotKey(slotCard)];
+        // Injection: only on roles the current user occupies (a "Leave Role"
+        // action is present), and only once that role's item is known - from
+        // the discovery pass above, or cached from an earlier scan.
+        findOwnRoleSlots().forEach(({ card, leaveBtn }) => {
+            if (card.querySelector('.silmaril-oc-loan-btn')) return;
+            const itemId = slotCache[getSlotKey(card)];
             if (!itemId) return;
-            injectButton(moduleChild(slotCard, 'slotBody') ?? slotCard, itemId);
+            injectButton(leaveBtn.parentElement ?? card, itemId);
         });
     }
 
