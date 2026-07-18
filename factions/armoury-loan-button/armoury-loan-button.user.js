@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Armoury Loan Button
 // @namespace    https://github.com/SOLiNARY
-// @version      0.2.0
+// @version      0.3.0
 // @description  Caches loanable faction armoury items and adds a "Loan" button next to organized crime roles that require an item, loaning it to you in one click.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT License
@@ -17,6 +17,7 @@
 
     const LOG_PREFIX = '[TornArmouryLoanButton]';
     const ITEMS_KEY = 'silmaril-armoury-loan-items';
+    const SLOT_ITEMS_KEY = 'silmaril-armoury-loan-slots';
     const USER_KEY = 'silmaril-armoury-loan-user';
     const RFCV_KEY = 'silmaril-armoury-loan-rfcv';
     const USED_ITEM_MARKER = 'used item';
@@ -31,6 +32,8 @@
     gap: 6px;
     margin-left: 8px;
     vertical-align: middle;
+    flex-shrink: 0;
+    white-space: nowrap;
 }
 
 .silmaril-oc-loan-wrap .silmaril-oc-loan-btn {
@@ -271,6 +274,10 @@
     // split across word-level spans, so the ancestors' combined textContent is
     // the only stable marker. The size cap keeps it from latching onto huge
     // containers that merely happen to contain the text somewhere far away.
+    //
+    // This block itself lives inside a hover/tooltip element that Torn hides
+    // (or unmounts) the instant the cursor leaves it, so it is only ever used
+    // to read the item requirement - never as the place to put the button.
     function findUsedItemBlock(img) {
         let el = img.parentElement;
         for (let depth = 0; el && el !== document.body && depth < 8; depth++) {
@@ -282,19 +289,92 @@
         return null;
     }
 
-    function scanCrimes() {
-        const imgs = document.querySelectorAll('img[src*="images/items/"], img[srcset*="images/items/"]');
-        for (const img of imgs) {
-            if (img.closest('.img-wrap[data-armoryid], .silmaril-oc-loan-wrap, #chatRoot, [class^="chat-box"]')) continue;
-            const block = findUsedItemBlock(img);
-            if (!block || block.querySelector('.silmaril-oc-loan-btn')) continue;
-            const itemId = extractItemId(img) ?? findItemIdByName(block.textContent);
-            if (!itemId) continue;
-            injectButton(block, itemId);
+    // Torn's OC role slots use CSS-module class names ("localName___hash");
+    // the hash suffix rotates on deploy but the local name stays put, so
+    // matching goes against the "name___" prefix rather than an exact class.
+    function moduleChild(root, name) {
+        return root.querySelector(`:scope > [class*="${name}___"]`);
+    }
+
+    // Every role slot renders as a stable card with a "slotHeader" button and
+    // a "slotBody" div as direct children - unlike the "Used item" tooltip,
+    // that card stays visible regardless of hover state, so climb up to it
+    // from wherever the item requirement was found and anchor the button there.
+    function findSlotCard(startEl) {
+        let node = startEl;
+        for (let depth = 0; node && node !== document.body && depth < 15; depth++) {
+            if (moduleChild(node, 'slotHeader') && moduleChild(node, 'slotBody')) return node;
+            node = node.parentElement;
+        }
+        return null;
+    }
+
+    // Identifies a slot across scans/rescans: the OC id disambiguates between
+    // crimes, the role title (e.g. "Muscle #1") disambiguates roles within one.
+    function getSlotKey(slotCard) {
+        const ocId = slotCard.closest('[data-oc-id]')?.getAttribute('data-oc-id') ?? 'oc?';
+        const title = slotCard.querySelector('[class*="title___"]')?.textContent.trim() ?? 'role?';
+        return `${ocId}::${title}`;
+    }
+
+    function getSlotItemCache() {
+        try {
+            const parsed = JSON.parse(localStorage.getItem(SLOT_ITEMS_KEY));
+            return parsed && typeof parsed === 'object' ? parsed : {};
+        } catch (e) {
+            return {};
         }
     }
 
-    function injectButton(block, itemId) {
+    function saveSlotItemCache(cache) {
+        try {
+            localStorage.setItem(SLOT_ITEMS_KEY, JSON.stringify(cache));
+        } catch (e) { /* ignore quota errors */ }
+    }
+
+    function scanCrimes() {
+        const slotCache = getSlotItemCache();
+        let slotCacheChanged = false;
+
+        // Pass 1: read every "Used item" tooltip currently in the DOM (visible
+        // or not) and remember its item against the stable slot card it
+        // belongs to, so the mapping survives even after the tooltip is gone.
+        const imgs = document.querySelectorAll('img[src*="images/items/"], img[srcset*="images/items/"]');
+        for (const img of imgs) {
+            if (img.closest('.img-wrap[data-armoryid], .silmaril-oc-loan-wrap, #chatRoot, [class^="chat-box"]')) continue;
+            const textBlock = findUsedItemBlock(img);
+            if (!textBlock) continue;
+            const itemId = extractItemId(img) ?? findItemIdByName(textBlock.textContent);
+            if (!itemId) continue;
+
+            const slotCard = findSlotCard(textBlock);
+            if (slotCard) {
+                const key = getSlotKey(slotCard);
+                if (slotCache[key] !== itemId) {
+                    slotCache[key] = itemId;
+                    slotCacheChanged = true;
+                }
+            } else if (!textBlock.querySelector('.silmaril-oc-loan-btn')) {
+                // Couldn't map the tooltip to a stable slot card - fall back to
+                // injecting right where the item was found rather than nothing.
+                injectButton(textBlock, itemId);
+            }
+        }
+        if (slotCacheChanged) saveSlotItemCache(slotCache);
+
+        // Pass 2: render (or restore) the button in every currently-mounted
+        // slot card whose item requirement is known, whether just discovered
+        // above or cached from an earlier scan when its tooltip wasn't showing.
+        document.querySelectorAll('[class*="slotHeader___"]').forEach((header) => {
+            const slotCard = findSlotCard(header);
+            if (!slotCard || slotCard.querySelector('.silmaril-oc-loan-btn')) return;
+            const itemId = slotCache[getSlotKey(slotCard)];
+            if (!itemId) return;
+            injectButton(moduleChild(slotCard, 'slotBody') ?? slotCard, itemId);
+        });
+    }
+
+    function injectButton(container, itemId) {
         const wrap = document.createElement('span');
         wrap.className = 'silmaril-oc-loan-wrap';
 
@@ -315,7 +395,7 @@
         });
 
         wrap.appendChild(button);
-        block.appendChild(wrap);
+        container.appendChild(wrap);
     }
 
     function showMessage(wrap, message, success) {
