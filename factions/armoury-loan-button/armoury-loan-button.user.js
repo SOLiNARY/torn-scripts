@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Armoury Loan Button
 // @namespace    https://github.com/SOLiNARY
-// @version      0.1.0
+// @version      0.2.0
 // @description  Caches loanable faction armoury items and adds a "Loan" button next to organized crime roles that require an item, loaning it to you in one click.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT License
@@ -245,31 +245,51 @@
     // --- organized crimes page -------------------------------------------------
 
     function extractItemId(img) {
-        const source = img.getAttribute('src') ?? img.getAttribute('srcset') ?? '';
-        return source.match(/\/images\/items\/(\d+)\//)?.[1] ?? null;
+        for (const attr of ['src', 'srcset']) {
+            const id = img.getAttribute(attr)?.match(/(?:^|\/)images\/items\/(\d+)\//)?.[1];
+            if (id) return id;
+        }
+        return null;
+    }
+
+    // Falls back to resolving the item by the name written after "Used item:",
+    // matched against the cached armoury item names.
+    function findItemIdByName(blockText) {
+        const captured = blockText?.match(/used item:?\s*(.{1,60})/i)?.[1].trim().toLowerCase();
+        if (!captured) return null;
+        let best = null;
+        for (const [itemId, entry] of Object.entries(getStoredItems())) {
+            const name = entry?.name?.trim().toLowerCase();
+            if (!name || !captured.startsWith(name)) continue;
+            if (!best || name.length > best.nameLength) best = { itemId, nameLength: name.length };
+        }
+        return best?.itemId ?? null;
     }
 
     // Climbs from the item image to the smallest ancestor containing the
-    // "Used item: ..." text; OC class names are hashed, so text is the only
-    // stable marker.
+    // "Used item: ..." text; OC class names are hashed and the text may be
+    // split across word-level spans, so the ancestors' combined textContent is
+    // the only stable marker. The size cap keeps it from latching onto huge
+    // containers that merely happen to contain the text somewhere far away.
     function findUsedItemBlock(img) {
         let el = img.parentElement;
-        for (let depth = 0; el && depth < 6; depth++) {
-            if (el.textContent.toLowerCase().includes(USED_ITEM_MARKER)) return el;
+        for (let depth = 0; el && el !== document.body && depth < 8; depth++) {
+            const text = el.textContent ?? '';
+            if (text.length > 600) return null;
+            if (text.toLowerCase().includes(USED_ITEM_MARKER)) return el;
             el = el.parentElement;
         }
         return null;
     }
 
     function scanCrimes() {
-        const root = document.getElementById('faction-crimes-root') ?? document.getElementById('faction-crimes');
-        if (!root) return;
-        const imgs = root.querySelectorAll('img[src*="/images/items/"], img[srcset*="/images/items/"]');
+        const imgs = document.querySelectorAll('img[src*="images/items/"], img[srcset*="images/items/"]');
         for (const img of imgs) {
-            const itemId = extractItemId(img);
-            if (!itemId) continue;
+            if (img.closest('.img-wrap[data-armoryid], .silmaril-oc-loan-wrap, #chatRoot, [class^="chat-box"]')) continue;
             const block = findUsedItemBlock(img);
             if (!block || block.querySelector('.silmaril-oc-loan-btn')) continue;
+            const itemId = extractItemId(img) ?? findItemIdByName(block.textContent);
+            if (!itemId) continue;
             injectButton(block, itemId);
         }
     }
@@ -435,12 +455,17 @@
         };
     }
 
-    const scan = debounce(() => {
+    function runScan() {
         scanArmoury();
         scanCrimes();
-    }, 300);
+    }
 
-    new MutationObserver(scan).observe(document.body, { childList: true, subtree: true });
-    setInterval(scan, 2000);
-    scan();
+    const scheduleScan = debounce(runScan, 150);
+
+    new MutationObserver(scheduleScan).observe(document.body, { childList: true, subtree: true });
+    // Torn mutates the DOM near-constantly (countdowns, chat, sidebar timers),
+    // which can starve the debounced observer callback forever — so the
+    // interval calls the scan directly to guarantee it keeps running.
+    setInterval(runScan, 1000);
+    runScan();
 })();
