@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Torn Bazaar Filler
 // @namespace    https://github.com/SOLiNARY
-// @version      1.5.1
-// @description  On "Fill" click autofills bazaar item price with lowest market price currently minus $1 (can be customised), shows current price coefficient compared to 3rd lowest, fills max quantity for items, marks checkboxes for guns. Hold a Fill/Update button for 3s to open the settings modal (price delta, API key, and per-category delta overrides — set different discounts/sources for Clothing, Other, Drug, etc.). Mark items as favourites (star next to Fill) and use "Fill All" to auto-fill every favourite row, including ones appearing later via infinite scroll or category switches. Drag the Fill All bar anywhere; drop it near a screen edge to clamp and minimise it — its position and state are remembered.
+// @version      1.6.0
+// @description  On "Fill" click autofills bazaar item price with lowest market price currently minus $1 (can be customised), shows current price coefficient compared to 3rd lowest, fills max quantity for items, marks checkboxes for guns. Hold a Fill/Update button for 3s to open the settings modal (price delta, API key, and per-category delta overrides — set different discounts/sources for Clothing, Other, Drug, etc.). Mark items as favourites (star next to Fill/Update) and use "Fill All" to auto-fill every favourite row on both the Add Items and Manage Items pages, including ones appearing later via infinite scroll or category switches. Drag the Fill All bar anywhere; drop it near a screen edge to clamp and minimise it — its position and state are remembered.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT License
 // @match        https://www.torn.com/bazaar.php*
@@ -371,15 +371,31 @@
                 return "error";
             }
         } else {
-            moneyGroupDiv = element.parentNode.parentNode.parentNode.parentNode.querySelector("div[class*=price___]");
+            moneyGroupDiv = parentNode4.querySelector("div[class*=price___]");
+            if (moneyGroupDiv == null) {
+                console.warn("[TornBazaarFiller] Price container not found — 'div[class*=price___]' returned null. Manage Items DOM may have changed.");
+                return "error";
+            }
         }
         let priceInputs = moneyGroupDiv.querySelectorAll("div.input-money-group input");
+        if (priceInputs.length === 0) {
+            console.warn("[TornBazaarFiller] Price inputs not found on Manage Items row. Manage Items DOM may have changed.");
+            return "error";
+        }
         let inputEvent = new Event("input", {bubbles: true});
 
-        let image = element.parentElement.parentElement.parentElement.parentElement.querySelector("div[class*=imgContainer___] img");
+        let image = parentNode4.querySelector("div[class*=imgContainer___] img")
+            ?? parentNode4.querySelector('img[src*="/items/"]');
+        if (image == null) {
+            console.warn("[TornBazaarFiller] Item image not found on Manage Items row — cannot resolve item id.");
+            return "error";
+        }
         let extractedItemId = getItemIdFromImage(image);
 
-        let wave = element.parentElement.parentElement.parentElement.querySelector("div.wave");
+        // The wave div lives in the container we injected into; fall back to a detached div
+        // so a missing wave (unexpected DOM) degrades to no animation instead of a throw.
+        let wave = element.parentElement.parentElement.parentElement.querySelector("div.wave")
+            ?? document.createElement('div');
         wave.style.animation = 'none';
         wave.offsetHeight;
         wave.style.animation = null;
@@ -409,7 +425,7 @@
                 let bazaarSlotOffset = getDeltaSlotOffset(formula);
                 let priceDeltaWithoutBazaarOffset = stripDeltaBracket(formula);
                 lowBallPrice = Math.round(performOperation(priceListings[Math.min(bazaarSlotOffset, priceListings.length - 1)].price, priceDeltaWithoutBazaarOffset));
-                let price3rd = priceListings[Math.min(2, priceListings.length - 1)].cost;
+                let price3rd = priceListings[Math.min(2, priceListings.length - 1)].price;
                 let priceCoefficient = ((lowBallPrice / price3rd) * 100).toFixed(0);
                 let percentageOverlaySpan = insertPercentageManageSpan(moneyGroupDiv);
                 if (priceCoefficient <= 95){
@@ -433,8 +449,7 @@
                 }
             }
 
-            priceInputs[0].value = lowBallPrice;
-            priceInputs[1].value = lowBallPrice;
+            priceInputs.forEach(x => { x.value = lowBallPrice; });
             priceInputs[0].dispatchEvent(inputEvent);
             return "ok";
         } catch (error) {
@@ -606,6 +621,12 @@
         let image = pageType === pages.AddItems
             ? element.parentElement.querySelector("div.image-wrap img")
             : element.parentElement.querySelector("div[class*=imgContainer___] img");
+        if (image == null) {
+            // Fallback for DOM drift (esp. the virtualized Manage Items rows): any item
+            // image within the row container.
+            let row = element.closest('li.clearfix, div[data-testid="sortable-item"], div[class*="row___"]') ?? element.parentElement;
+            image = row != null ? row.querySelector('img[src*="/items/"]') : null;
+        }
         if (image == null) {
             return null;
         }
@@ -964,11 +985,17 @@
                 }
                 let pageType = parseInt(wrapper.dataset.tbfPageType, 10);
                 let status;
-                if (pageType === pages.AddItems) {
-                    fillInput.parentNode.style.display = "none";
-                    status = await fillQuantityAndPrice(fillInput, pageType);
-                } else {
-                    status = await updatePrice(fillInput);
+                try {
+                    if (pageType === pages.AddItems) {
+                        fillInput.parentNode.style.display = "none";
+                        status = await fillQuantityAndPrice(fillInput, pageType);
+                    } else {
+                        status = await updatePrice(fillInput);
+                    }
+                } catch (error) {
+                    // A single row with unexpected DOM must not abort the whole run.
+                    console.error("[TornBazaarFiller] Fill All failed for item " + itemId + ":", error);
+                    status = "error";
                 }
                 if (status === "rate-limited") {
                     autoFillQueue.unshift(wrapper); // retry the same row after the pause
