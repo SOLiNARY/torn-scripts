@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Torn Market Filler
 // @namespace    https://github.com/SOLiNARY
-// @version      0.9.1
-// @description  On "Fill" click autofills market item price with lowest market price minus $1 (customizable), fills max quantity, marks checkboxes for guns. Hold the fill button for 2s to open the settings modal (price delta, API key, prices popup, and per-category delta overrides — set different discounts/sources for Clothing, Other, Drug, etc.). Mark items as favourites (star next to the fill button) and use "Fill All" to auto-fill every favourite row, including ones appearing later when switching categories. Drag the Fill All bar anywhere; drop it near a screen edge to clamp and minimise it — its position and state are remembered.
+// @version      0.10.0
+// @description  On "Fill" click autofills market item price with lowest market price minus $1 (customizable), fills max quantity, marks checkboxes for guns. Hold the fill button for 2s to open the settings modal (price delta, API key, prices popup, and per-category delta overrides — set different discounts/sources for Clothing, Other, Drug, etc.). Mark items as favourites (star next to the fill button) and use "Fill All" to auto-fill every favourite row on both the Add Items and Your Items (view listings) pages, including ones appearing later when switching categories. Drag the Fill All bar anywhere; drop it near a screen edge to clamp and minimise it — its position and state are remembered.
 // @author       Silmaril [2665762]
 // @license      MIT License
 // @match        https://www.torn.com/page.php?sid=ItemMarket*
@@ -93,27 +93,47 @@
     const isMobileView = window.innerWidth <= 784;
     const observerTarget = document.querySelector("#item-market-root");
     const observerConfig = { attributes: false, childList: true, characterData: false, subtree: true };
+
+    // Debounced whole-root scan instead of matching specific mutation targets: rows on the
+    // Add Items and Your Items (view listings) pages mount at different depths (tab panels,
+    // list containers, pagination), and target-based matching silently missed the latter.
+    // AddFillButton is idempotent, so re-scanning already-processed rows is cheap.
+    let scanScheduled = false;
+    function scanAndInject() {
+        scanScheduled = false;
+        currentPage = getCurrentPage();
+        if (currentPage == pages.Other) {
+            return;
+        }
+        observerTarget.querySelectorAll('[class*=itemRowWrapper___] > [class*=itemRow___]:not([class*=grayedOut___]) [class^=priceInputWrapper___]').forEach(x => AddFillButton(x));
+        if (autoFillActive) {
+            enqueueVisibleFavourites();
+        }
+    }
+
+    function scheduleScan() {
+        if (!scanScheduled) {
+            scanScheduled = true;
+            requestAnimationFrame(scanAndInject);
+        }
+    }
+
     const observer = new MutationObserver(function(mutations) {
-        mutations.forEach(mutationRaw => {
-            let mutation = mutationRaw.target;
-            currentPage = getCurrentPage();
-            if (currentPage == pages.AddItems){
-                if (mutation.id && mutation.id.startsWith('headlessui-tabs-panel-')) {
-                    mutation.querySelectorAll('[class*=itemRowWrapper___]:not(.silmaril-market-filler-processed) > [class*=itemRow___]:not([class*=grayedOut___]) [class^=priceInputWrapper___]').forEach(x => AddFillButton(x));
-                }
-                if (String(mutation.className).indexOf('priceInputWrapper___') > -1){
-                    AddFillButton(mutation);
-                }
-            } else if (currentPage == pages.ViewItems){
-                if (mutation.className && mutation.className.startsWith('viewListingWrapper___')) {
-                    mutation.querySelectorAll('[class*=itemRowWrapper___]:not(.silmaril-market-filler-processed) > [class*=itemRow___]:not([class*=grayedOut___]) [class^=priceInputWrapper___]').forEach(x => AddFillButton(x));
-                }
+        for (const m of mutations) {
+            if (m.addedNodes.length || m.removedNodes.length) {
+                scheduleScan();
+                return;
             }
-        });
+        }
     });
     observer.observe(observerTarget, observerConfig);
+    // Tab switches (#/addListing ↔ #/viewListing) don't always leave rows unprocessed,
+    // but a scan on hashchange is cheap insurance against missed mutations.
+    window.addEventListener("hashchange", scheduleScan);
     addCustomFillPopup();
     ensureFillAllUI();
+    // Rows may already be in the DOM at script start (run-at: document-idle).
+    scheduleScan();
 
     // Keep the Fill All bar on-screen (and flush to its edge if minimised) after a resize/rotate.
     window.addEventListener("resize", function() {
@@ -129,9 +149,7 @@
         }
         const wrapperParent = findParentByCondition(itemPriceElement, (el) => String(el.className).indexOf('itemRowWrapper___') > -1);
         wrapperParent.classList.add('silmaril-market-filler-processed');
-        let itemIdString = wrapperParent.querySelector('[class^=itemRow___] [type=button][class^=viewInfoButton___]').getAttribute('aria-controls');
-        let itemImage = wrapperParent.querySelector('[class*=viewInfoButton] img');
-        let itemId = currentPage == pages.AddItems ? getItemIdFromString(itemIdString) : getItemIdFromImage(itemImage);
+        let itemId = getRowItemId(wrapperParent);
         const span = document.createElement('span');
         span.className = 'silmaril-market-filler-button input-money-symbol';
         span.style.position = "relative";
@@ -152,22 +170,27 @@
         const itemIdNum = parseInt(itemId, 10);
         if (!isNaN(itemIdNum) && itemIdNum > 0){
             wrapperParent.dataset.tmfItemId = itemIdNum;
-            const favBtn = document.createElement('span');
-            favBtn.className = 'tmf-fav';
-            favBtn.title = 'Toggle favourite (used by Fill All)';
-            renderFavIcon(favBtn, favourites.has(itemIdNum));
-            favBtn.dataset.tmfItemId = itemIdNum;
-            favBtn.addEventListener('click', function(e){
-                e.preventDefault();
-                e.stopPropagation();
-                toggleFavourite(itemIdNum);
-                if (autoFillActive && favourites.has(itemIdNum)){
-                    enqueueFavouriteRow(wrapperParent);
-                }
-            });
             // First slot of the row's controls container — left of the anonymous button.
             const infoContainer = findParentByCondition(itemPriceElement, (el) => String(el.className).indexOf('info___') > -1);
-            (infoContainer ?? moneyGroup).prepend(favBtn);
+            const favHost = infoContainer ?? moneyGroup;
+            // A re-render can remount the price wrapper while the row (and our star) survives;
+            // guard against stacking a second star on re-scan.
+            if (favHost.querySelector('.tmf-fav') == null){
+                const favBtn = document.createElement('span');
+                favBtn.className = 'tmf-fav';
+                favBtn.title = 'Toggle favourite (used by Fill All)';
+                renderFavIcon(favBtn, favourites.has(itemIdNum));
+                favBtn.dataset.tmfItemId = itemIdNum;
+                favBtn.addEventListener('click', function(e){
+                    e.preventDefault();
+                    e.stopPropagation();
+                    toggleFavourite(itemIdNum);
+                    if (autoFillActive && favourites.has(itemIdNum)){
+                        enqueueFavouriteRow(wrapperParent);
+                    }
+                });
+                favHost.prepend(favBtn);
+            }
             moneyGroup.prepend(span);
             if (autoFillActive){
                 enqueueFavouriteRow(wrapperParent);
@@ -175,6 +198,30 @@
         } else {
             moneyGroup.prepend(span);
         }
+    }
+
+    // Resolve a row's item id from whichever source the page provides: the info button's
+    // aria-controls id on Add Items rows, otherwise any item image in the row. The Your Items
+    // (view listings) rows don't reliably carry the aria-controls id, and dereferencing the
+    // missing button used to throw — killing button injection for the whole row.
+    function getRowItemId(wrapperParent){
+        if (currentPage == pages.AddItems){
+            let infoButton = wrapperParent.querySelector('[class^=itemRow___] [type=button][class^=viewInfoButton___]');
+            let ariaControls = infoButton != null ? infoButton.getAttribute('aria-controls') : null;
+            if (ariaControls != null){
+                let itemId = getItemIdFromString(ariaControls);
+                if (parseInt(itemId, 10) > 0){
+                    return itemId;
+                }
+            }
+        }
+        let itemImage = wrapperParent.querySelector('[class*=viewInfoButton] img')
+            ?? wrapperParent.querySelector('img[src*="/items/"]');
+        if (itemImage != null){
+            return getItemIdFromImage(itemImage);
+        }
+        console.error("[TornMarketFiller] ItemId not found!");
+        return -1;
     }
 
     function buildPriceUrl(useItems, itemId){
@@ -394,21 +441,28 @@
 
         let price = action == 'fill' ? GetPrice(prices, pricing.formula) : '';
         switchActionFlag(target);
-        let parentRow = findParentByCondition(target, (el) => String(el.className).indexOf('info___') > -1);
-        let quantityInputs = parentRow.querySelectorAll('[class^=amountInputWrapper___] .input-money-group > .input-money');
-        if (quantityInputs.length > 0){
-            if (quantityInputs[0].value.length === 0 || parseInt(quantityInputs[0].value) < 1){
-                quantityInputs[0].value = action == 'fill' ? Number.MAX_SAFE_INTEGER : 0;
-                quantityInputs[1].value = action == 'fill' ? Number.MAX_SAFE_INTEGER : 0;
-            } else {
-                quantityInputs[0].value = action == 'clear' ? '' : quantityInputs[0].value;
-                quantityInputs[1].value = action == 'clear' ? '' : quantityInputs[1].value;
-            }
-            quantityInputs[0].dispatchEvent(new Event("input", {bubbles: true}));
-        } else {
-            let checkbox = parentRow.querySelector('[class^=checkboxWrapper___] > [class^=checkboxContainer___] [type=checkbox]');
-            if (checkbox && ((action == 'fill' && !checkbox.checked) || (action == 'clear' && checkbox.checked))){
-                checkbox.click();
+        // Quantity/checkbox handling only exists on the Add Items page. Your Items (view
+        // listings) rows carry a remove-amount input instead — touching it would be wrong,
+        // and the missing containers used to throw and abort the Fill All loop.
+        if (getCurrentPage() == pages.AddItems){
+            let parentRow = findParentByCondition(target, (el) => String(el.className).indexOf('info___') > -1);
+            if (parentRow != null){
+                let quantityInputs = parentRow.querySelectorAll('[class^=amountInputWrapper___] .input-money-group > .input-money');
+                if (quantityInputs.length > 0){
+                    if (quantityInputs[0].value.length === 0 || parseInt(quantityInputs[0].value) < 1){
+                        quantityInputs[0].value = action == 'fill' ? Number.MAX_SAFE_INTEGER : 0;
+                        quantityInputs[1].value = action == 'fill' ? Number.MAX_SAFE_INTEGER : 0;
+                    } else {
+                        quantityInputs[0].value = action == 'clear' ? '' : quantityInputs[0].value;
+                        quantityInputs[1].value = action == 'clear' ? '' : quantityInputs[1].value;
+                    }
+                    quantityInputs[0].dispatchEvent(new Event("input", {bubbles: true}));
+                } else {
+                    let checkbox = parentRow.querySelector('[class^=checkboxWrapper___] > [class^=checkboxContainer___] [type=checkbox]');
+                    if (checkbox && ((action == 'fill' && !checkbox.checked) || (action == 'clear' && checkbox.checked))){
+                        checkbox.click();
+                    }
+                }
             }
         }
         priceInputs.forEach(x => {x.value = price});
@@ -930,7 +984,14 @@
                     autoFillDoneIds.add(itemId);
                     continue;
                 }
-                let status = await performFill(fillBtn, itemId, false);
+                let status;
+                try {
+                    status = await performFill(fillBtn, itemId, false);
+                } catch (error) {
+                    // A single row with unexpected DOM must not abort the whole run.
+                    console.error("[TornMarketFiller] Fill All failed for item " + itemId + ":", error);
+                    status = "error";
+                }
                 if (status === "rate-limited") {
                     autoFillQueue.unshift(wrapper); // retry the same row after the pause
                     await sleep(randomBetween(RATE_LIMIT_PAUSE_MIN_MS, RATE_LIMIT_PAUSE_MAX_MS));
@@ -1193,9 +1254,12 @@
     }
 
     function getCurrentPage(){
-        if (window.location.href.indexOf('#/addListing') > -1){
+        // Case-insensitive, and tolerant of the "Your Items" naming Torn uses for the
+        // view-listings tab.
+        let href = window.location.href.toLowerCase();
+        if (href.indexOf('#/addlisting') > -1){
             return pages.AddItems;
-        } else if (window.location.href.indexOf('#/viewListing') > -1){
+        } else if (href.indexOf('#/viewlisting') > -1 || href.indexOf('#/youritems') > -1){
             return pages.ViewItems;
         } else {
             return pages.Other;
