@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Torn Bazaar Filler
 // @namespace    https://github.com/SOLiNARY
-// @version      1.6.0
-// @description  On "Fill" click autofills bazaar item price with lowest market price currently minus $1 (can be customised), shows current price coefficient compared to 3rd lowest, fills max quantity for items, marks checkboxes for guns. Hold a Fill/Update button for 3s to open the settings modal (price delta, API key, and per-category delta overrides — set different discounts/sources for Clothing, Other, Drug, etc.). Mark items as favourites (star next to Fill/Update) and use "Fill All" to auto-fill every favourite row on both the Add Items and Manage Items pages, including ones appearing later via infinite scroll or category switches. Drag the Fill All bar anywhere; drop it near a screen edge to clamp and minimise it — its position and state are remembered.
+// @version      1.7.0
+// @description  On "Fill" click autofills bazaar item price with lowest market price currently minus $1 (can be customised), shows current price coefficient compared to 3rd lowest, fills the quantity your quantity mode asks for, marks checkboxes for guns. Hold a Fill/Update button for 3s to open the settings modal (price delta, quantity mode, API key, and per-category overrides — set different discounts/sources/quantities for Clothing, Other, Drug, etc.). Quantity modes: "max" (default), "max-1" to always keep a copy, a fixed number, or "skip" to never list a category. Cycle the star next to Fill/Update to mark an item as a favourite (★, used by Fill All) or excluded (⊘, never auto-filled). Use "Fill All" to auto-fill every favourite row on both the Add Items and Manage Items pages, including ones appearing later via infinite scroll or category switches. Drag the Fill All bar anywhere; drop it near a screen edge to clamp and minimise it — its position and state are remembered.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT License
 // @match        https://www.torn.com/bazaar.php*
@@ -20,6 +20,9 @@
     const marketUrl = "https://api.torn.com/v2/market?id={itemId}&selections=itemMarket&key={apiKey}&comment=BazaarFiller";
     const itemUrl = "https://api.torn.com/torn/{itemId}?selections=items&key={apiKey}&comment=BazaarFiller";
     let priceDeltaRaw = localStorage.getItem("silmaril-torn-bazaar-filler-price-delta") ?? '-1';
+    // How many units to list per item: "max" (all of them), "max-N" (keep N back), a fixed
+    // number, or "skip"/"0" to never list. Defaults to "max" — the behaviour before this existed.
+    let quantityModeRaw = localStorage.getItem("silmaril-torn-bazaar-filler-quantity-mode") ?? 'max';
     let apiKey = localStorage.getItem("silmaril-torn-bazaar-filler-apikey");
 
     try {
@@ -36,23 +39,32 @@
         document.head.appendChild(style);
     };
 
-    GM_addStyle(`.btn-wrap.torn-bazaar-fill-qty-price{float:right;margin-left:auto;z-index:99999}.btn-wrap.torn-bazaar-clear-qty-price{z-index:99999}div.title-wrap div.name-wrap{display:flex;justify-content:flex-end}.wave-animation{position:relative;overflow:hidden}.wave{pointer-events:none;position:absolute;width:100%;height:33px;background-color:transparent;opacity:0;transform:translateX(-100%);animation:waveAnimation 1s cubic-bezier(0, 0, 0, 1)}@keyframes waveAnimation{0%{opacity:1;transform:translateX(-100%)}100%{opacity:0;transform:translateX(100%)}}.overlay-percentage{position:absolute;top:0;background-color:rgba(0, 0, 0, 0.9);padding:0 5px;border-radius:15px;font-size:10px}.overlay-percentage-add{right:-30px}.overlay-percentage-manage{right:0}.torn-bazaar-fill-qty-price input{-webkit-touch-callout:none;-webkit-user-select:none;user-select:none;transition:box-shadow 0s}.torn-bazaar-fill-qty-price input.tbf-holding{box-shadow:inset 0 0 0 40px rgba(0,180,255,.35);transition:box-shadow 3s linear}.tbf-fav{cursor:pointer;font-size:16px;line-height:1;margin-left:auto;margin-right:6px;width:16px;text-align:center;color:#888;align-self:center;user-select:none;-webkit-user-select:none;z-index:99999}.tbf-fav~.btn-wrap.torn-bazaar-fill-qty-price{margin-left:0}.tbf-fav.tbf-fav--on{color:gold;text-shadow:0 0 3px rgba(255,215,0,.7)}.tbf-fillall-bar{position:fixed;bottom:110px;right:16px;display:flex;align-items:center;gap:6px;padding:6px 8px;background:rgba(0,0,0,.55);border-radius:20px;z-index:999999;touch-action:none;transition:box-shadow .2s ease}.tbf-fillall-grip{cursor:grab;color:#bbb;font-size:14px;line-height:1;letter-spacing:-2px;min-width:12px;text-align:center;align-self:center;user-select:none;-webkit-user-select:none}.tbf-fillall-bar--dragging{cursor:grabbing;opacity:.92}.tbf-fillall-bar--dragging .tbf-fillall-grip{cursor:grabbing}.tbf-fillall-bar--min{padding:5px 7px;gap:4px}.tbf-fillall-bar--min .tbf-fillall-btn{display:none}.tbf-fillall-bar--min .tbf-fillall-grip{font-size:16px}.tbf-autofill-dot{display:none;width:10px;height:10px;border-radius:50%;background:gold;box-shadow:0 0 4px gold;animation:tbfPulse 1s ease-in-out infinite}.tbf-fillall-bar--active .tbf-autofill-dot{display:inline-block}.tbf-fillall-bar--active{box-shadow:0 0 10px 2px rgba(255,215,0,.75)}@keyframes tbfPulse{0%,100%{opacity:.3;transform:scale(.8)}50%{opacity:1;transform:scale(1.2)}}.tbf-viewport-border{display:none;position:fixed;top:0;right:0;bottom:0;left:0;border:3px solid gold;box-shadow:inset 0 0 12px rgba(255,215,0,.6);pointer-events:none;z-index:999998}.tbf-viewport-border--active{display:block}.tbf-toast{position:fixed;bottom:158px;right:16px;max-width:280px;background:rgba(0,0,0,.85);color:#fff;padding:10px 14px;border-radius:8px;border:1px solid gold;font-size:13px;line-height:1.4;z-index:1000000;opacity:0;visibility:hidden;transition:opacity .3s,visibility .3s}.tbf-toast--visible{opacity:1;visibility:visible}`);
+    GM_addStyle(`.btn-wrap.torn-bazaar-fill-qty-price{float:right;margin-left:auto;z-index:99999}.btn-wrap.torn-bazaar-clear-qty-price{z-index:99999}div.title-wrap div.name-wrap{display:flex;justify-content:flex-end}.wave-animation{position:relative;overflow:hidden}.wave{pointer-events:none;position:absolute;width:100%;height:33px;background-color:transparent;opacity:0;transform:translateX(-100%);animation:waveAnimation 1s cubic-bezier(0, 0, 0, 1)}@keyframes waveAnimation{0%{opacity:1;transform:translateX(-100%)}100%{opacity:0;transform:translateX(100%)}}.overlay-percentage{position:absolute;top:0;background-color:rgba(0, 0, 0, 0.9);padding:0 5px;border-radius:15px;font-size:10px;pointer-events:none}.overlay-percentage-add{right:-30px}.overlay-percentage-manage{right:0}.torn-bazaar-fill-qty-price input{-webkit-touch-callout:none;-webkit-user-select:none;user-select:none;transition:box-shadow 0s}.torn-bazaar-fill-qty-price input.tbf-holding{box-shadow:inset 0 0 0 40px rgba(0,180,255,.35);transition:box-shadow 3s linear}.tbf-fav{cursor:pointer;font-size:16px;line-height:1;margin-left:auto;margin-right:6px;width:16px;text-align:center;color:#888;align-self:center;user-select:none;-webkit-user-select:none;z-index:99999}.tbf-fav~.btn-wrap.torn-bazaar-fill-qty-price{margin-left:0}.tbf-fav.tbf-fav--on{color:gold;text-shadow:0 0 3px rgba(255,215,0,.7)}.tbf-fillall-bar{position:fixed;bottom:110px;right:16px;display:flex;align-items:center;gap:6px;padding:6px 8px;background:rgba(0,0,0,.55);border-radius:20px;z-index:999999;touch-action:none;transition:box-shadow .2s ease}.tbf-fillall-grip{cursor:grab;color:#bbb;font-size:14px;line-height:1;letter-spacing:-2px;min-width:12px;text-align:center;align-self:center;user-select:none;-webkit-user-select:none}.tbf-fillall-bar--dragging{cursor:grabbing;opacity:.92}.tbf-fillall-bar--dragging .tbf-fillall-grip{cursor:grabbing}.tbf-fillall-bar--min{padding:5px 7px;gap:4px}.tbf-fillall-bar--min .tbf-fillall-btn{display:none}.tbf-fillall-bar--min .tbf-fillall-grip{font-size:16px}.tbf-autofill-dot{display:none;width:10px;height:10px;border-radius:50%;background:gold;box-shadow:0 0 4px gold;animation:tbfPulse 1s ease-in-out infinite}.tbf-fillall-bar--active .tbf-autofill-dot{display:inline-block}.tbf-fillall-bar--active{box-shadow:0 0 10px 2px rgba(255,215,0,.75)}@keyframes tbfPulse{0%,100%{opacity:.3;transform:scale(.8)}50%{opacity:1;transform:scale(1.2)}}.tbf-viewport-border{display:none;position:fixed;top:0;right:0;bottom:0;left:0;border:3px solid gold;box-shadow:inset 0 0 12px rgba(255,215,0,.6);pointer-events:none;z-index:999998}.tbf-viewport-border--active{display:block}.tbf-toast{position:fixed;bottom:158px;right:16px;max-width:280px;background:rgba(0,0,0,.85);color:#fff;padding:10px 14px;border-radius:8px;border:1px solid gold;font-size:13px;line-height:1.4;z-index:1000000;opacity:0;visibility:hidden;transition:opacity .3s,visibility .3s}.tbf-toast--visible{opacity:1;visibility:visible}.tbf-fav.tbf-fav--off{color:#ff6b6b;text-shadow:none}`);
 
-    GM_addStyle(`.tbf-modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:2147483000;justify-content:center;align-items:flex-start;overflow:auto;padding:24px 12px;box-sizing:border-box}.tbf-modal-overlay--open{display:flex}.tbf-modal{background:#1f1f1f;color:#e6e6e6;width:100%;max-width:420px;border:1px solid #666;border-radius:10px;box-shadow:0 10px 40px rgba(0,0,0,.6);padding:16px 18px;box-sizing:border-box;font-size:13px;line-height:1.5}.tbf-modal h3{margin:0 0 12px;font-size:15px;display:flex;justify-content:space-between;align-items:center;color:#fff}.tbf-modal-close{cursor:pointer;color:#bbb;font-size:22px;line-height:1}.tbf-modal label{display:block;margin:10px 0 3px;font-weight:bold;color:#cfcfcf}.tbf-modal input[type=text]{width:100%;box-sizing:border-box;padding:7px 9px;border-radius:5px;border:1px solid #666;background:#111;color:#eee;font-size:13px}.tbf-modal-cats{margin-top:4px}.tbf-modal-cat-row{display:flex;gap:6px;margin-bottom:6px;align-items:center}.tbf-modal-cat-row .tbf-modal-cat-name{flex:1 1 55%}.tbf-modal-cat-row .tbf-modal-cat-formula{flex:1 1 45%}.tbf-modal-cat-del{cursor:pointer;color:#ff6b6b;font-size:20px;line-height:1;flex:0 0 auto;width:22px;text-align:center}.tbf-modal-addcat{margin-top:2px;cursor:pointer;background:#333;color:#eee;border:1px solid #666;border-radius:5px;padding:5px 10px;font-size:12px}.tbf-modal-resetcat{margin:2px 0 0 8px;cursor:pointer;background:#3a2a2a;color:#ddd;border:1px solid #774;border-radius:5px;padding:5px 10px;font-size:12px}.tbf-modal-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:16px}.tbf-modal-actions button{cursor:pointer;padding:7px 16px;border-radius:5px;border:1px solid #666;background:#333;color:#eee;font-size:13px}.tbf-modal-save{background:#2e7d32!important;border-color:#2e7d32!important;color:#fff!important}.tbf-modal-help{margin-top:12px;font-size:11px;color:#9a9a9a;line-height:1.5}.tbf-modal-help code{background:#000;padding:1px 4px;border-radius:3px;color:#cfc}`);
+    GM_addStyle(`.tbf-modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:2147483000;justify-content:center;align-items:flex-start;overflow:auto;padding:24px 12px;box-sizing:border-box}.tbf-modal-overlay--open{display:flex}.tbf-modal{background:#1f1f1f;color:#e6e6e6;width:100%;max-width:420px;border:1px solid #666;border-radius:10px;box-shadow:0 10px 40px rgba(0,0,0,.6);padding:16px 18px;box-sizing:border-box;font-size:13px;line-height:1.5}.tbf-modal h3{margin:0 0 12px;font-size:15px;display:flex;justify-content:space-between;align-items:center;color:#fff}.tbf-modal-close{cursor:pointer;color:#bbb;font-size:22px;line-height:1}.tbf-modal label{display:block;margin:10px 0 3px;font-weight:bold;color:#cfcfcf}.tbf-modal input[type=text]{width:100%;box-sizing:border-box;padding:7px 9px;border-radius:5px;border:1px solid #666;background:#111;color:#eee;font-size:13px}.tbf-modal-cats{margin-top:4px}.tbf-modal-cat-row{display:flex;gap:6px;margin-bottom:6px;align-items:center}.tbf-modal-cat-row .tbf-modal-cat-name{flex:1 1 55%}.tbf-modal-cat-row .tbf-modal-cat-formula{flex:1 1 45%}.tbf-modal-cat-del{cursor:pointer;color:#ff6b6b;font-size:20px;line-height:1;flex:0 0 auto;width:22px;text-align:center}.tbf-modal-addcat{margin-top:2px;cursor:pointer;background:#333;color:#eee;border:1px solid #666;border-radius:5px;padding:5px 10px;font-size:12px}.tbf-modal-resetcat{margin:2px 0 0 8px;cursor:pointer;background:#3a2a2a;color:#ddd;border:1px solid #774;border-radius:5px;padding:5px 10px;font-size:12px}.tbf-modal-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:16px}.tbf-modal-actions button{cursor:pointer;padding:7px 16px;border-radius:5px;border:1px solid #666;background:#333;color:#eee;font-size:13px}.tbf-modal-save{background:#2e7d32!important;border-color:#2e7d32!important;color:#fff!important}.tbf-modal-help{margin-top:12px;font-size:11px;color:#9a9a9a;line-height:1.5}.tbf-modal-help code{background:#000;padding:1px 4px;border-radius:3px;color:#cfc}.tbf-modal-cat-row input{min-width:0}.tbf-modal-cat-row .tbf-modal-cat-name{flex:1 1 38%}.tbf-modal-cat-row .tbf-modal-cat-formula{flex:1 1 32%}.tbf-modal-cat-row .tbf-modal-cat-qty{flex:1 1 30%}.tbf-modal-cat-head{display:flex;gap:6px;margin:0 0 4px;font-size:11px;color:#9a9a9a}.tbf-modal-cat-head span:nth-child(1){flex:1 1 38%}.tbf-modal-cat-head span:nth-child(2){flex:1 1 32%}.tbf-modal-cat-head span:nth-child(3){flex:1 1 30%}.tbf-modal-cat-head span:nth-child(4){flex:0 0 22px}.tbf-modal-clearexcl{margin:2px 0 0 8px;cursor:pointer;background:#3a2a2a;color:#ddd;border:1px solid #774;border-radius:5px;padding:5px 10px;font-size:12px}`);
 
     const favouritesStorageKey = "silmaril-torn-bazaar-filler-favourites";
     let favourites = loadFavourites();
+
+    // Excluded items are never touched by Fill All, and a manual Fill on one warns first.
+    // An item is either neutral, a favourite or excluded — never two of those at once.
+    const excludedStorageKey = "silmaril-torn-bazaar-filler-excluded";
+    let excluded = loadExcluded();
 
     // Per-category price-delta overrides + a persistent item→category(type) cache.
     // Item categories are immutable, so caching them avoids extra API calls when picking
     // which price source a category's formula needs.
     const categoryDeltasKey = "silmaril-torn-bazaar-filler-category-deltas";
+    // Per-category quantity overrides live in their own map so the existing delta entries keep
+    // their shape (a bare formula string) and upgrade without migration.
+    const categoryQuantitiesKey = "silmaril-torn-bazaar-filler-category-quantities";
     const itemCategoryCacheKey = "silmaril-torn-bazaar-filler-item-categories";
     // Item types are mostly immutable but Torn occasionally recategorises an item, so cached
     // categories are re-verified from each response and forcibly refreshed once past this TTL.
     const CATEGORY_TTL_MS = 14 * 24 * 60 * 60 * 1000;
     const SETTINGS_CATEGORIES = ["Melee","Primary","Secondary","Defensive","Temporary","Drug","Medical","Booster","Energy Drink","Alcohol","Enhancer","Clothing","Jewelry","Material","Flower","Plushie","Car","Supply Pack","Special","Collectible","Artifact","Tool","Other"];
     let categoryDeltas = loadCategoryDeltas();
+    let categoryQuantities = loadCategoryQuantities();
     let itemCategoryCache = loadItemCategoryCache();
 
     // "Fill All" auto-fill mode state. One activation fills each favourite item once;
@@ -193,12 +205,11 @@
             const favBtn = document.createElement('span');
             favBtn.className = 'tbf-fav';
             favBtn.dataset.tbfItemId = itemId;
-            favBtn.title = 'Toggle favourite (used by Fill All)';
-            renderFavIcon(favBtn, favourites.has(itemId));
+            renderFavIcon(favBtn, getItemState(itemId));
             favBtn.addEventListener('click', function(event) {
                 event.preventDefault();
                 event.stopPropagation();
-                toggleFavourite(itemId);
+                cycleItemState(itemId);
                 if (autoFillActive && favourites.has(itemId)) {
                     enqueueFavouriteRow(element);
                 }
@@ -212,8 +223,9 @@
             case pages.AddItems:
                 $(outerSpanFill).on("click", "input", function(event) {
                     checkApiKey();
+                    warnIfExcluded(this);
                     this.parentNode.style.display = "none";
-                    fillQuantityAndPrice(this, pageType);
+                    fillQuantityAndPrice(this, pageType, false);
                     event.stopPropagation();
                 });
 
@@ -226,6 +238,7 @@
             case pages.ManageItems:
                 $(outerSpanFill).on("click", "input", function(event) {
                     checkApiKey();
+                    warnIfExcluded(this);
                     // this.parentNode.style.display = "none";
                     updatePrice(this);
                     event.stopPropagation();
@@ -265,7 +278,7 @@
         return moneyGroupDiv.querySelector("span.overlay-percentage");
     }
 
-    async function fillQuantityAndPrice(element, pageType){
+    async function fillQuantityAndPrice(element, pageType, isAuto){
         let amountDiv = element.parentElement.parentElement.parentElement.parentElement.parentElement.querySelector("div.amount-main-wrap");
         let priceInputs = amountDiv.querySelectorAll("div.price div input");
         let keyupEvent = new Event("keyup", {bubbles: true});
@@ -287,12 +300,34 @@
         wave.style.animation = null;
         wave.style.backgroundColor = "transparent";
         wave.style.animationDuration = "1s";
+
+        // Single-copy items (most clothing) render as a checkbox instead of a quantity input,
+        // so their maximum is 1 by definition.
+        let checkbox = amountDiv.querySelector("div.amount.choice-container input");
+        let maxQuantity = checkbox != null ? 1 : getMaxQuantity(element, pageType);
+        // Resolve up front when no category override could change the answer, so a row that
+        // resolves to "list nothing" costs no API call. Otherwise wait until the fetch has
+        // told us the item's category.
+        let resolvedQuantity = hasCategoryQuantityOverrides() ? undefined : resolveQuantity(maxQuantity, quantityModeRaw);
+        let skipped = false;
         try {
+            if (resolvedQuantity === null){
+                skipped = true;
+                return reportSkippedRow(wave, extractedItemId, maxQuantity, quantityModeRaw, isAuto);
+            }
             let pricing = await fetchPricingForItem(extractedItemId);
             let data = pricing.data;
             let apiErrorStatus = handleApiError(data, wave);
             if (apiErrorStatus !== null){
                 return apiErrorStatus;
+            }
+            if (resolvedQuantity === undefined){
+                let categoryMode = getEffectiveQuantity(pricing.category);
+                resolvedQuantity = resolveQuantity(maxQuantity, categoryMode);
+                if (resolvedQuantity === null){
+                    skipped = true;
+                    return reportSkippedRow(wave, extractedItemId, maxQuantity, categoryMode, isAuto);
+                }
             }
             let formula = pricing.formula;
             let lowBallPrice = Number.MAX_VALUE;
@@ -339,12 +374,15 @@
             priceInputs[1].value = lowBallPrice;
             priceInputs[0].dispatchEvent(inputEvent);
 
-            let isQuantityCheckbox = amountDiv.querySelector("div.amount.choice-container") !== null;
-            if (isQuantityCheckbox){
-                amountDiv.querySelector("div.amount.choice-container input").click();
+            if (checkbox != null){
+                // Set, never toggle: a second Fill (or a Fill after the user unchecked the row
+                // by hand) must not silently deselect — or reselect — the item.
+                if (!checkbox.checked){
+                    checkbox.click();
+                }
             } else {
                 let quantityInput = amountDiv.querySelector("div.amount input");
-                quantityInput.value = getQuantity(element, pageType);
+                quantityInput.value = resolvedQuantity;
                 quantityInput.dispatchEvent(keyupEvent);
             }
             return "ok";
@@ -354,7 +392,12 @@
             console.error("[TornBazaarFiller] Error fetching data:", error);
             return "error";
         } finally {
-            element.parentNode.parentNode.parentNode.querySelector("span.btn-wrap.torn-bazaar-clear-qty-price span.btn").style.display = "inline-block";
+            // A skipped row was left exactly as it was, so put Fill back rather than offering
+            // a Clear for something that never got filled.
+            let buttonSelector = skipped
+                ? "span.btn-wrap.torn-bazaar-fill-qty-price span.btn"
+                : "span.btn-wrap.torn-bazaar-clear-qty-price span.btn";
+            element.parentNode.parentNode.parentNode.querySelector(buttonSelector).style.display = "inline-block";
         }
     }
 
@@ -469,9 +512,12 @@
         let wave = element.parentElement.parentElement.parentElement.querySelector("div.wave");
         wave.style.backgroundColor = "white";
 
-        let isQuantityCheckbox = amountDiv.querySelector("div.amount.choice-container") !== null;
-        if (isQuantityCheckbox){
-            amountDiv.querySelector("div.amount.choice-container input").click();
+        let checkbox = amountDiv.querySelector("div.amount.choice-container input");
+        if (checkbox != null){
+            // Unset, never toggle — clearing a row the user already unchecked must not re-check it.
+            if (checkbox.checked){
+                checkbox.click();
+            }
         } else {
             let quantityInput = amountDiv.querySelector("div.amount input");
             quantityInput.value = "";
@@ -498,7 +544,7 @@
     //         wave.style.backgroundColor = "white";
 
     //         let quantityInput = itemRow.querySelector("div.remove___R4eVW input");
-    //         quantityInput.value = getQuantity(element, pageType);
+    //         quantityInput.value = getMaxQuantity(element, pageType);
     //         quantityInput.dispatchEvent(keyupEvent);
 
     //         wave.style.animation = 'none';
@@ -508,14 +554,15 @@
     //         element.parentNode.parentNode.parentNode.querySelector("span.btn-wrap.torn-bazaar-fill-qty-price span.btn").style.display = "inline-block";
     //     }
 
-    function getQuantity(element, pageType){
+    // How many of the item the row says you own, or null when it can't be read.
+    function getMaxQuantity(element, pageType){
         let rgx = /x(\d+)$/;
         let rgxMobile = /^x(\d+)/
         let quantityText = '';
         switch(pageType){
             case pages.AddItems:
                 // Read the row's text but skip the nodes we inject (favourite star, fill/clear
-                // buttons, wave). The star adds a trailing ★/☆ character that would otherwise
+                // buttons, wave). The star adds a trailing ★/☆/⊘ character that would otherwise
                 // break the end-anchored desktop regex and silently fall back to qty 1.
                 quantityText = getRowTextExcludingInjected(element.parentNode.parentNode.parentNode).trim();
                 break;
@@ -525,10 +572,64 @@
         }
         let match = isMobileView ? rgxMobile.exec(quantityText) : rgx.exec(quantityText);
         if (match === null){
-            console.warn("[TornBazaarFiller] Quantity not found in row text, defaulting to 1:", quantityText);
+            console.warn("[TornBazaarFiller] Quantity not found in row text:", quantityText);
+            return null;
+        }
+        let parsed = parseInt(match[1], 10);
+        return (isNaN(parsed) || parsed < 1) ? null : parsed;
+    }
+
+    function hasCategoryQuantityOverrides(){
+        return Object.keys(categoryQuantities).length > 0;
+    }
+
+    // Resolve a quantity mode against a row's maximum. Returns a positive integer to list, or
+    // null when the row should be left completely untouched ("keep them all").
+    // Accepted syntax: "max", "max-N", a plain number, and "skip"/"none"/"0".
+    function resolveQuantity(maxQuantity, mode){
+        let normalised = String(mode ?? 'max').trim().toLowerCase();
+        let fixed = normalised.match(/^(\d+)$/);
+        let maxMinus = normalised.match(/^max\s*-\s*(\d+)$/);
+        if (normalised === 'skip' || normalised === 'none' || (fixed && parseInt(fixed[1], 10) === 0)){
+            return null;
+        }
+        if (fixed){
+            // A fixed amount doesn't need the row's maximum — Torn clamps anything too large.
+            let wanted = parseInt(fixed[1], 10);
+            return maxQuantity != null ? Math.min(wanted, maxQuantity) : wanted;
+        }
+        if (maxMinus){
+            if (maxQuantity == null){
+                console.warn("[TornBazaarFiller] Row quantity unknown — leaving the row alone rather than risk listing a kept copy.");
+                return null;
+            }
+            let wanted = maxQuantity - parseInt(maxMinus[1], 10);
+            return wanted > 0 ? wanted : null;
+        }
+        if (normalised !== '' && normalised !== 'max'){
+            console.warn("[TornBazaarFiller] Unrecognised quantity mode '" + mode + "', using max.");
+        }
+        if (maxQuantity == null){
+            console.warn("[TornBazaarFiller] Quantity not found in row, defaulting to 1.");
             return 1;
         }
-        return match[1];
+        return maxQuantity;
+    }
+
+    // The row is deliberately left as-is: neutral wave, no price, no selection.
+    function reportSkippedRow(wave, itemId, maxQuantity, mode, isAuto){
+        wave.style.backgroundColor = "white";
+        wave.style.animation = 'none';
+        wave.offsetHeight;
+        wave.style.animation = null;
+        let modeLabel = String(mode ?? 'max').trim();
+        console.info("[TornBazaarFiller] Item " + itemId + " left untouched — quantity mode '" + modeLabel +
+                     "' lists nothing out of " + (maxQuantity ?? "an unknown number") + ".");
+        if (!isAuto){
+            showToast("Nothing listed — quantity mode \"" + modeLabel + "\" keeps all " +
+                      (maxQuantity ?? "?") + " of this item.");
+        }
+        return "skipped";
     }
 
     // Concatenate a container's text content while ignoring the elements this script injects,
@@ -598,21 +699,68 @@
         localStorage.setItem(favouritesStorageKey, JSON.stringify([...favourites]));
     }
 
-    function toggleFavourite(itemId){
-        if (favourites.has(itemId)) {
-            favourites.delete(itemId);
-        } else {
-            favourites.add(itemId);
+    function loadExcluded(){
+        try {
+            let stored = JSON.parse(localStorage.getItem(excludedStorageKey) ?? "[]");
+            return new Set(Array.isArray(stored) ? stored : []);
+        } catch (error) {
+            console.error("[TornBazaarFiller] Failed to load excluded items:", error);
+            return new Set();
+        }
+    }
+
+    function saveExcluded(){
+        localStorage.setItem(excludedStorageKey, JSON.stringify([...excluded]));
+    }
+
+    function getItemState(itemId){
+        if (excluded.has(itemId)) {
+            return 'excluded';
+        }
+        return favourites.has(itemId) ? 'favourite' : 'neutral';
+    }
+
+    // neutral → favourite → excluded → neutral. The three states are mutually exclusive.
+    function cycleItemState(itemId){
+        switch (getItemState(itemId)) {
+            case 'neutral':
+                favourites.add(itemId);
+                break;
+            case 'favourite':
+                favourites.delete(itemId);
+                excluded.add(itemId);
+                break;
+            default:
+                excluded.delete(itemId);
+                break;
         }
         saveFavourites();
+        saveExcluded();
+        let state = getItemState(itemId);
         document.querySelectorAll('.tbf-fav[data-tbf-item-id="' + itemId + '"]').forEach(function(el){
-            renderFavIcon(el, favourites.has(itemId));
+            renderFavIcon(el, state);
         });
     }
 
-    function renderFavIcon(el, isOn){
-        el.textContent = isOn ? '★' : '☆';
-        el.classList.toggle('tbf-fav--on', isOn);
+    function renderFavIcon(el, state){
+        el.textContent = state === 'favourite' ? '★' : (state === 'excluded' ? '⊘' : '☆');
+        el.classList.toggle('tbf-fav--on', state === 'favourite');
+        el.classList.toggle('tbf-fav--off', state === 'excluded');
+        el.title = state === 'favourite'
+            ? 'Favourite — filled by Fill All. Click to exclude.'
+            : (state === 'excluded'
+               ? 'Excluded — never filled by Fill All, and a manual Fill warns first. Click to reset.'
+               : 'Click to mark as a favourite (used by Fill All).');
+    }
+
+    // A manual Fill on an excluded item still fills — the exclusion only governs Fill All —
+    // but it says so, so an accidental click on the wrong row is obvious straight away.
+    function warnIfExcluded(inputEl){
+        let wrapper = inputEl.parentNode.parentNode.parentNode;
+        let itemId = parseInt(wrapper.dataset.tbfItemId, 10);
+        if (!isNaN(itemId) && excluded.has(itemId)){
+            showToast("Heads up: this item is marked excluded (⊘). Filling it anyway because you clicked Fill.");
+        }
     }
 
     // element is the row's name-wrap (Add Items) or desc (Manage Items) container,
@@ -955,7 +1103,7 @@
             return;
         }
         let itemId = parseInt(wrapper.dataset.tbfItemId, 10);
-        if (!favourites.has(itemId) || autoFillDoneIds.has(itemId) || autoFillQueuedIds.has(itemId)) {
+        if (!favourites.has(itemId) || excluded.has(itemId) || autoFillDoneIds.has(itemId) || autoFillQueuedIds.has(itemId)) {
             return;
         }
         autoFillQueuedIds.add(itemId);
@@ -972,7 +1120,7 @@
             while (autoFillActive && autoFillQueue.length > 0) {
                 let wrapper = autoFillQueue.shift();
                 let itemId = parseInt(wrapper.dataset.tbfItemId, 10);
-                if (!wrapper.isConnected || !favourites.has(itemId)) {
+                if (!wrapper.isConnected || !favourites.has(itemId) || excluded.has(itemId)) {
                     // Row unmounted (virtualized list) or unfavourited meanwhile; it will be
                     // re-queued by the scan if it mounts again.
                     autoFillQueuedIds.delete(itemId);
@@ -988,7 +1136,7 @@
                 try {
                     if (pageType === pages.AddItems) {
                         fillInput.parentNode.style.display = "none";
-                        status = await fillQuantityAndPrice(fillInput, pageType);
+                        status = await fillQuantityAndPrice(fillInput, pageType, true);
                     } else {
                         status = await updatePrice(fillInput);
                     }
@@ -1009,7 +1157,7 @@
                 }
                 autoFillQueuedIds.delete(itemId);
                 autoFillDoneIds.add(itemId);
-                if (status !== "ok") {
+                if (status !== "ok" && status !== "skipped") {
                     console.warn("[TornBazaarFiller] Fill All skipped item " + itemId + " after error.");
                 }
                 await sleep(randomBetween(FILL_COOLDOWN_MIN_MS, FILL_COOLDOWN_MAX_MS));
@@ -1085,6 +1233,20 @@
         localStorage.setItem(categoryDeltasKey, JSON.stringify(categoryDeltas));
     }
 
+    function loadCategoryQuantities(){
+        try {
+            let parsed = JSON.parse(localStorage.getItem(categoryQuantitiesKey) ?? "{}");
+            return (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) ? parsed : {};
+        } catch (error) {
+            console.error("[TornBazaarFiller] Failed to load category quantities:", error);
+            return {};
+        }
+    }
+
+    function saveCategoryQuantities(){
+        localStorage.setItem(categoryQuantitiesKey, JSON.stringify(categoryQuantities));
+    }
+
     function loadItemCategoryCache(){
         try {
             let parsed = JSON.parse(localStorage.getItem(itemCategoryCacheKey) ?? "{}");
@@ -1140,6 +1302,17 @@
         return priceDeltaRaw;
     }
 
+    // Same lookup as getEffectiveDelta, for the quantity mode.
+    function getEffectiveQuantity(category){
+        if (category != null){
+            let override = categoryQuantities[String(category).trim().toLowerCase()];
+            if (override != null && String(override).trim() !== ''){
+                return String(override).trim();
+            }
+        }
+        return quantityModeRaw;
+    }
+
     function buildPriceUrl(useItems, itemId){
         return (useItems ? itemUrl : marketUrl)
             .replace("{itemId}", itemId)
@@ -1163,11 +1336,12 @@
     // picked up on the next fill. Past the TTL we refresh via the items endpoint (always carries
     // type). Only the first fill after a change whose category also flips the source costs 2 calls.
     async function fetchPricingForItem(itemId){
-        // No per-category overrides → category is irrelevant; behave exactly like the default path.
-        if (Object.keys(categoryDeltas).length === 0){
+        // No per-category overrides of either kind → category is irrelevant; behave exactly
+        // like the default path.
+        if (Object.keys(categoryDeltas).length === 0 && !hasCategoryQuantityOverrides()){
             let useItems = priceDeltaRaw.indexOf('[market]') != -1;
             let data = await fetch(buildPriceUrl(useItems, itemId)).then(response => response.json());
-            return { data: data, formula: priceDeltaRaw, useItems: useItems };
+            return { data: data, formula: priceDeltaRaw, useItems: useItems, category: null };
         }
 
         let cached = getCachedCategory(itemId);
@@ -1178,7 +1352,7 @@
         let firstUseItems = expired ? true : (getEffectiveDelta(guessCategory).indexOf('[market]') != -1);
         let data = await fetch(buildPriceUrl(firstUseItems, itemId)).then(response => response.json());
         if (data.error != null){
-            return { data: data, formula: getEffectiveDelta(guessCategory), useItems: firstUseItems };
+            return { data: data, formula: getEffectiveDelta(guessCategory), useItems: firstUseItems, category: guessCategory };
         }
         let actualType = readCategoryFromData(data, itemId, firstUseItems);
         let category = actualType != null ? actualType : guessCategory;
@@ -1189,9 +1363,9 @@
         let useItems = formula.indexOf('[market]') != -1;
         if (useItems !== firstUseItems){
             let data2 = await fetch(buildPriceUrl(useItems, itemId)).then(response => response.json());
-            return { data: data2, formula: formula, useItems: useItems };
+            return { data: data2, formula: formula, useItems: useItems, category: category };
         }
-        return { data: data, formula: formula, useItems: useItems };
+        return { data: data, formula: formula, useItems: useItems, category: category };
     }
 
     function ensureSettingsModal(){
@@ -1205,17 +1379,23 @@
                 '<h3>Bazaar Filler Settings<span class="tbf-modal-close" title="Close">&times;</span></h3>' +
                 '<label>Default price delta</label>' +
                 '<input type="text" class="tbf-modal-delta" placeholder="-1">' +
+                '<label>Default quantity</label>' +
+                '<input type="text" class="tbf-modal-qty" placeholder="max">' +
                 '<label>Public API key</label>' +
                 '<input type="text" class="tbf-modal-apikey" placeholder="16-character key">' +
                 '<label>Per-category overrides</label>' +
+                '<div class="tbf-modal-cat-head"><span>Category</span><span>Price</span><span>Quantity</span><span></span></div>' +
                 '<div class="tbf-modal-cats"></div>' +
                 '<button type="button" class="tbf-modal-addcat">+ Add category</button>' +
                 '<button type="button" class="tbf-modal-resetcat" title="Forget cached item categories. Use if Torn recategorised an item and a wrong discount is being applied.">Reset learned categories</button>' +
+                '<button type="button" class="tbf-modal-clearexcl" title="Un-exclude every item marked ⊘, including ones not currently on screen.">Clear exclusions</button>' +
                 '<div class="tbf-modal-actions">' +
                     '<button type="button" class="tbf-modal-cancel">Cancel</button>' +
                     '<button type="button" class="tbf-modal-save">Save</button>' +
                 '</div>' +
-                '<div class="tbf-modal-help">Examples: <code>-1</code> (lowest − $1), <code>-5%</code>, <code>-1[1]</code> (2nd lowest listing), <code>[market]</code> (item market value). Category rows accept the same syntax — including a different source — and fall back to the default when blank.</div>' +
+                '<div class="tbf-modal-help">Price examples: <code>-1</code> (lowest − $1), <code>-5%</code>, <code>-1[1]</code> (2nd lowest listing), <code>[market]</code> (item market value).<br>' +
+                'Quantity examples: <code>max</code> (all of them), <code>max-1</code> (keep one back), <code>max-3</code>, <code>1</code> (always list one), <code>skip</code> (never list this category).<br>' +
+                'Category rows accept the same syntax and fall back to the defaults above when blank.</div>' +
             '</div>' +
             '<datalist id="tbf-modal-cat-list">' + SETTINGS_CATEGORIES.map(c => '<option value="' + c + '"></option>').join('') + '</datalist>';
         document.body.appendChild(overlay);
@@ -1223,17 +1403,27 @@
         overlay.querySelector('.tbf-modal-close').addEventListener('click', closeSettingsModal);
         overlay.querySelector('.tbf-modal-cancel').addEventListener('click', closeSettingsModal);
         overlay.addEventListener('click', function(event){ if (event.target === overlay){ closeSettingsModal(); } });
-        overlay.querySelector('.tbf-modal-addcat').addEventListener('click', function(){ addCategoryRow('', ''); });
+        overlay.querySelector('.tbf-modal-addcat').addEventListener('click', function(){ addCategoryRow('', '', ''); });
         overlay.querySelector('.tbf-modal-resetcat').addEventListener('click', function(event){
             clearItemCategoryCache();
             let btn = event.target;
             btn.textContent = 'Cleared ✓';
             setTimeout(function(){ btn.textContent = 'Reset learned categories'; }, 1500);
         });
+        overlay.querySelector('.tbf-modal-clearexcl').addEventListener('click', function(event){
+            excluded.clear();
+            saveExcluded();
+            document.querySelectorAll('.tbf-fav').forEach(function(el){
+                renderFavIcon(el, getItemState(parseInt(el.dataset.tbfItemId, 10)));
+            });
+            let btn = event.target;
+            btn.textContent = 'Cleared ✓';
+            setTimeout(function(){ btn.textContent = 'Clear exclusions'; }, 1500);
+        });
         overlay.querySelector('.tbf-modal-save').addEventListener('click', saveSettingsModal);
     }
 
-    function addCategoryRow(name, formula){
+    function addCategoryRow(name, formula, quantity){
         const list = document.querySelector('.tbf-modal-cats');
         if (list == null){
             return;
@@ -1243,9 +1433,11 @@
         row.innerHTML =
             '<input type="text" class="tbf-modal-cat-name" list="tbf-modal-cat-list" placeholder="Category">' +
             '<input type="text" class="tbf-modal-cat-formula" placeholder="-5%">' +
+            '<input type="text" class="tbf-modal-cat-qty" placeholder="max-1">' +
             '<span class="tbf-modal-cat-del" title="Remove">&times;</span>';
         row.querySelector('.tbf-modal-cat-name').value = name;
         row.querySelector('.tbf-modal-cat-formula').value = formula;
+        row.querySelector('.tbf-modal-cat-qty').value = quantity;
         row.querySelector('.tbf-modal-cat-del').addEventListener('click', function(){ row.remove(); });
         list.appendChild(row);
     }
@@ -1254,10 +1446,14 @@
         ensureSettingsModal();
         const overlay = document.querySelector('.tbf-modal-overlay');
         overlay.querySelector('.tbf-modal-delta').value = priceDeltaRaw;
+        overlay.querySelector('.tbf-modal-qty').value = quantityModeRaw;
         overlay.querySelector('.tbf-modal-apikey').value = apiKey ?? '';
         const list = overlay.querySelector('.tbf-modal-cats');
         list.innerHTML = '';
-        Object.keys(categoryDeltas).forEach(function(key){ addCategoryRow(key, categoryDeltas[key]); });
+        // One row per category named by either map, so a category with only a quantity
+        // override still shows up.
+        let names = [...new Set(Object.keys(categoryDeltas).concat(Object.keys(categoryQuantities)))];
+        names.forEach(function(key){ addCategoryRow(key, categoryDeltas[key] ?? '', categoryQuantities[key] ?? ''); });
         overlay.classList.add('tbf-modal-overlay--open');
     }
 
@@ -1278,6 +1474,9 @@
             priceDeltaRaw = deltaVal;
             localStorage.setItem("silmaril-torn-bazaar-filler-price-delta", priceDeltaRaw);
         }
+        let qtyVal = overlay.querySelector('.tbf-modal-qty').value.trim();
+        quantityModeRaw = qtyVal === '' ? 'max' : qtyVal;
+        localStorage.setItem("silmaril-torn-bazaar-filler-quantity-mode", quantityModeRaw);
         let keyVal = overlay.querySelector('.tbf-modal-apikey').value.trim();
         if (keyVal.length === 16){
             apiKey = keyVal;
@@ -1286,15 +1485,25 @@
             console.warn("[TornBazaarFiller] API key must be 16 characters; ignored.");
         }
         let map = {};
+        let quantityMap = {};
         overlay.querySelectorAll('.tbf-modal-cat-row').forEach(function(row){
             let name = row.querySelector('.tbf-modal-cat-name').value.trim().toLowerCase();
             let formula = row.querySelector('.tbf-modal-cat-formula').value.trim();
-            if (name !== '' && formula !== ''){
+            let quantity = row.querySelector('.tbf-modal-cat-qty').value.trim();
+            if (name === ''){
+                return;
+            }
+            if (formula !== ''){
                 map[name] = formula;
+            }
+            if (quantity !== ''){
+                quantityMap[name] = quantity;
             }
         });
         categoryDeltas = map;
+        categoryQuantities = quantityMap;
         saveCategoryDeltas();
+        saveCategoryQuantities();
         closeSettingsModal();
     }
 
