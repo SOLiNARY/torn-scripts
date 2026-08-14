@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Torn Bazaar Filler
 // @namespace    https://github.com/SOLiNARY
-// @version      1.7.0
-// @description  On "Fill" click autofills bazaar item price with lowest market price currently minus $1 (can be customised), shows current price coefficient compared to 3rd lowest, fills the quantity your quantity mode asks for, marks checkboxes for guns. Hold a Fill/Update button for 3s to open the settings modal (price delta, quantity mode, API key, and per-category overrides — set different discounts/sources/quantities for Clothing, Other, Drug, etc.). Quantity modes: "max" (default), "max-1" to always keep a copy, a fixed number, or "skip" to never list a category. Cycle the star next to Fill/Update to mark an item as a favourite (★, used by Fill All) or excluded (⊘, never auto-filled). Use "Fill All" to auto-fill every favourite row on both the Add Items and Manage Items pages, including ones appearing later via infinite scroll or category switches. Drag the Fill All bar anywhere; drop it near a screen edge to clamp and minimise it — its position and state are remembered.
+// @version      1.8.0
+// @description  On "Fill" click autofills bazaar item price with lowest market price currently minus $1 (can be customised), shows current price coefficient compared to 3rd lowest, fills the quantity your quantity mode asks for, marks checkboxes for guns. Click the ⚙ cog on the Fill All bar — or hold a Fill/Update button for 3s — to open the settings modal (price delta, quantity mode, API key, and per-category overrides — set different discounts/sources/quantities for Clothing, Other, Drug, etc.). Quantity modes: "max" (default), "max-1" to always keep a copy, a fixed number, or "skip" to never list a category. Cycle the star next to Fill/Update to mark an item as a favourite (★, used by Fill All) or excluded (⊘, never auto-filled). Use "Fill All" to auto-fill every favourite row on both the Add Items and Manage Items pages, including ones appearing later via infinite scroll or category switches. Drag the Fill All bar anywhere; drop it near a screen edge to clamp and minimise it — its position and state are remembered.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT License
 // @match        https://www.torn.com/bazaar.php*
@@ -39,7 +39,7 @@
         document.head.appendChild(style);
     };
 
-    GM_addStyle(`.btn-wrap.torn-bazaar-fill-qty-price{float:right;margin-left:auto;z-index:99999}.btn-wrap.torn-bazaar-clear-qty-price{z-index:99999}div.title-wrap div.name-wrap{display:flex;justify-content:flex-end}.wave-animation{position:relative;overflow:hidden}.wave{pointer-events:none;position:absolute;width:100%;height:33px;background-color:transparent;opacity:0;transform:translateX(-100%);animation:waveAnimation 1s cubic-bezier(0, 0, 0, 1)}@keyframes waveAnimation{0%{opacity:1;transform:translateX(-100%)}100%{opacity:0;transform:translateX(100%)}}.overlay-percentage{position:absolute;top:0;background-color:rgba(0, 0, 0, 0.9);padding:0 5px;border-radius:15px;font-size:10px;pointer-events:none}.overlay-percentage-add{right:-30px}.overlay-percentage-manage{right:0}.torn-bazaar-fill-qty-price input{-webkit-touch-callout:none;-webkit-user-select:none;user-select:none;transition:box-shadow 0s}.torn-bazaar-fill-qty-price input.tbf-holding{box-shadow:inset 0 0 0 40px rgba(0,180,255,.35);transition:box-shadow 3s linear}.tbf-fav{cursor:pointer;font-size:16px;line-height:1;margin-left:auto;margin-right:6px;width:16px;text-align:center;color:#888;align-self:center;user-select:none;-webkit-user-select:none;z-index:99999}.tbf-fav~.btn-wrap.torn-bazaar-fill-qty-price{margin-left:0}.tbf-fav.tbf-fav--on{color:gold;text-shadow:0 0 3px rgba(255,215,0,.7)}.tbf-fillall-bar{position:fixed;bottom:110px;right:16px;display:flex;align-items:center;gap:6px;padding:6px 8px;background:rgba(0,0,0,.55);border-radius:20px;z-index:999999;touch-action:none;transition:box-shadow .2s ease}.tbf-fillall-grip{cursor:grab;color:#bbb;font-size:14px;line-height:1;letter-spacing:-2px;min-width:12px;text-align:center;align-self:center;user-select:none;-webkit-user-select:none}.tbf-fillall-bar--dragging{cursor:grabbing;opacity:.92}.tbf-fillall-bar--dragging .tbf-fillall-grip{cursor:grabbing}.tbf-fillall-bar--min{padding:5px 7px;gap:4px}.tbf-fillall-bar--min .tbf-fillall-btn{display:none}.tbf-fillall-bar--min .tbf-fillall-grip{font-size:16px}.tbf-autofill-dot{display:none;width:10px;height:10px;border-radius:50%;background:gold;box-shadow:0 0 4px gold;animation:tbfPulse 1s ease-in-out infinite}.tbf-fillall-bar--active .tbf-autofill-dot{display:inline-block}.tbf-fillall-bar--active{box-shadow:0 0 10px 2px rgba(255,215,0,.75)}@keyframes tbfPulse{0%,100%{opacity:.3;transform:scale(.8)}50%{opacity:1;transform:scale(1.2)}}.tbf-viewport-border{display:none;position:fixed;top:0;right:0;bottom:0;left:0;border:3px solid gold;box-shadow:inset 0 0 12px rgba(255,215,0,.6);pointer-events:none;z-index:999998}.tbf-viewport-border--active{display:block}.tbf-toast{position:fixed;bottom:158px;right:16px;max-width:280px;background:rgba(0,0,0,.85);color:#fff;padding:10px 14px;border-radius:8px;border:1px solid gold;font-size:13px;line-height:1.4;z-index:1000000;opacity:0;visibility:hidden;transition:opacity .3s,visibility .3s}.tbf-toast--visible{opacity:1;visibility:visible}.tbf-fav.tbf-fav--off{color:#ff6b6b;text-shadow:none}`);
+    GM_addStyle(`.btn-wrap.torn-bazaar-fill-qty-price{float:right;margin-left:auto;z-index:99999}.btn-wrap.torn-bazaar-clear-qty-price{z-index:99999}div.title-wrap div.name-wrap{display:flex;justify-content:flex-end}.wave-animation{position:relative;overflow:hidden}.wave{pointer-events:none;position:absolute;width:100%;height:33px;background-color:transparent;opacity:0;transform:translateX(-100%);animation:waveAnimation 1s cubic-bezier(0, 0, 0, 1)}@keyframes waveAnimation{0%{opacity:1;transform:translateX(-100%)}100%{opacity:0;transform:translateX(100%)}}.overlay-percentage{position:absolute;top:0;background-color:rgba(0, 0, 0, 0.9);padding:0 5px;border-radius:15px;font-size:10px;pointer-events:none}.overlay-percentage-add{right:-30px}.overlay-percentage-manage{right:0}.torn-bazaar-fill-qty-price input{-webkit-touch-callout:none;-webkit-user-select:none;user-select:none;transition:box-shadow 0s}.torn-bazaar-fill-qty-price input.tbf-holding{box-shadow:inset 0 0 0 40px rgba(0,180,255,.35);transition:box-shadow 3s linear}.tbf-fav{cursor:pointer;font-size:16px;line-height:1;margin-left:auto;margin-right:6px;width:16px;text-align:center;color:#888;align-self:center;user-select:none;-webkit-user-select:none;z-index:99999}.tbf-fav~.btn-wrap.torn-bazaar-fill-qty-price{margin-left:0}.tbf-fav.tbf-fav--on{color:gold;text-shadow:0 0 3px rgba(255,215,0,.7)}.tbf-fillall-bar{position:fixed;bottom:110px;right:16px;display:flex;align-items:center;gap:6px;padding:6px 8px;background:rgba(0,0,0,.55);border-radius:20px;z-index:999999;touch-action:none;transition:box-shadow .2s ease}.tbf-fillall-grip{cursor:grab;color:#bbb;font-size:14px;line-height:1;letter-spacing:-2px;min-width:12px;text-align:center;align-self:center;user-select:none;-webkit-user-select:none}.tbf-fillall-bar--dragging{cursor:grabbing;opacity:.92}.tbf-fillall-bar--dragging .tbf-fillall-grip{cursor:grabbing}.tbf-fillall-cog{cursor:pointer;flex:0 0 auto;display:flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:rgba(255,255,255,.12);color:#ddd;font-size:13px;line-height:1;user-select:none;-webkit-user-select:none}.tbf-fillall-cog:hover{background:rgba(255,255,255,.28);color:#fff}.tbf-fillall-bar--min{padding:5px 7px;gap:4px}.tbf-fillall-bar--min .tbf-fillall-btn,.tbf-fillall-bar--min .tbf-fillall-cog{display:none}.tbf-fillall-bar--min .tbf-fillall-grip{font-size:16px}.tbf-autofill-dot{display:none;width:10px;height:10px;border-radius:50%;background:gold;box-shadow:0 0 4px gold;animation:tbfPulse 1s ease-in-out infinite}.tbf-fillall-bar--active .tbf-autofill-dot{display:inline-block}.tbf-fillall-bar--active{box-shadow:0 0 10px 2px rgba(255,215,0,.75)}@keyframes tbfPulse{0%,100%{opacity:.3;transform:scale(.8)}50%{opacity:1;transform:scale(1.2)}}.tbf-viewport-border{display:none;position:fixed;top:0;right:0;bottom:0;left:0;border:3px solid gold;box-shadow:inset 0 0 12px rgba(255,215,0,.6);pointer-events:none;z-index:999998}.tbf-viewport-border--active{display:block}.tbf-toast{position:fixed;bottom:158px;right:16px;max-width:280px;background:rgba(0,0,0,.85);color:#fff;padding:10px 14px;border-radius:8px;border:1px solid gold;font-size:13px;line-height:1.4;z-index:1000000;opacity:0;visibility:hidden;transition:opacity .3s,visibility .3s}.tbf-toast--visible{opacity:1;visibility:visible}.tbf-fav.tbf-fav--off{color:#ff6b6b;text-shadow:none}`);
 
     GM_addStyle(`.tbf-modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:2147483000;justify-content:center;align-items:flex-start;overflow:auto;padding:24px 12px;box-sizing:border-box}.tbf-modal-overlay--open{display:flex}.tbf-modal{background:#1f1f1f;color:#e6e6e6;width:100%;max-width:420px;border:1px solid #666;border-radius:10px;box-shadow:0 10px 40px rgba(0,0,0,.6);padding:16px 18px;box-sizing:border-box;font-size:13px;line-height:1.5}.tbf-modal h3{margin:0 0 12px;font-size:15px;display:flex;justify-content:space-between;align-items:center;color:#fff}.tbf-modal-close{cursor:pointer;color:#bbb;font-size:22px;line-height:1}.tbf-modal label{display:block;margin:10px 0 3px;font-weight:bold;color:#cfcfcf}.tbf-modal input[type=text]{width:100%;box-sizing:border-box;padding:7px 9px;border-radius:5px;border:1px solid #666;background:#111;color:#eee;font-size:13px}.tbf-modal-cats{margin-top:4px}.tbf-modal-cat-row{display:flex;gap:6px;margin-bottom:6px;align-items:center}.tbf-modal-cat-row .tbf-modal-cat-name{flex:1 1 55%}.tbf-modal-cat-row .tbf-modal-cat-formula{flex:1 1 45%}.tbf-modal-cat-del{cursor:pointer;color:#ff6b6b;font-size:20px;line-height:1;flex:0 0 auto;width:22px;text-align:center}.tbf-modal-addcat{margin-top:2px;cursor:pointer;background:#333;color:#eee;border:1px solid #666;border-radius:5px;padding:5px 10px;font-size:12px}.tbf-modal-resetcat{margin:2px 0 0 8px;cursor:pointer;background:#3a2a2a;color:#ddd;border:1px solid #774;border-radius:5px;padding:5px 10px;font-size:12px}.tbf-modal-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:16px}.tbf-modal-actions button{cursor:pointer;padding:7px 16px;border-radius:5px;border:1px solid #666;background:#333;color:#eee;font-size:13px}.tbf-modal-save{background:#2e7d32!important;border-color:#2e7d32!important;color:#fff!important}.tbf-modal-help{margin-top:12px;font-size:11px;color:#9a9a9a;line-height:1.5}.tbf-modal-help code{background:#000;padding:1px 4px;border-radius:3px;color:#cfc}.tbf-modal-cat-row input{min-width:0}.tbf-modal-cat-row .tbf-modal-cat-name{flex:1 1 38%}.tbf-modal-cat-row .tbf-modal-cat-formula{flex:1 1 32%}.tbf-modal-cat-row .tbf-modal-cat-qty{flex:1 1 30%}.tbf-modal-cat-head{display:flex;gap:6px;margin:0 0 4px;font-size:11px;color:#9a9a9a}.tbf-modal-cat-head span:nth-child(1){flex:1 1 38%}.tbf-modal-cat-head span:nth-child(2){flex:1 1 32%}.tbf-modal-cat-head span:nth-child(3){flex:1 1 30%}.tbf-modal-cat-head span:nth-child(4){flex:0 0 22px}.tbf-modal-clearexcl{margin:2px 0 0 8px;cursor:pointer;background:#3a2a2a;color:#ddd;border:1px solid #774;border-radius:5px;padding:5px 10px;font-size:12px}`);
 
@@ -896,8 +896,9 @@
     }
 
     // Whole-bar drag with click/drag disambiguation: a clean tap still triggers the button
-    // (or expands a minimised bar), while a drag moves it and suppresses the trailing click.
-    function attachFillAllDrag(bar, btn){
+    // it landed on (or expands a minimised bar), while a drag moves the bar and suppresses the
+    // trailing click.
+    function attachFillAllDrag(bar){
         let startX = 0, startY = 0, baseLeft = 0, baseTop = 0;
         let candidate = false, dragging = false, suppressClick = false;
 
@@ -956,8 +957,10 @@
         document.addEventListener('touchend', end);
         document.addEventListener('touchcancel', end);
 
-        // Capture-phase: cancel the click that follows a drag so it doesn't also start/stop fill.
-        btn.addEventListener('click', function(e){
+        // Capture-phase on the bar itself: runs before any child's own click handler, so the
+        // click that follows a drag never reaches Fill All or the settings cog. Listening on the
+        // bar (rather than each button) also clears the flag when a drag ends on the grip.
+        bar.addEventListener('click', function(e){
             if (suppressClick) {
                 suppressClick = false;
                 e.stopImmediatePropagation();
@@ -975,12 +978,22 @@
             grip.className = 'tbf-fillall-grip';
             grip.textContent = '⠿';
             grip.title = 'Drag to move; drop near an edge to minimise';
+            // Second way into the settings, next to the always-visible Fill All button —
+            // the press-and-hold on a row's Fill/Update button remains available too.
+            const cog = document.createElement('span');
+            cog.className = 'tbf-fillall-cog';
+            cog.textContent = '⚙';
+            cog.title = 'Open Bazaar Filler settings';
             const btn = document.createElement('input');
             btn.type = 'button';
             btn.className = 'torn-btn tbf-fillall-btn';
             const dot = document.createElement('span');
             dot.className = 'tbf-autofill-dot';
-            bar.append(grip, btn, dot);
+            bar.append(grip, cog, btn, dot);
+            cog.addEventListener('click', function(event){
+                event.stopPropagation();
+                openSettingsModal();
+            });
             btn.addEventListener('click', function(event){
                 event.stopPropagation();
                 if (autoFillActive) {
@@ -990,7 +1003,7 @@
                 }
             });
             document.body.appendChild(bar);
-            attachFillAllDrag(bar, btn);
+            attachFillAllDrag(bar);
             applyFillAllState(bar);
         }
         if (document.querySelector(".tbf-viewport-border") == null) {
