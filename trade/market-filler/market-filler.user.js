@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Torn Market Filler
 // @namespace    https://github.com/SOLiNARY
-// @version      0.11.0
-// @description  On "Fill" click autofills market item price with lowest market price minus $1 (customizable), fills the quantity your quantity mode asks for, marks checkboxes for guns. Hold the fill button for 2s to open the settings modal (price delta, quantity mode, API key, prices popup, and per-category overrides — set different discounts/sources/quantities for Clothing, Other, Drug, etc.). Quantity modes: "max" (default), "max-1" to always keep a copy, a fixed number, or "skip" to never list a category. Cycle the star next to the fill button to mark an item as a favourite (★, used by Fill All) or excluded (⊘, never auto-filled). Use "Fill All" to auto-fill every favourite row on both the Add Items and Your Items (view listings) pages, including ones appearing later when switching categories. Drag the Fill All bar anywhere; drop it near a screen edge to clamp and minimise it — its position and state are remembered.
+// @version      0.12.0
+// @description  On "Fill" click autofills market item price with lowest market price minus $1 (customizable), fills the quantity your quantity mode asks for, marks checkboxes for guns. Click the ⚙ cog on the Fill All bar — or hold the fill button for 2s — to open the settings modal (price delta, quantity mode, API key, prices popup, and per-category overrides — set different discounts/sources/quantities for Clothing, Other, Drug, etc.). Quantity modes: "max" (default), "max-1" to always keep a copy, a fixed number, or "skip" to never list a category. Cycle the star next to the fill button to mark an item as a favourite (★, used by Fill All) or excluded (⊘, never auto-filled). Use "Fill All" to auto-fill every favourite row on both the Add Items and Your Items (view listings) pages, including ones appearing later when switching categories. Drag the Fill All bar anywhere; drop it near a screen edge to clamp and minimise it — its position and state are remembered.
 // @author       Silmaril [2665762]
 // @license      MIT License
 // @match        https://www.torn.com/page.php?sid=ItemMarket*
@@ -38,7 +38,7 @@
         style.innerHTML = s;
         document.head.appendChild(style);
     };
-    GM_addStyle(`#item-market-root [class^=addListingWrapper___] [class^=panels___] [class^=priceInputWrapper___]>.input-money-group>.input-money,#item-market-root [class^=viewListingWrapper___] [class^=priceInputWrapper___]>.input-money-group>.input-money{font-size:smaller!important;border-bottom-left-radius:0!important;border-top-left-radius:0!important}.silmaril-market-filler-popup{background:var(--tooltip-bg-color);padding:12px 18px;border-radius:8px;border:1px solid #888;box-shadow:0 4px 18px 0 #0009;color:var(--info-msg-font-color);z-index:99999;position:fixed;font-size:1em!important;line-height:1.5;pointer-events:auto}.silmaril-market-filler-popup-close{position:absolute;top:4px;right:7px;font-size:1em;color:#aaa;cursor:pointer}.silmaril-market-filler-popup-draggable{user-select:none;cursor:move}.silmaril-torn-market-filler-popup-price{cursor:pointer}.tmf-fav{cursor:pointer;display:inline-flex;align-items:center;justify-content:center;width:18px;font-size:16px;line-height:1;color:#888;align-self:center;margin-right:2px;user-select:none;-webkit-user-select:none}.tmf-fav.tmf-fav--on{color:gold;text-shadow:0 0 3px rgba(255,215,0,.7)}.tmf-fillall-bar{position:fixed;bottom:110px;right:16px;display:flex;align-items:center;gap:6px;padding:6px 8px;background:rgba(0,0,0,.55);border-radius:20px;z-index:999999;touch-action:none;transition:box-shadow .2s ease}.tmf-fillall-grip{cursor:grab;color:#bbb;font-size:14px;line-height:1;letter-spacing:-2px;min-width:12px;text-align:center;align-self:center;user-select:none;-webkit-user-select:none}.tmf-fillall-bar--dragging{cursor:grabbing;opacity:.92}.tmf-fillall-bar--dragging .tmf-fillall-grip{cursor:grabbing}.tmf-fillall-bar--min{padding:5px 7px;gap:4px}.tmf-fillall-bar--min .tmf-fillall-btn{display:none}.tmf-fillall-bar--min .tmf-fillall-grip{font-size:16px}.tmf-autofill-dot{display:none;width:10px;height:10px;border-radius:50%;background:gold;box-shadow:0 0 4px gold;animation:tmfPulse 1s ease-in-out infinite}.tmf-fillall-bar--active .tmf-autofill-dot{display:inline-block}.tmf-fillall-bar--active{box-shadow:0 0 10px 2px rgba(255,215,0,.75)}@keyframes tmfPulse{0%,100%{opacity:.3;transform:scale(.8)}50%{opacity:1;transform:scale(1.2)}}.tmf-viewport-border{display:none;position:fixed;top:0;right:0;bottom:0;left:0;border:3px solid gold;box-shadow:inset 0 0 12px rgba(255,215,0,.6);pointer-events:none;z-index:999998}.tmf-viewport-border--active{display:block}.tmf-toast{position:fixed;bottom:158px;right:16px;max-width:280px;background:rgba(0,0,0,.85);color:#fff;padding:10px 14px;border-radius:8px;border:1px solid gold;font-size:13px;line-height:1.4;z-index:1000000;opacity:0;visibility:hidden;transition:opacity .3s,visibility .3s}.tmf-toast--visible{opacity:1;visibility:visible}.tmf-fav.tmf-fav--off{color:#ff6b6b;text-shadow:none}`);
+    GM_addStyle(`#item-market-root [class^=addListingWrapper___] [class^=panels___] [class^=priceInputWrapper___]>.input-money-group>.input-money,#item-market-root [class^=viewListingWrapper___] [class^=priceInputWrapper___]>.input-money-group>.input-money{font-size:smaller!important;border-bottom-left-radius:0!important;border-top-left-radius:0!important}.silmaril-market-filler-popup{background:var(--tooltip-bg-color);padding:12px 18px;border-radius:8px;border:1px solid #888;box-shadow:0 4px 18px 0 #0009;color:var(--info-msg-font-color);z-index:99999;position:fixed;font-size:1em!important;line-height:1.5;pointer-events:auto}.silmaril-market-filler-popup-close{position:absolute;top:4px;right:7px;font-size:1em;color:#aaa;cursor:pointer}.silmaril-market-filler-popup-draggable{user-select:none;cursor:move}.silmaril-torn-market-filler-popup-price{cursor:pointer}.tmf-fav{cursor:pointer;display:inline-flex;align-items:center;justify-content:center;width:18px;font-size:16px;line-height:1;color:#888;align-self:center;margin-right:2px;user-select:none;-webkit-user-select:none}.tmf-fav.tmf-fav--on{color:gold;text-shadow:0 0 3px rgba(255,215,0,.7)}.tmf-fillall-bar{position:fixed;bottom:110px;right:16px;display:flex;align-items:center;gap:6px;padding:6px 8px;background:rgba(0,0,0,.55);border-radius:20px;z-index:999999;touch-action:none;transition:box-shadow .2s ease}.tmf-fillall-grip{cursor:grab;color:#bbb;font-size:14px;line-height:1;letter-spacing:-2px;min-width:12px;text-align:center;align-self:center;user-select:none;-webkit-user-select:none}.tmf-fillall-bar--dragging{cursor:grabbing;opacity:.92}.tmf-fillall-bar--dragging .tmf-fillall-grip{cursor:grabbing}.tmf-fillall-cog{cursor:pointer;flex:0 0 auto;display:flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:rgba(255,255,255,.12);color:#ddd;font-size:13px;line-height:1;user-select:none;-webkit-user-select:none}.tmf-fillall-cog:hover{background:rgba(255,255,255,.28);color:#fff}.tmf-fillall-bar--min{padding:5px 7px;gap:4px}.tmf-fillall-bar--min .tmf-fillall-btn,.tmf-fillall-bar--min .tmf-fillall-cog{display:none}.tmf-fillall-bar--min .tmf-fillall-grip{font-size:16px}.tmf-autofill-dot{display:none;width:10px;height:10px;border-radius:50%;background:gold;box-shadow:0 0 4px gold;animation:tmfPulse 1s ease-in-out infinite}.tmf-fillall-bar--active .tmf-autofill-dot{display:inline-block}.tmf-fillall-bar--active{box-shadow:0 0 10px 2px rgba(255,215,0,.75)}@keyframes tmfPulse{0%,100%{opacity:.3;transform:scale(.8)}50%{opacity:1;transform:scale(1.2)}}.tmf-viewport-border{display:none;position:fixed;top:0;right:0;bottom:0;left:0;border:3px solid gold;box-shadow:inset 0 0 12px rgba(255,215,0,.6);pointer-events:none;z-index:999998}.tmf-viewport-border--active{display:block}.tmf-toast{position:fixed;bottom:158px;right:16px;max-width:280px;background:rgba(0,0,0,.85);color:#fff;padding:10px 14px;border-radius:8px;border:1px solid gold;font-size:13px;line-height:1.4;z-index:1000000;opacity:0;visibility:hidden;transition:opacity .3s,visibility .3s}.tmf-toast--visible{opacity:1;visibility:visible}.tmf-fav.tmf-fav--off{color:#ff6b6b;text-shadow:none}`);
 
     GM_addStyle(`.tmf-modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:2147483000;justify-content:center;align-items:flex-start;overflow:auto;padding:24px 12px;box-sizing:border-box}.tmf-modal-overlay--open{display:flex}.tmf-modal{background:#1f1f1f;color:#e6e6e6;width:100%;max-width:420px;border:1px solid #666;border-radius:10px;box-shadow:0 10px 40px rgba(0,0,0,.6);padding:16px 18px;box-sizing:border-box;font-size:13px;line-height:1.5}.tmf-modal h3{margin:0 0 12px;font-size:15px;display:flex;justify-content:space-between;align-items:center;color:#fff}.tmf-modal-close{cursor:pointer;color:#bbb;font-size:22px;line-height:1}.tmf-modal label{display:block;margin:10px 0 3px;font-weight:bold;color:#cfcfcf}.tmf-modal input[type=text]{width:100%;box-sizing:border-box;padding:7px 9px;border-radius:5px;border:1px solid #666;background:#111;color:#eee;font-size:13px}.tmf-modal-toggle{display:flex;align-items:center;gap:8px;margin-top:10px;font-weight:bold;color:#cfcfcf}.tmf-modal-toggle input{width:auto}.tmf-modal-cats{margin-top:4px}.tmf-modal-cat-row{display:flex;gap:6px;margin-bottom:6px;align-items:center}.tmf-modal-cat-row .tmf-modal-cat-name{flex:1 1 55%}.tmf-modal-cat-row .tmf-modal-cat-formula{flex:1 1 45%}.tmf-modal-cat-del{cursor:pointer;color:#ff6b6b;font-size:20px;line-height:1;flex:0 0 auto;width:22px;text-align:center}.tmf-modal-addcat{margin-top:2px;cursor:pointer;background:#333;color:#eee;border:1px solid #666;border-radius:5px;padding:5px 10px;font-size:12px}.tmf-modal-resetcat{margin:2px 0 0 8px;cursor:pointer;background:#3a2a2a;color:#ddd;border:1px solid #774;border-radius:5px;padding:5px 10px;font-size:12px}.tmf-modal-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:16px}.tmf-modal-actions button{cursor:pointer;padding:7px 16px;border-radius:5px;border:1px solid #666;background:#333;color:#eee;font-size:13px}.tmf-modal-save{background:#2e7d32!important;border-color:#2e7d32!important;color:#fff!important}.tmf-modal-help{margin-top:12px;font-size:11px;color:#9a9a9a;line-height:1.5}.tmf-modal-help code{background:#000;padding:1px 4px;border-radius:3px;color:#cfc}.tmf-modal-cat-row input{min-width:0}.tmf-modal-cat-row .tmf-modal-cat-name{flex:1 1 38%}.tmf-modal-cat-row .tmf-modal-cat-formula{flex:1 1 32%}.tmf-modal-cat-row .tmf-modal-cat-qty{flex:1 1 30%}.tmf-modal-cat-head{display:flex;gap:6px;margin:0 0 4px;font-size:11px;color:#9a9a9a}.tmf-modal-cat-head span:nth-child(1){flex:1 1 38%}.tmf-modal-cat-head span:nth-child(2){flex:1 1 32%}.tmf-modal-cat-head span:nth-child(3){flex:1 1 30%}.tmf-modal-cat-head span:nth-child(4){flex:0 0 22px}.tmf-modal-clearexcl{margin:2px 0 0 8px;cursor:pointer;background:#3a2a2a;color:#ddd;border:1px solid #774;border-radius:5px;padding:5px 10px;font-size:12px}`);
 
@@ -953,8 +953,9 @@
     }
 
     // Whole-bar drag with click/drag disambiguation: a clean tap still triggers the button
-    // (or expands a minimised bar), while a drag moves it and suppresses the trailing click.
-    function attachFillAllDrag(bar, btn){
+    // it landed on (or expands a minimised bar), while a drag moves the bar and suppresses the
+    // trailing click.
+    function attachFillAllDrag(bar){
         let startX = 0, startY = 0, baseLeft = 0, baseTop = 0;
         let candidate = false, dragging = false, suppressClick = false;
 
@@ -1013,8 +1014,10 @@
         document.addEventListener('touchend', end);
         document.addEventListener('touchcancel', end);
 
-        // Capture-phase: cancel the click that follows a drag so it doesn't also start/stop fill.
-        btn.addEventListener('click', function(e){
+        // Capture-phase on the bar itself: runs before any child's own click handler, so the
+        // click that follows a drag never reaches Fill All or the settings cog. Listening on the
+        // bar (rather than each button) also clears the flag when a drag ends on the grip.
+        bar.addEventListener('click', function(e){
             if (suppressClick) {
                 suppressClick = false;
                 e.stopImmediatePropagation();
@@ -1032,12 +1035,22 @@
             grip.className = 'tmf-fillall-grip';
             grip.textContent = '⠿';
             grip.title = 'Drag to move; drop near an edge to minimise';
+            // Second way into the settings, next to the always-visible Fill All button —
+            // the press-and-hold on a row's fill button remains available too.
+            const cog = document.createElement('span');
+            cog.className = 'tmf-fillall-cog';
+            cog.textContent = '⚙';
+            cog.title = 'Open Market Filler settings';
             const btn = document.createElement('input');
             btn.type = 'button';
             btn.className = 'torn-btn tmf-fillall-btn';
             const dot = document.createElement('span');
             dot.className = 'tmf-autofill-dot';
-            bar.append(grip, btn, dot);
+            bar.append(grip, cog, btn, dot);
+            cog.addEventListener('click', function(event){
+                event.stopPropagation();
+                openSettingsModal();
+            });
             btn.addEventListener('click', function(event){
                 event.stopPropagation();
                 if (autoFillActive) {
@@ -1047,7 +1060,7 @@
                 }
             });
             document.body.appendChild(bar);
-            attachFillAllDrag(bar, btn);
+            attachFillAllDrag(bar);
             applyFillAllState(bar);
         }
         if (document.querySelector(".tmf-viewport-border") == null) {
