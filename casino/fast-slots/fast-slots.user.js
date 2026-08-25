@@ -1,36 +1,38 @@
 // ==UserScript==
 // @name         Torn Fast Slots
 // @namespace    https://github.com/SOLiNARY
-// @version      0.3
-// @description  Makes slots stop instantly. Works for every spin except first.
+// @version      0.4
+// @description  Makes slots stop instantly, first spin included, without leaving the barrels blurred.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT
 // @match        https://www.torn.com/loader.php?sid=slots
 // @match        https://www.torn.com/page.php?sid=slots
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=torn.com
-// @run-at       document-idle
+// @run-at       document-start
 // ==/UserScript==
  
 (function() {
     'use strict';
  
-    const originalAjax = $.ajax;
+    // Lowest speed that still plays - and therefore clears - Torn's blurred spin frame.
+    // A speed of 0 stops the barrels but leaves the blur sprite on screen.
+    const spinAnimationSpeed = 50;
  
-    $.ajax = function (options) {
-        if (options.data != null && options.data.sid == 'slotsData' && options.data.step == 'play') {
-            const originalSuccess = options.success;
-            options.success = function (data, textStatus, jqXHR) {
-                if (data.error) delete data.error;
-                if (data.errorMsg) delete data.errorMsg;
-                data.barrelsAnimationSpeed = 0;
-                if (originalSuccess) {
-                    originalSuccess(data, textStatus, jqXHR);
-                }
-            };
+    const isTampermonkeyEnabled = typeof unsafeWindow !== 'undefined';
+    const jsonHost = isTampermonkeyEnabled ? unsafeWindow : window;
+    const originalParse = jsonHost.JSON.parse;
+ 
+    // Hooking JSON.parse at document-start covers every response, including the first
+    // spin that the old document-idle $.ajax hook missed. Idea by alesgrbec [2064983].
+    jsonHost.JSON.parse = function (text, reviver) {
+        const data = originalParse.call(this, text, reviver);
+        if (data != null && typeof data === 'object' && 'barrelsAnimationSpeed' in data) {
+            if (data.error) delete data.error;
+            if (data.errorMsg) delete data.errorMsg;
+            data.barrelsAnimationSpeed = spinAnimationSpeed;
         }
- 
-        return originalAjax(options);
-    }
+        return data;
+    };
  
     function enableBetButtons() {
         document.querySelectorAll(".slots-btn-list .betbtn").forEach(btn => {
@@ -72,7 +74,7 @@
     }
  
     var o = setInterval(() => {
-        if($('#barrels').length == 1){
+        if (document.getElementById('barrels') != null) {
             clearInterval(o)
             watchBarrelsSpinAndStop();
         }
