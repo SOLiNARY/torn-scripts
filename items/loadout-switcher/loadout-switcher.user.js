@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Loadout Switcher
 // @namespace    https://github.com/SOLiNARY
-// @version      0.6.11
+// @version      0.6.12
 // @description  Adds customisable quick loadout change buttons on Items page.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT
@@ -159,10 +159,12 @@
     }
 
     const styles = `
-div#loadoutsRoot p[class^=title___] {
-    overflow-y: hidden;
-    overflow-x: auto;
+@media (min-width: 769px) {
+    div#loadoutsRoot p[class^=title___] {
+        overflow-y: hidden;
+        overflow-x: auto;
     }
+}
 
 div.silmaril-torn-loadout-switcher-container {
     display: inline-flex;
@@ -199,6 +201,26 @@ div.silmaril-torn-loadout-switcher-container a img {
     div[class^=main___] > div[class^=content___] {
         margin-top: 10px;
     }
+
+    /* Torn's loadouts title bar has no horizontal room left on a phone. Scrolling it
+       (what the desktop rule above does) parks the buttons off the right edge, which
+       reads as them vanishing a moment after they appear, so give them their own row. */
+    .silmaril-torn-loadout-switcher-host {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        overflow: visible;
+        height: auto;
+        max-height: none;
+    }
+
+    .silmaril-torn-loadout-switcher-host div.silmaril-torn-loadout-switcher-container {
+        flex: 1 0 100%;
+        flex-wrap: wrap;
+        gap: 4px;
+        margin-left: 0;
+        margin-top: 4px;
+    }
 }
 
 @keyframes waveAnimation {
@@ -229,14 +251,40 @@ div.silmaril-torn-loadout-switcher-container a img {
     let selectedLoadouts = localStorage.getItem("silmaril-loadout-switcher-selected-loadouts") ?? "1,2,3";
     let selectedLoadoutsArray = selectedLoadouts.split(',');
 
+    const containerClass = 'silmaril-torn-loadout-switcher-container';
+    const hostClass = 'silmaril-torn-loadout-switcher-host';
+
+    function isRendered(el) {
+        return el.isConnected && el.getClientRects().length > 0;
+    }
+
+    // Torn re-renders the loadouts panel and can leave more than one title element behind,
+    // some of them hidden. Picking the first match regardless would park the buttons in a
+    // node that never paints - they show up for a moment on the first render, then look as
+    // if they vanished for good, because the guard below sees a container and stops trying.
+    function findTitleElement() {
+        const candidates = [...document.querySelectorAll("#loadoutsRoot [class*=title___]")]
+            .filter((el) => Array.from(el.classList).some((c) => c.startsWith('title___')));
+        return candidates.find(isRendered) ?? candidates[0] ?? null;
+    }
+
     function tryAttach() {
-        const titleEl = [...document.querySelectorAll("#loadoutsRoot [class*=title___]")]
-            .find(el => Array.from(el.classList).some(c => c.startsWith('title___')));
+        const titleEl = findTitleElement();
         if (!titleEl) return;
-        if (titleEl.querySelector('.silmaril-torn-loadout-switcher-container')) return;
+
+        observeLoadoutsRoot();
+
+        // Discard containers Torn's re-render orphaned or moved elsewhere, so a stale one
+        // can never satisfy the guard below while nothing is on screen.
+        document.querySelectorAll(`div.${containerClass}`).forEach((existing) => {
+            if (existing.parentElement !== titleEl) existing.remove();
+        });
+
+        titleEl.classList.add(hostClass);
+        if (titleEl.querySelector(`div.${containerClass}`)) return;
 
         const buttonContainer = document.createElement('div');
-        buttonContainer.className = 'silmaril-torn-loadout-switcher-container';
+        buttonContainer.className = containerClass;
 
         const waveDiv = document.createElement('div');
         waveDiv.className = 'wave';
@@ -248,6 +296,34 @@ div.silmaril-torn-loadout-switcher-container a img {
         titleEl.appendChild(buttonContainer);
     }
 
+    let attachScheduled = false;
+
+    function scheduleAttach() {
+        if (attachScheduled) return;
+        attachScheduled = true;
+        requestAnimationFrame(() => {
+            attachScheduled = false;
+            tryAttach();
+        });
+    }
+
+    // Watch the panel itself rather than the whole document: Torn mutates the page
+    // constantly, and this keeps re-attachment to the frame after a re-render wipes the
+    // buttons, instead of leaving them missing for up to a poll interval.
+    let observedRoot = null;
+    let rootObserver = null;
+
+    function observeLoadoutsRoot() {
+        const root = document.getElementById('loadoutsRoot');
+        if (!root || root === observedRoot) return;
+        if (rootObserver) rootObserver.disconnect();
+        observedRoot = root;
+        rootObserver = new MutationObserver(scheduleAttach);
+        rootObserver.observe(root, { childList: true, subtree: true });
+    }
+
+    // The poll stays as the safety net: it finds the panel when it first appears, picks up
+    // a replaced #loadoutsRoot, and keeps working when rAF is paused in a background tab.
     setInterval(tryAttach, 500);
 
     function addLogo(root) {
