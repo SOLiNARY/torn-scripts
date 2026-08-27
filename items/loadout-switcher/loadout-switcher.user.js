@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Loadout Switcher
 // @namespace    https://github.com/SOLiNARY
-// @version      0.6.10
+// @version      0.6.13
 // @description  Adds customisable quick loadout change buttons on Items page.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT
@@ -20,10 +20,10 @@
 
     const includeLogo = false;
     const rfcvArg = "rfcv=";
+    const rfcvStorageKey = "silmaril-loadout-switcher-rfcv";
     const isTampermonkeyEnabled = typeof unsafeWindow !== 'undefined';
     const getEquippedItemsUrl = "/page.php?sid=itemsLoadouts&step=getEquippedItems";
-    let rfcv = localStorage.getItem("silmaril-loadout-switcher-rfcv") ?? null;
-    let rfcvUpdatedThisSession = false;
+    let rfcv = null;
     let loadoutTitles = {};
     try {
         const cachedTitles = localStorage.getItem("silmaril-loadout-switcher-titles");
@@ -32,21 +32,42 @@
         loadoutTitles = {};
     }
 
-    // Capture rfcv via PerformanceObserver instead of monkey-patching fetch.
-    // Works in both the page world (Tampermonkey/Violentmonkey) and the
-    // userscript-isolated world (iOS Safari Userscripts app), because
-    // performance entries are origin-scoped and visible to any same-origin script.
+    function setRfcv(value) {
+        if (!value || value === rfcv) return;
+        rfcv = value;
+        try {
+            localStorage.setItem(rfcvStorageKey, value);
+        } catch (e) { /* ignore quota errors */
+        }
+        document.querySelectorAll("div.silmaril-torn-loadout-switcher-container button")
+            .forEach((button) => button.classList.remove("disabled"));
+    }
+
+    // Torn keeps the live token in the rfc_v cookie, which any same-origin script can read
+    // at any moment. This is the source Torn PDA needs: it injects userscripts after the
+    // page's load event, and by then Torn's rfcv-bearing AJAX calls have already gone out
+    // and the resource timing buffer has usually overflowed on an inventory page, so
+    // neither the PerformanceObserver replay below nor the fetch/XHR hooks ever see one.
+    // Without the cookie the buttons stay disabled forever there, or fire a stale token.
+    function refreshRfcv() {
+        const match = document.cookie.match(/(?:^|;\s*)rfc_v=([^;]*)/);
+        if (match) setRfcv(decodeURIComponent(match[1]));
+        return rfcv;
+    }
+
+    // Fallback for the cookie: pick rfcv out of Torn's own traffic. Uses PerformanceObserver
+    // rather than monkey-patching fetch so it works in both the page world
+    // (Tampermonkey/Violentmonkey) and the userscript-isolated world (iOS Safari Userscripts
+    // app), because performance entries are origin-scoped and visible to any same-origin script.
     function captureRfcvFromUrl(url) {
-        if (rfcvUpdatedThisSession) return;
         if (typeof url !== 'string') return;
         const idx = url.indexOf(rfcvArg);
         if (idx < 0) return;
-        rfcv = url.substring(idx + rfcvArg.length).split('&')[0];
-        localStorage.setItem("silmaril-loadout-switcher-rfcv", rfcv);
-        document.querySelectorAll("div.silmaril-torn-loadout-switcher-container button")
-            .forEach((button) => button.classList.remove("disabled"));
-        rfcvUpdatedThisSession = true;
+        setRfcv(url.substring(idx + rfcvArg.length).split('&')[0]);
     }
+
+    setRfcv(localStorage.getItem(rfcvStorageKey));
+    refreshRfcv();
 
     try {
         performance.getEntriesByType('resource').forEach((entry) => captureRfcvFromUrl(entry.name));
@@ -138,10 +159,13 @@
     }
 
     const styles = `
-div#loadoutsRoot p[class^=title___] {
-    overflow-y: hidden;
-    overflow-x: auto;
+@media (min-width: 769px) {
+    div#loadoutsRoot p[class*=title___],
+    div#loadoutsRoot .silmaril-torn-loadout-switcher-host {
+        overflow-y: hidden;
+        overflow-x: auto;
     }
+}
 
 div.silmaril-torn-loadout-switcher-container {
     display: inline-flex;
@@ -178,6 +202,34 @@ div.silmaril-torn-loadout-switcher-container a img {
     div[class^=main___] > div[class^=content___] {
         margin-top: 10px;
     }
+
+    /* The buttons live inside the title, next to the current loadout's name, and that row
+       has no horizontal space left on a phone. Scrolling it - what the desktop rule above
+       does - parks them past the right edge, and the row's own height clips them from
+       below, which reads as them vanishing a moment after they appear. Let the header and
+       the title grow here, and drop the buttons onto a row of their own beneath the name.
+       These are scoped under #loadoutsRoot so they outrank Torn's own class selectors,
+       whose stylesheet loads from the body and would otherwise win on source order. */
+    div#loadoutsRoot header[class*=header___] {
+        height: auto;
+        max-height: none;
+    }
+
+    div#loadoutsRoot p[class*=title___],
+    div#loadoutsRoot .silmaril-torn-loadout-switcher-host {
+        overflow: visible;
+        height: auto;
+        max-height: none;
+        white-space: normal;
+    }
+
+    div#loadoutsRoot div.silmaril-torn-loadout-switcher-container {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+        margin-left: 0;
+        margin-top: 4px;
+    }
 }
 
 @keyframes waveAnimation {
@@ -208,14 +260,40 @@ div.silmaril-torn-loadout-switcher-container a img {
     let selectedLoadouts = localStorage.getItem("silmaril-loadout-switcher-selected-loadouts") ?? "1,2,3";
     let selectedLoadoutsArray = selectedLoadouts.split(',');
 
+    const containerClass = 'silmaril-torn-loadout-switcher-container';
+    const hostClass = 'silmaril-torn-loadout-switcher-host';
+
+    function isRendered(el) {
+        return el.isConnected && el.getClientRects().length > 0;
+    }
+
+    // Torn re-renders the loadouts panel and can leave more than one title element behind,
+    // some of them hidden. Picking the first match regardless would park the buttons in a
+    // node that never paints - they show up for a moment on the first render, then look as
+    // if they vanished for good, because the guard below sees a container and stops trying.
+    function findTitleElement() {
+        const candidates = [...document.querySelectorAll("#loadoutsRoot [class*=title___]")]
+            .filter((el) => Array.from(el.classList).some((c) => c.startsWith('title___')));
+        return candidates.find(isRendered) ?? candidates[0] ?? null;
+    }
+
     function tryAttach() {
-        const titleEl = [...document.querySelectorAll("#loadoutsRoot [class*=title___]")]
-            .find(el => Array.from(el.classList).some(c => c.startsWith('title___')));
+        const titleEl = findTitleElement();
         if (!titleEl) return;
-        if (titleEl.querySelector('.silmaril-torn-loadout-switcher-container')) return;
+
+        observeLoadoutsRoot();
+
+        // Discard containers Torn's re-render orphaned or moved elsewhere, so a stale one
+        // can never satisfy the guard below while nothing is on screen.
+        document.querySelectorAll(`div.${containerClass}`).forEach((existing) => {
+            if (existing.parentElement !== titleEl) existing.remove();
+        });
+
+        titleEl.classList.add(hostClass);
+        if (titleEl.querySelector(`div.${containerClass}`)) return;
 
         const buttonContainer = document.createElement('div');
-        buttonContainer.className = 'silmaril-torn-loadout-switcher-container';
+        buttonContainer.className = containerClass;
 
         const waveDiv = document.createElement('div');
         waveDiv.className = 'wave';
@@ -227,6 +305,34 @@ div.silmaril-torn-loadout-switcher-container a img {
         titleEl.appendChild(buttonContainer);
     }
 
+    let attachScheduled = false;
+
+    function scheduleAttach() {
+        if (attachScheduled) return;
+        attachScheduled = true;
+        requestAnimationFrame(() => {
+            attachScheduled = false;
+            tryAttach();
+        });
+    }
+
+    // Watch the panel itself rather than the whole document: Torn mutates the page
+    // constantly, and this keeps re-attachment to the frame after a re-render wipes the
+    // buttons, instead of leaving them missing for up to a poll interval.
+    let observedRoot = null;
+    let rootObserver = null;
+
+    function observeLoadoutsRoot() {
+        const root = document.getElementById('loadoutsRoot');
+        if (!root || root === observedRoot) return;
+        if (rootObserver) rootObserver.disconnect();
+        observedRoot = root;
+        rootObserver = new MutationObserver(scheduleAttach);
+        rootObserver.observe(root, { childList: true, subtree: true });
+    }
+
+    // The poll stays as the safety net: it finds the panel when it first appears, picks up
+    // a replaced #loadoutsRoot, and keeps working when rAF is paused in a background tab.
     setInterval(tryAttach, 500);
 
     function addLogo(root) {
@@ -256,7 +362,6 @@ div.silmaril-torn-loadout-switcher-container a img {
         settings.textContent = '⚙';
         settings.addEventListener('click', () => {
             let userInput = prompt("Please, enter which loadouts from 1 to 9 you want to see, comma-separated (default: 1,2,3):", selectedLoadouts);
-            let wave = root.querySelector("div.wave");
             if (userInput !== null && userInput.length > 0) {
                 localStorage.setItem("silmaril-loadout-switcher-selected-loadouts", userInput);
                 selectedLoadouts = userInput;
@@ -264,15 +369,11 @@ div.silmaril-torn-loadout-switcher-container a img {
                 root.querySelectorAll("button, a").forEach((item) => item.remove());
                 addLoadoutAndSettingButtons(root);
                 addLogo(root);
-                wave.style.backgroundColor = "green";
+                flashWave(root, "green");
             } else {
-                wave.style.animationDuration = "3s";
-                wave.style.backgroundColor = "yellow";
                 console.error("[TornLoadoutSwitcher] User cancelled input of selected loadouts.");
+                flashWave(root, "yellow", 3);
             }
-            wave.style.animation = 'none';
-            wave.offsetHeight;
-            wave.style.animation = null;
         });
 
         root.appendChild(settings);
@@ -286,42 +387,84 @@ div.silmaril-torn-loadout-switcher-container a img {
             button.className = rfcv === null ? 'torn-btn disabled' : 'torn-btn';
             button.textContent = showTitles ? (loadoutTitles[loadout] ?? loadout) : loadout;
             button.setAttribute('data-loadout-number', loadout);
-            button.addEventListener('click', () => {
-                handleLoadoutClick(root)
+            button.addEventListener('click', (clickEvent) => {
+                handleLoadoutClick(clickEvent, root);
             });
 
             root.appendChild(button);
         })
     }
 
-    async function handleLoadoutClick(root) {
-        let loadout = event.target.getAttribute('data-loadout-number');
-        if (event.target.classList.contains('disabled')) {
+    // Takes the event as an argument rather than reading the implicit `event` global,
+    // which is a non-standard leftover that no isolated-world userscript engine has to provide.
+    async function handleLoadoutClick(clickEvent, root) {
+        const button = clickEvent.currentTarget;
+        if (button.classList.contains('disabled')) {
             return;
         }
-        let url = setLoadoutUrl.replace("{loadoutId}", loadout).replace("{rfcv}", rfcv);
+        const loadout = button.getAttribute('data-loadout-number');
+        // Re-read the cookie on every click: Torn rotates the token, and a stale one is
+        // rejected silently (see sendSetLoadoutRequest).
+        const token = refreshRfcv();
+        if (!token) {
+            console.error("[TornLoadoutSwitcher] No rfcv token available yet.");
+            flashWave(root, "red", 5);
+            return;
+        }
+        let url = setLoadoutUrl.replace("{loadoutId}", loadout).replace("{rfcv}", token);
         await sendSetLoadoutRequest(url, root);
     }
 
     async function sendSetLoadoutRequest(url, root) {
-        let wave = root.querySelector("div.wave");
-        await fetch(url, {
-            method: 'GET',
-        })
-            .then(response => {
-                if (response.ok) {
-                    wave.style.backgroundColor = "green";
-                } else {
-                    console.error("[TornLoadoutSwitcher] Set Loadout request failed:", response);
-                    wave.style.backgroundColor = "red";
-                    wave.style.animationDuration = "5s";
-                }
-            })
-            .catch(error => {
-                console.error("[TornLoadoutSwitcher] Error setting loadout:", error);
-                wave.style.backgroundColor = "red";
-                wave.style.animationDuration = "5s";
+        try {
+            const response = await fetch(url, {
+                method: 'GET',
             });
+            if (!response.ok) {
+                console.error("[TornLoadoutSwitcher] Set Loadout request failed:", response);
+                flashWave(root, "red", 5);
+                return;
+            }
+            // Torn answers a rejected request - a stale rfcv token above all - with HTTP 200
+            // and the error inside the JSON body, so response.ok on its own flashes green for
+            // a loadout that never actually changed.
+            const error = extractResponseError(await response.text());
+            if (error) {
+                console.error("[TornLoadoutSwitcher] Set Loadout rejected by Torn:", error);
+                flashWave(root, "red", 5);
+                return;
+            }
+            flashWave(root, "green");
+        } catch (e) {
+            console.error("[TornLoadoutSwitcher] Error setting loadout:", e);
+            flashWave(root, "red", 5);
+        }
+    }
+
+    // Returns Torn's error when the response body reports a failure, null otherwise. Bodies
+    // that are not JSON objects count as success, so an unexpected response shape keeps
+    // behaving the way it did before this check existed.
+    function extractResponseError(body) {
+        let payload;
+        try {
+            payload = JSON.parse(body);
+        } catch (e) {
+            return null;
+        }
+        if (!payload || typeof payload !== 'object') return null;
+        if (payload.success === false || payload.error || payload.errorMessage) {
+            return payload.error || payload.errorMessage || payload.message || "request rejected";
+        }
+        return null;
+    }
+
+    function flashWave(root, color, durationSeconds) {
+        const wave = root.querySelector("div.wave");
+        if (!wave) return;
+        wave.style.backgroundColor = color;
+        if (durationSeconds) {
+            wave.style.animationDuration = `${durationSeconds}s`;
+        }
         wave.style.animation = 'none';
         wave.offsetHeight;
         wave.style.animation = null;
