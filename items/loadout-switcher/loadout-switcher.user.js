@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Loadout Switcher
 // @namespace    https://github.com/SOLiNARY
-// @version      0.6.12
+// @version      0.6.13
 // @description  Adds customisable quick loadout change buttons on Items page.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT
@@ -160,7 +160,8 @@
 
     const styles = `
 @media (min-width: 769px) {
-    div#loadoutsRoot p[class^=title___] {
+    div#loadoutsRoot p[class*=title___],
+    div#loadoutsRoot .silmaril-torn-loadout-switcher-host {
         overflow-y: hidden;
         overflow-x: auto;
     }
@@ -202,20 +203,28 @@ div.silmaril-torn-loadout-switcher-container a img {
         margin-top: 10px;
     }
 
-    /* Torn's loadouts title bar has no horizontal room left on a phone. Scrolling it
-       (what the desktop rule above does) parks the buttons off the right edge, which
-       reads as them vanishing a moment after they appear, so give them their own row. */
-    .silmaril-torn-loadout-switcher-host {
-        display: flex;
-        flex-wrap: wrap;
-        align-items: center;
-        overflow: visible;
+    /* The buttons live inside the title, next to the current loadout's name, and that row
+       has no horizontal space left on a phone. Scrolling it - what the desktop rule above
+       does - parks them past the right edge, and the row's own height clips them from
+       below, which reads as them vanishing a moment after they appear. Let the header and
+       the title grow here, and drop the buttons onto a row of their own beneath the name.
+       These are scoped under #loadoutsRoot so they outrank Torn's own class selectors,
+       whose stylesheet loads from the body and would otherwise win on source order. */
+    div#loadoutsRoot header[class*=header___] {
         height: auto;
         max-height: none;
     }
 
-    .silmaril-torn-loadout-switcher-host div.silmaril-torn-loadout-switcher-container {
-        flex: 1 0 100%;
+    div#loadoutsRoot p[class*=title___],
+    div#loadoutsRoot .silmaril-torn-loadout-switcher-host {
+        overflow: visible;
+        height: auto;
+        max-height: none;
+        white-space: normal;
+    }
+
+    div#loadoutsRoot div.silmaril-torn-loadout-switcher-container {
+        display: flex;
         flex-wrap: wrap;
         gap: 4px;
         margin-left: 0;
