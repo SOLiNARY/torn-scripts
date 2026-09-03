@@ -1615,8 +1615,6 @@
         return 0;
     }
 
-    // A first install has no "before" to report, so it records the version silently and the
-    // popup waits for a real update. Anything else shows every release since the one last seen.
     function maybeShowChangelog(){
         let lastSeen;
         try {
@@ -1627,11 +1625,14 @@
         if (lastSeen === SCRIPT_VERSION){
             return;
         }
-        if (lastSeen == null){
-            rememberChangelogSeen();
-            return;
-        }
-        let unseen = CHANGELOG.filter(function(release){ return compareVersions(release.version, lastSeen) > 0; });
+        // No stored version means one of two things: a brand-new install, or — far more often,
+        // because this is the first release to carry the popup — a long-standing user whose key
+        // simply never existed. The two are indistinguishable from here, so the notes get shown
+        // rather than swallowed. Staying silent would hide this release from everyone who
+        // already had the script.
+        let unseen = lastSeen == null
+            ? CHANGELOG
+            : CHANGELOG.filter(function(release){ return compareVersions(release.version, lastSeen) > 0; });
         if (unseen.length === 0){
             rememberChangelogSeen();
             return;
