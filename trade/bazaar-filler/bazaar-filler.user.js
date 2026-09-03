@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Torn Bazaar Filler
 // @namespace    https://github.com/SOLiNARY
-// @version      1.8.0
-// @description  On "Fill" click autofills bazaar item price with lowest market price currently minus $1 (can be customised), shows current price coefficient compared to 3rd lowest, fills the quantity your quantity mode asks for, marks checkboxes for guns. Click the ⚙ cog on the Fill All bar — or hold a Fill/Update button for 3s — to open the settings modal (price delta, quantity mode, API key, and per-category overrides — set different discounts/sources/quantities for Clothing, Other, Drug, etc.). Quantity modes: "max" (default), "max-1" to always keep a copy, a fixed number, or "skip" to never list a category. Cycle the star next to Fill/Update to mark an item as a favourite (★, used by Fill All) or excluded (⊘, never auto-filled). Use "Fill All" to auto-fill every favourite row on both the Add Items and Manage Items pages, including ones appearing later via infinite scroll or category switches. Drag the Fill All bar anywhere; drop it near a screen edge to clamp and minimise it — its position and state are remembered.
+// @version      1.9.0
+// @description  On "Fill" click autofills bazaar item price with lowest market price currently minus $1 (can be customised), shows current price coefficient compared to 3rd lowest, fills the quantity your quantity mode asks for, marks checkboxes for guns. Click the ⚙ cog on the Fill All bar — or hold a Fill/Update button for 3s — to open the settings modal (price delta, quantity mode, API key, and per-category overrides — set different discounts/sources/quantities for Clothing, Other, Drug, etc.). Quantity modes: "max" (default), "max-1" to always keep a copy, a fixed number, or "skip" to never list a category. Cycle the star next to Fill/Update to mark an item as a favourite (★, used by Fill All) or excluded (⊘, never auto-filled). Use "Fill All" to auto-fill every favourite row on both the Add Items and Manage Items pages, including ones appearing later via infinite scroll or category switches. Drag the Fill All bar anywhere; drop it near a screen edge to clamp and minimise it — its position and state are remembered. Three price sources are available: Torn's item market listings (the default), Torn's market value ([market]) and live player-bazaar data from weav3r.dev ([bazaar], [bazaar:2], [bazaar:avg], [bazaar:median]) — the last one prices you against the bazaars you actually compete with. After an update a "What's new" popup lists what changed.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT License
 // @match        https://www.torn.com/bazaar.php*
@@ -16,9 +16,33 @@
 (function() {
     'use strict';
 
-    const bazaarUrl = "https://api.torn.com/market/{itemId}?selections=bazaar&key={apiKey}&comment=BazaarFiller";
+    // Keep in sync with @version above — it keys the "What's new" popup.
+    const SCRIPT_VERSION = "1.9.0";
+
     const marketUrl = "https://api.torn.com/v2/market?id={itemId}&selections=itemMarket&key={apiKey}&comment=BazaarFiller";
     const itemUrl = "https://api.torn.com/torn/{itemId}?selections=items&key={apiKey}&comment=BazaarFiller";
+    // weav3r.dev aggregates live player-bazaar listings. Public, no API key, CORS-open, but
+    // shared across every consumer at 100 req/min, so responses are cached client-side too.
+    const weav3rItemUrl = "https://weav3r.dev/api/marketplace/{itemId}";
+    const weav3rAllUrl = "https://weav3r.dev/api/marketplace";
+
+    // Which endpoint a formula's price comes from.
+    const SOURCE_ITEM_MARKET = "itemmarket";  // Torn live item market listings (default)
+    const SOURCE_MARKET_VALUE = "items";      // Torn market value, i.e. [market]
+    const SOURCE_BAZAAR = "bazaar";           // weav3r player bazaars, i.e. [bazaar...]
+
+    // weav3r serves its own cache with a 30-180s TTL, so re-asking sooner than this only burns
+    // rate limit. The bulk snapshot covers every item at once and backs [bazaar:avg].
+    const WEAV3R_ITEM_TTL_MS = 60 * 1000;
+    const WEAV3R_ALL_TTL_MS = 60 * 1000;
+    // Listings the crawler has not re-checked recently may already be sold; they are dropped
+    // unless that would empty the list, in which case stale data beats no data.
+    const WEAV3R_STALE_LISTING_MS = 30 * 60 * 1000;
+    // A bazaar price this far below the bazaar average is treated as an outlier rather than
+    // undercut — a single troll listing must never re-price a whole Fill All run.
+    const BAZAAR_SANITY_FLOOR_RATIO = 0.25;
+    let weav3rItemCache = new Map();
+    let weav3rAllCache = null;
     let priceDeltaRaw = localStorage.getItem("silmaril-torn-bazaar-filler-price-delta") ?? '-1';
     // How many units to list per item: "max" (all of them), "max-N" (keep N back), a fixed
     // number, or "skip"/"0" to never list. Defaults to "max" — the behaviour before this existed.
@@ -27,6 +51,7 @@
 
     try {
         GM_registerMenuCommand('Open Settings', openSettingsModal);
+        GM_registerMenuCommand("What's new", function(){ openChangelogModal(CHANGELOG); });
     } catch (error) {
         console.log('[TornBazaarFiller] Tampermonkey not detected!');
     }
@@ -42,6 +67,26 @@
     GM_addStyle(`.btn-wrap.torn-bazaar-fill-qty-price{float:right;margin-left:auto;z-index:99999}.btn-wrap.torn-bazaar-clear-qty-price{z-index:99999}div.title-wrap div.name-wrap{display:flex;justify-content:flex-end}.wave-animation{position:relative;overflow:hidden}.wave{pointer-events:none;position:absolute;width:100%;height:33px;background-color:transparent;opacity:0;transform:translateX(-100%);animation:waveAnimation 1s cubic-bezier(0, 0, 0, 1)}@keyframes waveAnimation{0%{opacity:1;transform:translateX(-100%)}100%{opacity:0;transform:translateX(100%)}}.overlay-percentage{position:absolute;top:0;background-color:rgba(0, 0, 0, 0.9);padding:0 5px;border-radius:15px;font-size:10px;pointer-events:none}.overlay-percentage-add{right:-30px}.overlay-percentage-manage{right:0}.torn-bazaar-fill-qty-price input{-webkit-touch-callout:none;-webkit-user-select:none;user-select:none;transition:box-shadow 0s}.torn-bazaar-fill-qty-price input.tbf-holding{box-shadow:inset 0 0 0 40px rgba(0,180,255,.35);transition:box-shadow 3s linear}.tbf-fav{cursor:pointer;font-size:16px;line-height:1;margin-left:auto;margin-right:6px;width:16px;text-align:center;color:#888;align-self:center;user-select:none;-webkit-user-select:none;z-index:99999}.tbf-fav~.btn-wrap.torn-bazaar-fill-qty-price{margin-left:0}.tbf-fav.tbf-fav--on{color:gold;text-shadow:0 0 3px rgba(255,215,0,.7)}.tbf-fillall-bar{position:fixed;bottom:110px;right:16px;display:flex;align-items:center;gap:6px;padding:6px 8px;background:rgba(0,0,0,.55);border-radius:20px;z-index:999999;touch-action:none;transition:box-shadow .2s ease}.tbf-fillall-grip{cursor:grab;color:#bbb;font-size:14px;line-height:1;letter-spacing:-2px;min-width:12px;text-align:center;align-self:center;user-select:none;-webkit-user-select:none}.tbf-fillall-bar--dragging{cursor:grabbing;opacity:.92}.tbf-fillall-bar--dragging .tbf-fillall-grip{cursor:grabbing}.tbf-fillall-cog{cursor:pointer;flex:0 0 auto;display:flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:rgba(255,255,255,.12);color:#ddd;font-size:13px;line-height:1;user-select:none;-webkit-user-select:none}.tbf-fillall-cog:hover{background:rgba(255,255,255,.28);color:#fff}.tbf-fillall-bar--min{padding:5px 7px;gap:4px}.tbf-fillall-bar--min .tbf-fillall-btn,.tbf-fillall-bar--min .tbf-fillall-cog{display:none}.tbf-fillall-bar--min .tbf-fillall-grip{font-size:16px}.tbf-autofill-dot{display:none;width:10px;height:10px;border-radius:50%;background:gold;box-shadow:0 0 4px gold;animation:tbfPulse 1s ease-in-out infinite}.tbf-fillall-bar--active .tbf-autofill-dot{display:inline-block}.tbf-fillall-bar--active{box-shadow:0 0 10px 2px rgba(255,215,0,.75)}@keyframes tbfPulse{0%,100%{opacity:.3;transform:scale(.8)}50%{opacity:1;transform:scale(1.2)}}.tbf-viewport-border{display:none;position:fixed;top:0;right:0;bottom:0;left:0;border:3px solid gold;box-shadow:inset 0 0 12px rgba(255,215,0,.6);pointer-events:none;z-index:999998}.tbf-viewport-border--active{display:block}.tbf-toast{position:fixed;bottom:158px;right:16px;max-width:280px;background:rgba(0,0,0,.85);color:#fff;padding:10px 14px;border-radius:8px;border:1px solid gold;font-size:13px;line-height:1.4;z-index:1000000;opacity:0;visibility:hidden;transition:opacity .3s,visibility .3s}.tbf-toast--visible{opacity:1;visibility:visible}.tbf-fav.tbf-fav--off{color:#ff6b6b;text-shadow:none}`);
 
     GM_addStyle(`.tbf-modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:2147483000;justify-content:center;align-items:flex-start;overflow:auto;padding:24px 12px;box-sizing:border-box}.tbf-modal-overlay--open{display:flex}.tbf-modal{background:#1f1f1f;color:#e6e6e6;width:100%;max-width:420px;border:1px solid #666;border-radius:10px;box-shadow:0 10px 40px rgba(0,0,0,.6);padding:16px 18px;box-sizing:border-box;font-size:13px;line-height:1.5}.tbf-modal h3{margin:0 0 12px;font-size:15px;display:flex;justify-content:space-between;align-items:center;color:#fff}.tbf-modal-close{cursor:pointer;color:#bbb;font-size:22px;line-height:1}.tbf-modal label{display:block;margin:10px 0 3px;font-weight:bold;color:#cfcfcf}.tbf-modal input[type=text]{width:100%;box-sizing:border-box;padding:7px 9px;border-radius:5px;border:1px solid #666;background:#111;color:#eee;font-size:13px}.tbf-modal-cats{margin-top:4px}.tbf-modal-cat-row{display:flex;gap:6px;margin-bottom:6px;align-items:center}.tbf-modal-cat-row .tbf-modal-cat-name{flex:1 1 55%}.tbf-modal-cat-row .tbf-modal-cat-formula{flex:1 1 45%}.tbf-modal-cat-del{cursor:pointer;color:#ff6b6b;font-size:20px;line-height:1;flex:0 0 auto;width:22px;text-align:center}.tbf-modal-addcat{margin-top:2px;cursor:pointer;background:#333;color:#eee;border:1px solid #666;border-radius:5px;padding:5px 10px;font-size:12px}.tbf-modal-resetcat{margin:2px 0 0 8px;cursor:pointer;background:#3a2a2a;color:#ddd;border:1px solid #774;border-radius:5px;padding:5px 10px;font-size:12px}.tbf-modal-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:16px}.tbf-modal-actions button{cursor:pointer;padding:7px 16px;border-radius:5px;border:1px solid #666;background:#333;color:#eee;font-size:13px}.tbf-modal-save{background:#2e7d32!important;border-color:#2e7d32!important;color:#fff!important}.tbf-modal-help{margin-top:12px;font-size:11px;color:#9a9a9a;line-height:1.5}.tbf-modal-help code{background:#000;padding:1px 4px;border-radius:3px;color:#cfc}.tbf-modal-cat-row input{min-width:0}.tbf-modal-cat-row .tbf-modal-cat-name{flex:1 1 38%}.tbf-modal-cat-row .tbf-modal-cat-formula{flex:1 1 32%}.tbf-modal-cat-row .tbf-modal-cat-qty{flex:1 1 30%}.tbf-modal-cat-head{display:flex;gap:6px;margin:0 0 4px;font-size:11px;color:#9a9a9a}.tbf-modal-cat-head span:nth-child(1){flex:1 1 38%}.tbf-modal-cat-head span:nth-child(2){flex:1 1 32%}.tbf-modal-cat-head span:nth-child(3){flex:1 1 30%}.tbf-modal-cat-head span:nth-child(4){flex:0 0 22px}.tbf-modal-clearexcl{margin:2px 0 0 8px;cursor:pointer;background:#3a2a2a;color:#ddd;border:1px solid #774;border-radius:5px;padding:5px 10px;font-size:12px}`);
+
+    GM_addStyle(`.tbf-changelog-release{margin:0 0 14px}.tbf-changelog-release:last-of-type{margin-bottom:0}.tbf-changelog-ver{display:flex;align-items:baseline;gap:8px;margin:0 0 6px}.tbf-changelog-ver b{color:#fff;font-size:13px}.tbf-changelog-date{color:#8a8a8a;font-size:11px;margin-left:auto}.tbf-changelog-badge{background:#2e7d32;color:#fff;border-radius:10px;padding:1px 7px;font-size:10px;text-transform:uppercase;letter-spacing:.04em}.tbf-changelog-items{margin:0;padding-left:18px;color:#cfcfcf}.tbf-changelog-items li{margin:0 0 5px}.tbf-changelog-items code{background:#000;padding:1px 4px;border-radius:3px;color:#cfc}`);
+
+    const lastSeenVersionKey = "silmaril-torn-bazaar-filler-last-seen-version";
+    // Newest release first. Everything a user could have skipped over is listed, so updating
+    // across several versions still shows the whole gap in one popup.
+    const CHANGELOG = [
+        {
+            version: "1.9.0",
+            date: "2026-09-02",
+            changes: [
+                'New price source: live player-bazaar data from <b>weav3r.dev</b>. Use <code>[bazaar]</code> to undercut the cheapest bazaar, <code>[bazaar:2]</code> for the 3rd cheapest, <code>[bazaar:avg]</code> for the current bazaar average, or <code>[bazaar:median]</code> for the median listing.',
+                'Bazaars normally sell under the item market, so <code>[bazaar]</code> prices you against the sellers you actually compete with. Needs no API key.',
+                'Sponsored listings, listings the crawler has not re-checked in 30 minutes, and listings far below the bazaar average are all ignored — so a single troll listing cannot re-price a Fill All run.',
+                'An item weav3r cannot price falls back to the item market instead of failing the row.',
+                'A formula with no discount (<code>[market]</code>, <code>[bazaar]</code>) now fills at the source price instead of erroring.',
+                'This popup: after an update, a short list of what changed. Re-open it any time from the Tampermonkey menu.'
+            ]
+        }
+    ];
 
     const favouritesStorageKey = "silmaril-torn-bazaar-filler-favourites";
     let favourites = loadFavourites();
@@ -166,6 +211,9 @@
 
     // Initial pass — rows may already be in the DOM at script start (run-at: document-idle).
     scheduleScan();
+
+    // Tell the user what an update changed, the first time they land on a bazaar page after it.
+    maybeShowChangelog();
 
     function insertFillAndWaveBtn(element, buttonLabels, pageType){
         const waveDiv = document.createElement('div');
@@ -329,45 +377,13 @@
                     return reportSkippedRow(wave, extractedItemId, maxQuantity, categoryMode, isAuto);
                 }
             }
-            let formula = pricing.formula;
-            let lowBallPrice = Number.MAX_VALUE;
-            if (pricing.useItems) {
-                let priceDelta = stripDeltaBracket(formula);
-                let price = data.items[extractedItemId].market_value;
-                lowBallPrice = Math.round(performOperation(price, priceDelta));
-            } else {
-                if (data.itemmarket.listings[0].price == null){
-                    console.warn("[TornBazaarFiller] The API is temporarily disabled, please try again later");
-                }
-                if (data.itemmarket.item.id != extractedItemId){
-                    console.warn("[TornBazaarFiller] The API is BROKEN!");
-                }
-                let priceListings = data.itemmarket.listings;
-                let bazaarSlotOffset = getDeltaSlotOffset(formula);
-                let priceDeltaWithoutBazaarOffset = stripDeltaBracket(formula);
-                lowBallPrice = Math.round(performOperation(priceListings[Math.min(bazaarSlotOffset, priceListings.length - 1)].price, priceDeltaWithoutBazaarOffset));
-                let price3rd = priceListings[Math.min(2, priceListings.length - 1)].price;
-                let priceCoefficient = ((lowBallPrice / price3rd) * 100).toFixed(0);
-                let percentageOverlaySpan = insertPercentageSpan(amountDiv);
-                if (priceCoefficient <= 95){
-                    percentageOverlaySpan.style.display = "block";
-                    if (priceCoefficient <= 50){
-                        percentageOverlaySpan.style.color = "red";
-                        wave.style.backgroundColor = "red";
-                        wave.style.animationDuration = "5s";
-                    } else if (priceCoefficient <= 75){
-                        percentageOverlaySpan.style.color = "yellow";
-                        wave.style.backgroundColor = "yellow";
-                        wave.style.animationDuration = "3s";
-                    } else {
-                        percentageOverlaySpan.style.color = "green";
-                        wave.style.backgroundColor = "green";
-                    }
-                    percentageOverlaySpan.innerText = priceCoefficient + "%";
-                } else {
-                    percentageOverlaySpan.style.display = "none";
-                    wave.style.backgroundColor = "green";
-                }
+            let resolved = await resolveFillPrice(pricing, extractedItemId);
+            if (resolved.error != null){
+                return handleApiError(resolved.error, wave) ?? "error";
+            }
+            let lowBallPrice = resolved.price;
+            if (resolved.listings != null){
+                applyPriceCoefficientOverlay(insertPercentageSpan(amountDiv), wave, lowBallPrice, resolved.listings);
             }
 
             priceInputs[0].value = lowBallPrice;
@@ -451,45 +467,13 @@
             if (apiErrorStatus !== null){
                 return apiErrorStatus;
             }
-            let formula = pricing.formula;
-            let lowBallPrice = Number.MAX_VALUE;
-            if (pricing.useItems) {
-                let priceDelta = stripDeltaBracket(formula);
-                let price = data.items[extractedItemId].market_value;
-                lowBallPrice = Math.round(performOperation(price, priceDelta));
-            } else {
-                if (data.itemmarket.listings[0].price == null){
-                    console.warn("[TornBazaarFiller] The API is temporarily disabled, please try again later");
-                }
-                if (data.itemmarket.item.id != extractedItemId){
-                    console.warn("[TornBazaarFiller] The API is BROKEN!");
-                }
-                let priceListings = data.itemmarket.listings;
-                let bazaarSlotOffset = getDeltaSlotOffset(formula);
-                let priceDeltaWithoutBazaarOffset = stripDeltaBracket(formula);
-                lowBallPrice = Math.round(performOperation(priceListings[Math.min(bazaarSlotOffset, priceListings.length - 1)].price, priceDeltaWithoutBazaarOffset));
-                let price3rd = priceListings[Math.min(2, priceListings.length - 1)].price;
-                let priceCoefficient = ((lowBallPrice / price3rd) * 100).toFixed(0);
-                let percentageOverlaySpan = insertPercentageManageSpan(moneyGroupDiv);
-                if (priceCoefficient <= 95){
-                    percentageOverlaySpan.style.display = "block";
-                    if (priceCoefficient <= 50){
-                        percentageOverlaySpan.style.color = "red";
-                        wave.style.backgroundColor = "red";
-                        wave.style.animationDuration = "5s";
-                    } else if (priceCoefficient <= 75){
-                        percentageOverlaySpan.style.color = "yellow";
-                        wave.style.backgroundColor = "yellow";
-                        wave.style.animationDuration = "3s";
-                    } else {
-                        percentageOverlaySpan.style.color = "green";
-                        wave.style.backgroundColor = "green";
-                    }
-                    percentageOverlaySpan.innerText = priceCoefficient + "%";
-                } else {
-                    percentageOverlaySpan.style.display = "none";
-                    wave.style.backgroundColor = "green";
-                }
+            let resolved = await resolveFillPrice(pricing, extractedItemId);
+            if (resolved.error != null){
+                return handleApiError(resolved.error, wave) ?? "error";
+            }
+            let lowBallPrice = resolved.price;
+            if (resolved.listings != null){
+                applyPriceCoefficientOverlay(insertPercentageManageSpan(moneyGroupDiv), wave, lowBallPrice, resolved.listings);
             }
 
             priceInputs.forEach(x => { x.value = lowBallPrice; });
@@ -1193,6 +1177,12 @@
     }
 
     function performOperation(number, operation) {
+        // A formula that is nothing but a source — "[market]", "[bazaar]" — leaves no delta
+        // behind, and means "take the source price as it stands".
+        if (operation == null || operation.trim() === '') {
+            return number;
+        }
+
         // Parse the operation string to extract the operator and value
         const match = operation.match(/^([-+]?)(\d+(?:\.\d+)?)(%)?$/);
 
@@ -1326,16 +1316,245 @@
         return quantityModeRaw;
     }
 
-    function buildPriceUrl(useItems, itemId){
-        return (useItems ? itemUrl : marketUrl)
+    // ---- Price sources ---------------------------------------------------------------------
+    // A formula names its source inside its bracket: no bracket or [n] is Torn's item market,
+    // [market] is Torn's market value, [bazaar...] is weav3r's player-bazaar data.
+
+    function bracketToken(formula){
+        let open = formula.indexOf('[');
+        if (open == -1){
+            return '';
+        }
+        let close = formula.indexOf(']', open);
+        return (close == -1 ? formula.substring(open + 1) : formula.substring(open + 1, close)).trim().toLowerCase();
+    }
+
+    function sourceOf(formula){
+        let token = bracketToken(formula);
+        if (token === 'market'){
+            return SOURCE_MARKET_VALUE;
+        }
+        if (token === 'bazaar' || token.indexOf('bazaar:') == 0){
+            return SOURCE_BAZAAR;
+        }
+        return SOURCE_ITEM_MARKET;
+    }
+
+    // What a [bazaar...] formula reads: a listing slot, the bazaar average, or the median listing.
+    function bazaarSelector(formula){
+        let argument = bracketToken(formula).substring('bazaar'.length).replace(/^:/, '').trim();
+        if (argument === 'avg' || argument === 'average'){
+            return { kind: 'avg' };
+        }
+        if (argument === 'median'){
+            return { kind: 'median' };
+        }
+        let slot = parseInt(argument, 10);
+        return { kind: 'slot', index: isNaN(slot) ? 0 : slot };
+    }
+
+    // Shape a weav3r failure like a Torn error payload so one set of handlers covers both.
+    // A 429 borrows Torn's rate-limit code, which already drives the Fill All back-off.
+    function weav3rError(status, message){
+        return { error: { code: status === 429 ? 5 : -1, error: "weav3r: " + message } };
+    }
+
+    async function fetchWeav3rItem(itemId){
+        let cached = weav3rItemCache.get(itemId);
+        if (cached != null && (Date.now() - cached.ts) < WEAV3R_ITEM_TTL_MS){
+            return cached.payload;
+        }
+        let payload;
+        try {
+            let response = await fetch(weav3rItemUrl.replace("{itemId}", itemId));
+            if (!response.ok){
+                return weav3rError(response.status, "HTTP " + response.status);
+            }
+            payload = await response.json();
+        } catch (error) {
+            return weav3rError(0, String(error));
+        }
+        // weav3r reports failures as a bare string, unlike Torn's {code, error} object.
+        if (payload == null || payload.error != null){
+            return weav3rError(0, payload == null ? "empty response" : String(payload.error));
+        }
+        weav3rItemCache.set(itemId, { ts: Date.now(), payload: payload });
+        return payload;
+    }
+
+    // The bulk snapshot carries every item's average at once, so a whole Fill All run on
+    // [bazaar:avg] costs a single request instead of one per row.
+    async function fetchWeav3rAll(){
+        if (weav3rAllCache != null && (Date.now() - weav3rAllCache.ts) < WEAV3R_ALL_TTL_MS){
+            return weav3rAllCache.byId;
+        }
+        let response = await fetch(weav3rAllUrl);
+        if (!response.ok){
+            throw new Error("weav3r snapshot HTTP " + response.status);
+        }
+        let payload = await response.json();
+        let byId = new Map();
+        (payload.items ?? []).forEach(function(item){ byId.set(item.item_id, item); });
+        weav3rAllCache = { ts: Date.now(), byId: byId };
+        return byId;
+    }
+
+    // The snapshot has no listings, so only an average request can be served from it; everything
+    // else needs the per-item endpoint. A snapshot failure just falls through to that endpoint.
+    async function fetchBazaarData(formula, itemId){
+        if (bazaarSelector(formula).kind === 'avg'){
+            try {
+                let row = (await fetchWeav3rAll()).get(itemId);
+                if (row != null){
+                    return { item_id: itemId, bazaar_average: row.bazaar_average, market_price: row.market_price, listings: [] };
+                }
+            } catch (error) {
+                console.warn("[TornBazaarFiller] weav3r snapshot unavailable, using the per-item endpoint:", error);
+            }
+        }
+        return fetchWeav3rItem(itemId);
+    }
+
+    // Normalise weav3r listings to the {price, amount} shape the rest of the script speaks.
+    // The sponsored slot is dropped first — a paid placement must never set your price — and so
+    // are listings the crawler has not re-confirmed lately, unless that would leave nothing.
+    function normaliseBazaarListings(data){
+        // A listing this far under the average is an outlier, not competition. Dropping it (rather
+        // than refusing the item) means the next genuine listing sets the price.
+        let floor = data.bazaar_average == null ? 0 : data.bazaar_average * BAZAAR_SANITY_FLOOR_RATIO;
+        let usable = (data.listings ?? []).filter(function(listing){
+            return listing.sponsored !== 1 && listing.price >= floor;
+        });
+        let fresh = usable.filter(function(listing){
+            return (Date.now() - (listing.last_checked ?? 0) * 1000) <= WEAV3R_STALE_LISTING_MS;
+        });
+        return (fresh.length > 0 ? fresh : usable).map(function(listing){
+            return { price: listing.price, amount: listing.quantity ?? 1 };
+        });
+    }
+
+    // Resolve a [bazaar...] formula against a weav3r payload. Returns null when weav3r has
+    // nothing usable, which tells the caller to fall back to Torn's item market.
+    function bazaarPriceFrom(data, formula, itemId){
+        let selector = bazaarSelector(formula);
+        let listings = normaliseBazaarListings(data);
+        let basis = null;
+        if (selector.kind === 'avg'){
+            basis = data.bazaar_average ?? null;
+        } else if (selector.kind === 'median'){
+            basis = listings.length > 0 ? getMedianPrice(listings) : null;
+        } else if (listings.length > 0){
+            basis = listings[Math.min(selector.index, listings.length - 1)].price;
+        }
+        if (basis == null){
+            console.warn("[TornBazaarFiller] weav3r has no usable bazaar price for item " + itemId + ".");
+            return null;
+        }
+        return { price: Math.round(performOperation(basis, stripDeltaBracket(formula))), listings: listings };
+    }
+
+    function buildTornPriceUrl(source, itemId){
+        return (source === SOURCE_MARKET_VALUE ? itemUrl : marketUrl)
             .replace("{itemId}", itemId)
             .replace("{apiKey}", apiKey);
     }
 
-    function readCategoryFromData(data, itemId, useItems){
+    async function fetchForSource(source, formula, itemId){
+        if (source === SOURCE_BAZAAR){
+            return fetchBazaarData(formula, itemId);
+        }
+        return fetch(buildTornPriceUrl(source, itemId)).then(response => response.json());
+    }
+
+    function itemMarketPrice(data, formula, itemId){
+        if (data.itemmarket.listings[0].price == null){
+            console.warn("[TornBazaarFiller] The API is temporarily disabled, please try again later");
+        }
+        if (data.itemmarket.item.id != itemId){
+            console.warn("[TornBazaarFiller] The API is BROKEN!");
+        }
+        let listings = data.itemmarket.listings;
+        let slot = getDeltaSlotOffset(formula);
+        return {
+            price: Math.round(performOperation(listings[Math.min(slot, listings.length - 1)].price, stripDeltaBracket(formula))),
+            listings: listings
+        };
+    }
+
+    // Resolve the price to fill plus the listings the percentage overlay compares against
+    // (null when the source is a single scalar and there is nothing to compare with).
+    async function resolveFillPrice(pricing, itemId){
+        if (pricing.source === SOURCE_MARKET_VALUE){
+            let marketValue = pricing.data.items[itemId].market_value;
+            return { price: Math.round(performOperation(marketValue, stripDeltaBracket(pricing.formula))), listings: null };
+        }
+        if (pricing.source === SOURCE_BAZAAR){
+            let resolved = bazaarPriceFrom(pricing.data, pricing.formula, itemId);
+            if (resolved != null){
+                return resolved;
+            }
+            // A thin or unanswerable item falls back to Torn rather than failing the row, so one
+            // bad item never stops a Fill All run. The delta carries over; the selector cannot.
+            console.warn("[TornBazaarFiller] No usable weav3r bazaar price for item " + itemId + "; using the item market.");
+            let fallbackFormula = stripDeltaBracket(pricing.formula);
+            let data = await fetchForSource(SOURCE_ITEM_MARKET, fallbackFormula, itemId);
+            if (data.error != null){
+                return { error: data };
+            }
+            return itemMarketPrice(data, fallbackFormula, itemId);
+        }
+        return itemMarketPrice(pricing.data, pricing.formula, itemId);
+    }
+
+    // Colour the row by how far the filled price sits under the 3rd-cheapest listing of whichever
+    // source produced it, so the cue reads the same on item-market and bazaar prices.
+    function applyPriceCoefficientOverlay(percentageOverlaySpan, wave, lowBallPrice, listings){
+        // [bazaar:avg] resolves from the snapshot and carries no listings to compare against;
+        // the fill still succeeded, so clear any percentage left over from an earlier one.
+        if (listings.length === 0){
+            percentageOverlaySpan.style.display = "none";
+            wave.style.backgroundColor = "green";
+            return;
+        }
+        let price3rd = listings[Math.min(2, listings.length - 1)].price;
+        let priceCoefficient = ((lowBallPrice / price3rd) * 100).toFixed(0);
+        if (priceCoefficient <= 95){
+            percentageOverlaySpan.style.display = "block";
+            if (priceCoefficient <= 50){
+                percentageOverlaySpan.style.color = "red";
+                wave.style.backgroundColor = "red";
+                wave.style.animationDuration = "5s";
+            } else if (priceCoefficient <= 75){
+                percentageOverlaySpan.style.color = "yellow";
+                wave.style.backgroundColor = "yellow";
+                wave.style.animationDuration = "3s";
+            } else {
+                percentageOverlaySpan.style.color = "green";
+                wave.style.backgroundColor = "green";
+            }
+            percentageOverlaySpan.innerText = priceCoefficient + "%";
+        } else {
+            percentageOverlaySpan.style.display = "none";
+            wave.style.backgroundColor = "green";
+        }
+    }
+
+    function getMedianPrice(listings) {
+        const prices = listings.flatMap(listing => Array(listing.amount).fill(listing.price));
+        prices.sort((a, b) => a - b);
+        const mid = Math.floor(prices.length / 2);
+        return prices.length % 2 === 0 ? (prices[mid - 1] + prices[mid]) / 2 : prices[mid];
+    }
+
+    // weav3r carries no item type, so a bazaar response can never teach us a category — the
+    // caller keeps its cached guess and re-learns from Torn at the next expiry.
+    function readCategoryFromData(data, itemId, source){
         try {
-            if (useItems){
+            if (source === SOURCE_MARKET_VALUE){
                 return (data.items && data.items[itemId]) ? (data.items[itemId].type ?? null) : null;
+            }
+            if (source === SOURCE_BAZAAR){
+                return null;
             }
             return (data.itemmarket && data.itemmarket.item) ? (data.itemmarket.item.type ?? null) : null;
         } catch (error) {
@@ -1352,33 +1571,135 @@
         // No per-category overrides of either kind → category is irrelevant; behave exactly
         // like the default path.
         if (Object.keys(categoryDeltas).length === 0 && !hasCategoryQuantityOverrides()){
-            let useItems = priceDeltaRaw.indexOf('[market]') != -1;
-            let data = await fetch(buildPriceUrl(useItems, itemId)).then(response => response.json());
-            return { data: data, formula: priceDeltaRaw, useItems: useItems, category: null };
+            let source = sourceOf(priceDeltaRaw);
+            let data = await fetchForSource(source, priceDeltaRaw, itemId);
+            return { data: data, formula: priceDeltaRaw, source: source, category: null };
         }
 
         let cached = getCachedCategory(itemId);
         let expired = cached == null || (Date.now() - cached.ts) > CATEGORY_TTL_MS;
         let guessCategory = cached != null ? cached.type : null;
+        let guessFormula = getEffectiveDelta(guessCategory);
         // When stale/unknown, force the items endpoint so we definitively re-learn the type even if
-        // the listings response omits it; otherwise guess from the cached category to stay 1 call.
-        let firstUseItems = expired ? true : (getEffectiveDelta(guessCategory).indexOf('[market]') != -1);
-        let data = await fetch(buildPriceUrl(firstUseItems, itemId)).then(response => response.json());
+        // the chosen source omits it; otherwise guess from the cached category to stay 1 call.
+        let firstSource = expired ? SOURCE_MARKET_VALUE : sourceOf(guessFormula);
+        let data = await fetchForSource(firstSource, guessFormula, itemId);
         if (data.error != null){
-            return { data: data, formula: getEffectiveDelta(guessCategory), useItems: firstUseItems, category: guessCategory };
+            return { data: data, formula: guessFormula, source: firstSource, category: guessCategory };
         }
-        let actualType = readCategoryFromData(data, itemId, firstUseItems);
+        let actualType = readCategoryFromData(data, itemId, firstSource);
         let category = actualType != null ? actualType : guessCategory;
         if (actualType != null && (cached == null || cached.type !== actualType || expired)){
             cacheItemCategory(itemId, actualType);
         }
         let formula = getEffectiveDelta(category);
-        let useItems = formula.indexOf('[market]') != -1;
-        if (useItems !== firstUseItems){
-            let data2 = await fetch(buildPriceUrl(useItems, itemId)).then(response => response.json());
-            return { data: data2, formula: formula, useItems: useItems, category: category };
+        let source = sourceOf(formula);
+        if (source !== firstSource){
+            let data2 = await fetchForSource(source, formula, itemId);
+            return { data: data2, formula: formula, source: source, category: category };
         }
-        return { data: data, formula: formula, useItems: useItems, category: category };
+        return { data: data, formula: formula, source: source, category: category };
+    }
+
+    // ---- "What's new" popup ----------------------------------------------------------------
+
+    function compareVersions(left, right){
+        let leftParts = String(left).split('.').map(function(part){ return parseInt(part, 10) || 0; });
+        let rightParts = String(right).split('.').map(function(part){ return parseInt(part, 10) || 0; });
+        for (let i = 0; i < Math.max(leftParts.length, rightParts.length); i++){
+            let difference = (leftParts[i] ?? 0) - (rightParts[i] ?? 0);
+            if (difference !== 0){
+                return difference < 0 ? -1 : 1;
+            }
+        }
+        return 0;
+    }
+
+    // A first install has no "before" to report, so it records the version silently and the
+    // popup waits for a real update. Anything else shows every release since the one last seen.
+    function maybeShowChangelog(){
+        let lastSeen;
+        try {
+            lastSeen = localStorage.getItem(lastSeenVersionKey);
+        } catch (error) {
+            return;
+        }
+        if (lastSeen === SCRIPT_VERSION){
+            return;
+        }
+        if (lastSeen == null){
+            rememberChangelogSeen();
+            return;
+        }
+        let unseen = CHANGELOG.filter(function(release){ return compareVersions(release.version, lastSeen) > 0; });
+        if (unseen.length === 0){
+            rememberChangelogSeen();
+            return;
+        }
+        openChangelogModal(unseen);
+    }
+
+    function rememberChangelogSeen(){
+        try {
+            localStorage.setItem(lastSeenVersionKey, SCRIPT_VERSION);
+        } catch (error) {
+            // A blocked localStorage only means the popup returns on the next page load.
+        }
+    }
+
+    // Entries are literals defined in this file, so their inline markup is intentional.
+    function renderChangelogRelease(release, index){
+        return '<div class="tbf-changelog-release">' +
+                   '<div class="tbf-changelog-ver"><b>v' + release.version + '</b>' +
+                       (index === 0 ? '<span class="tbf-changelog-badge">new</span>' : '') +
+                       '<span class="tbf-changelog-date">' + release.date + '</span>' +
+                   '</div>' +
+                   '<ul class="tbf-changelog-items">' +
+                       release.changes.map(function(change){ return '<li>' + change + '</li>'; }).join('') +
+                   '</ul>' +
+               '</div>';
+    }
+
+    function openChangelogModal(releases){
+        if (releases.length === 0){
+            return;
+        }
+        let overlay = document.querySelector('.tbf-changelog-overlay');
+        if (overlay == null){
+            overlay = document.createElement('div');
+            // Borrows the settings modal's chrome, so the popup needs no layout of its own.
+            overlay.className = 'tbf-modal-overlay tbf-changelog-overlay';
+            document.body.appendChild(overlay);
+        }
+        overlay.innerHTML =
+            '<div class="tbf-modal">' +
+                '<h3>Bazaar Filler v' + SCRIPT_VERSION + ' — what&rsquo;s new' +
+                    '<span class="tbf-modal-close" title="Close">&times;</span>' +
+                '</h3>' +
+                releases.map(renderChangelogRelease).join('') +
+                '<div class="tbf-modal-actions">' +
+                    '<button type="button" class="tbf-changelog-settings">Open settings</button>' +
+                    '<button type="button" class="tbf-modal-save tbf-changelog-ok">Got it</button>' +
+                '</div>' +
+            '</div>';
+
+        overlay.querySelector('.tbf-modal-close').addEventListener('click', closeChangelogModal);
+        overlay.querySelector('.tbf-changelog-ok').addEventListener('click', closeChangelogModal);
+        overlay.querySelector('.tbf-changelog-settings').addEventListener('click', function(){
+            closeChangelogModal();
+            openSettingsModal();
+        });
+        overlay.addEventListener('click', function(event){ if (event.target === overlay){ closeChangelogModal(); } });
+        overlay.classList.add('tbf-modal-overlay--open');
+    }
+
+    // Dismissing by any route counts as read — the popup must never nag.
+    function closeChangelogModal(){
+        let overlay = document.querySelector('.tbf-changelog-overlay');
+        if (overlay != null){
+            overlay.classList.remove('tbf-modal-overlay--open');
+        }
+        rememberChangelogSeen();
     }
 
     function ensureSettingsModal(){
@@ -1406,7 +1727,8 @@
                     '<button type="button" class="tbf-modal-cancel">Cancel</button>' +
                     '<button type="button" class="tbf-modal-save">Save</button>' +
                 '</div>' +
-                '<div class="tbf-modal-help">Price examples: <code>-1</code> (lowest − $1), <code>-5%</code>, <code>-1[1]</code> (2nd lowest listing), <code>[market]</code> (item market value).<br>' +
+                '<div class="tbf-modal-help">Item market: <code>-1</code> (lowest listing − $1), <code>-5%</code>, <code>-1[1]</code> (2nd lowest listing), <code>[market]</code> (Torn market value).<br>' +
+                'Player bazaars, via weav3r.dev, no API key: <code>-1[bazaar]</code> (cheapest bazaar − $1), <code>-1[bazaar:2]</code> (3rd cheapest), <code>-5%[bazaar:avg]</code> (bazaar average), <code>[bazaar:median]</code>.<br>' +
                 'Quantity examples: <code>max</code> (all of them), <code>max-1</code> (keep one back), <code>max-3</code>, <code>1</code> (always list one), <code>skip</code> (never list this category).<br>' +
                 'Category rows accept the same syntax and fall back to the defaults above when blank.</div>' +
             '</div>' +
