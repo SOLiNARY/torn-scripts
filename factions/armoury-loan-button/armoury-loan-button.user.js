@@ -234,7 +234,6 @@
     const SLOT_ITEMS_KEY = 'silmaril-armoury-loan-slots';
     const USER_KEY = 'silmaril-armoury-loan-user';
     const RFCV_KEY = 'silmaril-armoury-loan-rfcv';
-    const USED_ITEM_MARKER = 'used item';
     const RFCV_ARG = 'rfcv=';
     const USER_ID_KEYS = ['userID', 'userId', 'user_id', 'playerId', 'playerID', 'uid'];
     const USER_NAME_KEYS = ['playername', 'playerName', 'username', 'userName', 'user_name'];
@@ -244,9 +243,17 @@
    member name, on every occupied role whose item this script knows about. */
 .silmaril-chip-wrap {
     position: relative;
+    display: block;
     width: 100%;
     margin-top: 6px;
     container-type: inline-size;
+}
+
+/* The chip is appended to the slot wrapper, which Torn lays out as a column. This is
+   only a guard for the day that changes: a row parent is told to wrap so the chip still
+   gets a line of its own instead of sharing the member name's. */
+:has(> .silmaril-chip-wrap) {
+    flex-wrap: wrap;
 }
 
 .silmaril-chip {
@@ -876,6 +883,10 @@
     // Loans are sent one at a time with a gap, so a crew handover does not arrive as a
     // burst Torn could reasonably treat as automation.
     const BATCH_GAP_MS = 400;
+    // Torn words the requirement two ways: a role somebody holds says "Used item", an
+    // empty one says "Required item". Only matching the first is why this used to see
+    // nothing but your own role.
+    const ITEM_MARKERS = ['used item', 'required item'];
 
     const ICON_CHECK = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" ' +
         'stroke-width="2" aria-hidden="true"><path d="M3.2 8.4 6.5 11.7 12.8 5.2" stroke-linecap="round" ' +
@@ -915,10 +926,10 @@
         return null;
     }
 
-    // Falls back to resolving the item by the name written after "Used item:",
-    // matched against the cached armoury item names.
+    // Falls back to resolving the item by the name written after the marker, matched
+    // against the cached armoury item names.
     function findItemIdByName(blockText) {
-        const captured = blockText?.match(/used item:?\s*(.{1,60})/i)?.[1].trim().toLowerCase();
+        const captured = blockText?.match(/(?:used|required) item:?\s*(.{1,60})/i)?.[1].trim().toLowerCase();
         if (!captured) return null;
         let best = null;
         for (const [itemId, entry] of Object.entries(getStoredItems())) {
@@ -929,20 +940,44 @@
         return best?.itemId ?? null;
     }
 
-    // Climbs from the item image to the smallest ancestor containing the
-    // "Used item: ..." text; OC class names are hashed and the text may be
-    // split across word-level spans, so the ancestors' combined textContent is
-    // the only stable marker. The size cap keeps it from latching onto huge
-    // containers that merely happen to contain the text somewhere far away.
-    function findUsedItemBlock(img) {
+    function hasItemMarker(text) {
+        const lower = String(text ?? '').toLowerCase();
+        return ITEM_MARKERS.some(function (marker) { return lower.includes(marker); });
+    }
+
+    // Climbs from the item image to the smallest ancestor containing the requirement
+    // text; OC class names are hashed and the text may be split across word-level
+    // spans, so the ancestors' combined textContent is the only stable marker. The size
+    // cap keeps it from latching onto huge containers that merely happen to contain the
+    // text somewhere far away.
+    function findItemBlock(img) {
         let el = img.parentElement;
         for (let depth = 0; el && el !== document.body && depth < 8; depth++) {
             const text = el.textContent ?? '';
             if (text.length > 600) return null;
-            if (text.toLowerCase().includes(USED_ITEM_MARKER)) return el;
+            if (hasItemMarker(text)) return el;
             el = el.parentElement;
         }
         return null;
+    }
+
+    function itemIdIn(block) {
+        for (const img of block.querySelectorAll('img[src*="images/items/"], img[srcset*="images/items/"]')) {
+            const id = extractItemId(img);
+            if (id != null) return id;
+        }
+        return findItemIdByName(block.textContent);
+    }
+
+    // Torn keeps one cached tooltip node per slot and leaves every one of them in the
+    // document once hovered, all of them reporting zero opacity. Neither presence nor
+    // paint says which role is being described - but the header it marks as open names
+    // its own tooltip by id, which is exact.
+    function tooltipForHeader(header) {
+        const id = header.getAttribute('aria-describedby');
+        if (id == null || id === '') return null;
+        const tip = document.getElementById(id);
+        return tip != null && hasItemMarker(tip.textContent) ? tip : null;
     }
 
     // The slot wrapper holds both the header (role name, success chance) and the body
@@ -1019,33 +1054,50 @@
         return cache[slot.ocKey] ?? (slot.scenarioKey != null ? cache[slot.scenarioKey] : null) ?? null;
     }
 
-    // Correlates a currently-visible "Used item" tooltip to the role it belongs to.
-    // Climbing up from the tooltip text is preferred; the header Torn itself marks as
-    // open is the fallback for when the tooltip renders as a portal disconnected from
-    // its slot's own subtree.
+    // The scenario key is the valuable half: the item belongs to the role in that
+    // scenario, not to this particular crime, so learning it once teaches every other
+    // copy on the page - including the roles Torn has stopped describing because their
+    // planning is finished.
+    function rememberSlotItem(cache, slot, itemId) {
+        if (slot == null || itemId == null) return false;
+        let changed = false;
+        for (const key of [slot.ocKey, slot.scenarioKey]) {
+            if (key != null && cache[key] !== itemId) {
+                cache[key] = itemId;
+                changed = true;
+            }
+        }
+        return changed;
+    }
+
     function discoverSlotItems() {
         const cache = getSlotItemCache();
         let changed = false;
-        const activeHeader = document.querySelector('[data-is-tooltip-opened="true"]');
+
+        // When the requirement is rendered inside the slot itself, the role it belongs
+        // to can be read off the DOM with certainty.
         const imgs = document.querySelectorAll('img[src*="images/items/"], img[srcset*="images/items/"]');
         for (const img of imgs) {
             if (img.closest('.img-wrap[data-armoryid], .silmaril-chip, .silmaril-pop, .silmaril-modal, ' +
                 '#chatRoot, [class^="chat-box"]')) continue;
-            const textBlock = findUsedItemBlock(img);
-            if (!textBlock) continue;
-            const itemId = extractItemId(img) ?? findItemIdByName(textBlock.textContent);
-            if (!itemId) continue;
-            const source = findSlotWrapper(textBlock) ?? (activeHeader != null ? findSlotWrapper(activeHeader) : null);
-            if (!source) continue;
-            const slot = readSlot(source);
-            if (slot == null) continue;
-            for (const key of [slot.ocKey, slot.scenarioKey]) {
-                if (key != null && cache[key] !== itemId) {
-                    cache[key] = itemId;
-                    changed = true;
-                }
+            const block = findItemBlock(img);
+            if (block == null) continue;
+            const wrapper = findSlotWrapper(block);
+            if (wrapper == null) continue;
+            changed = rememberSlotItem(cache, readSlot(wrapper), extractItemId(img) ?? itemIdIn(block)) || changed;
+        }
+
+        // Otherwise Torn renders it as a tooltip outside the slot's own subtree, and the
+        // link back to the role runs through the open header's aria-describedby.
+        const header = document.querySelector('[data-is-tooltip-opened="true"]');
+        const tip = header != null ? tooltipForHeader(header) : null;
+        if (tip != null) {
+            const wrapper = findSlotWrapper(header);
+            if (wrapper != null) {
+                changed = rememberSlotItem(cache, readSlot(wrapper), itemIdIn(tip)) || changed;
             }
         }
+
         if (changed) saveSlotItemCache(cache);
     }
 
@@ -1145,16 +1197,19 @@
         return { art: state.itemId, dim: state.kind === 'gone' };
     }
 
-    // Where the chip goes: straight after the member's name badge, which puts it inside
-    // the slot body and above the menu, wherever Torn has moved things to this build.
+    // Where the chip goes: the end of the slot wrapper, which puts it directly under the
+    // member name and spanning the slot, without landing between two children React is
+    // managing or disturbing the menu that is positioned against the slot body.
     function chipHome(wrapper) {
-        const badge = wrapper.querySelector('[class*="badgeContainer"]');
-        if (badge != null && badge.parentElement != null) {
-            return { parent: badge.parentElement, before: badge.nextSibling };
-        }
-        const body = wrapper.querySelector('[class*="slotBody"]');
-        if (body != null) return { parent: body, before: null };
-        return null;
+        return { parent: wrapper, before: null };
+    }
+
+    // Whether the chip needs a whole line to itself depends on which way its parent's
+    // flex runs, and Torn has changed that before. Reading it beats assuming it.
+    function fitWrapToRow(wrap, parent) {
+        const style = getComputedStyle(parent);
+        const isFlex = style.display === 'flex' || style.display === 'inline-flex';
+        wrap.style.flexBasis = isFlex && !style.flexDirection.startsWith('column') ? '100%' : '';
     }
 
     function buildChip(slot, state, isMine) {
@@ -1236,9 +1291,10 @@
         if (wrap == null) {
             const home = chipHome(slot.wrapper);
             if (home == null) return;
-            wrap = document.createElement('span');
+            wrap = document.createElement('div');
             wrap.className = 'silmaril-chip-wrap';
             home.parent.insertBefore(wrap, home.before);
+            fitWrapToRow(wrap, home.parent);
         } else if (wrap.dataset.silmarilSig === signature) {
             return;
         }
