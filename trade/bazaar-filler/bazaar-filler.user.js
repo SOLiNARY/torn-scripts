@@ -1,13 +1,14 @@
 // ==UserScript==
 // @name         Torn Bazaar Filler
 // @namespace    https://github.com/SOLiNARY
-// @version      1.9.1
+// @version      1.9.2
 // @description  On "Fill" click autofills bazaar item price with lowest market price currently minus $1 (can be customised), shows current price coefficient compared to 3rd lowest, fills the quantity your quantity mode asks for, marks checkboxes for guns. Click the ⚙ cog on the Fill All bar — or hold a Fill/Update button for 3s — to open the settings modal (price delta, quantity mode, API key, and per-category overrides — set different discounts/sources/quantities for Clothing, Other, Drug, etc.). Quantity modes: "max" (default), "max-1" to always keep a copy, a fixed number, or "skip" to never list a category. Cycle the star next to Fill/Update to mark an item as a favourite (★, used by Fill All) or excluded (⊘, never auto-filled). Use "Fill All" to auto-fill every favourite row on both the Add Items and Manage Items pages, including ones appearing later via infinite scroll or category switches. Drag the Fill All bar anywhere; drop it near a screen edge to clamp and minimise it — its position and state are remembered. Three price sources are available: Torn's item market listings (the default), Torn's market value ([market]) and live player-bazaar data from weav3r.dev ([bazaar], [bazaar:2], [bazaar:avg], [bazaar:median]) — the last one prices you against the bazaars you actually compete with. After an update a "What's new" popup lists what changed.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT License
 // @match        https://www.torn.com/bazaar.php*
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=torn.com
-// @require      https://ajax.googleapis.com/ajax/libs/jquery/3.3.1/jquery.min.js
+// @downloadURL  https://raw.githubusercontent.com/SOLiNARY/torn-scripts/main/trade/bazaar-filler/bazaar-filler.user.js
+// @updateURL    https://raw.githubusercontent.com/SOLiNARY/torn-scripts/main/trade/bazaar-filler/bazaar-filler.user.js
 // @run-at       document-idle
 // @grant        GM_addStyle
 // @grant        GM_registerMenuCommand
@@ -17,7 +18,7 @@
     'use strict';
 
     // Keep in sync with @version above — it keys the "What's new" popup.
-    const SCRIPT_VERSION = "1.9.1";
+    const SCRIPT_VERSION = "1.9.2";
 
     const marketUrl = "https://api.torn.com/v2/market?id={itemId}&selections=itemMarket&key={apiKey}&comment=BazaarFiller";
     const itemUrl = "https://api.torn.com/torn/{itemId}?selections=items&key={apiKey}&comment=BazaarFiller";
@@ -142,7 +143,9 @@
     const viewPortWidthPx = window.innerWidth;
     const isMobileView = viewPortWidthPx <= 784;
 
-    const observerTarget = $(".content-wrapper")[0];
+    // Torn PDA ignores @require, so nothing here may depend on jQuery being loaded.
+    // Falling back to the body keeps the observer alive if the wrapper is renamed.
+    const observerTarget = document.querySelector(".content-wrapper") ?? document.body;
     const observerConfig = { attributes: false, childList: true, characterData: false, subtree: true };
 
     let scanScheduled = false;
@@ -150,19 +153,20 @@
         scanScheduled = false;
 
         // Add Items page rows (legacy non-virtualized list)
-        $("ul.items-cont li.clearfix").find("div.title-wrap div.name-wrap").each(function(){
-            let isParentRowDisabled = this.parentElement.parentElement.classList.contains("disabled");
-            let alreadyHasFillBtn = this.querySelector(".btn-wrap.torn-bazaar-fill-qty-price") != null;
+        document.querySelectorAll("ul.items-cont li.clearfix div.title-wrap div.name-wrap").forEach(function(nameWrap){
+            let isParentRowDisabled = nameWrap.parentElement.parentElement.classList.contains("disabled");
+            let alreadyHasFillBtn = nameWrap.querySelector(".btn-wrap.torn-bazaar-fill-qty-price") != null;
             if (!alreadyHasFillBtn && !isParentRowDisabled){
-                insertFillAndWaveBtn(this, addItemsLabels, pages.AddItems);
+                insertFillAndWaveBtn(nameWrap, addItemsLabels, pages.AddItems);
             }
         });
 
         // Manage Items page rows (virtualized list — rows mount/unmount on scroll & dnd-kit reorder)
-        $('div[data-testid="sortable-item"], div[class*="row___"]').find('div[class*="item___"] div[class*="desc___"]').each(function(){
-            let alreadyHasUpdateBtn = this.querySelector(".btn-wrap.torn-bazaar-fill-qty-price") != null;
+        document.querySelectorAll('div[data-testid="sortable-item"] div[class*="item___"] div[class*="desc___"], ' +
+                                  'div[class*="row___"] div[class*="item___"] div[class*="desc___"]').forEach(function(descWrap){
+            let alreadyHasUpdateBtn = descWrap.querySelector(".btn-wrap.torn-bazaar-fill-qty-price") != null;
             if (!alreadyHasUpdateBtn) {
-                insertFillAndWaveBtn(this, updateItemsLabels, pages.ManageItems);
+                insertFillAndWaveBtn(descWrap, updateItemsLabels, pages.ManageItems);
             }
         });
 
@@ -202,18 +206,37 @@
 
     // Belt-and-braces: tab-link clicks. The old aria-labelledby IDs are now dynamic
     // (e.g. link-aria-label-1) so we delegate on the stable `href` instead.
-    $(document).on("click",
-                   'div[class*="topSection___"] a[href="#/add"], ' +
-                   'div[class*="topSection___"] a[href="#/manage"], ' +
-                   'div[class*="topSection___"] a[href="#/personalize"], ' +
-                   'div[class*="topSection___"] a[href="#/"]',
-                   scheduleScan);
+    const tabLinkSelector = 'div[class*="topSection___"] a[href="#/add"], ' +
+                            'div[class*="topSection___"] a[href="#/manage"], ' +
+                            'div[class*="topSection___"] a[href="#/personalize"], ' +
+                            'div[class*="topSection___"] a[href="#/"]';
+    document.addEventListener("click", function(event) {
+        if (closestMatch(event.target, tabLinkSelector) != null) {
+            scheduleScan();
+        }
+    });
 
     // Initial pass — rows may already be in the DOM at script start (run-at: document-idle).
     scheduleScan();
 
     // Tell the user what an update changed, the first time they land on a bazaar page after it.
     maybeShowChangelog();
+
+    // Plain-DOM replacements for the jQuery delegation this script used to rely on.
+    // Torn PDA never loads @require libraries, so on Android jQuery is simply not there.
+    function closestMatch(eventTarget, selector) {
+        return eventTarget instanceof Element ? eventTarget.closest(selector) : null;
+    }
+
+    // Runs handler with `this` bound to the clicked <input>, like $(container).on("click", "input", fn).
+    function onInputClick(container, handler) {
+        container.addEventListener("click", function(event) {
+            const input = closestMatch(event.target, "input");
+            if (input != null && container.contains(input)) {
+                handler.call(input, event);
+            }
+        });
+    }
 
     function insertFillAndWaveBtn(element, buttonLabels, pageType){
         const waveDiv = document.createElement('div');
@@ -269,7 +292,7 @@
 
         switch(pageType) {
             case pages.AddItems:
-                $(outerSpanFill).on("click", "input", function(event) {
+                onInputClick(outerSpanFill, function(event) {
                     checkApiKey();
                     warnIfExcluded(this);
                     this.parentNode.style.display = "none";
@@ -277,14 +300,14 @@
                     event.stopPropagation();
                 });
 
-                $(outerSpanClear).on("click", "input", function(event) {
+                onInputClick(outerSpanClear, function(event) {
                     this.parentNode.style.display = "none";
                     clearQuantityAndPrice(this);
                     event.stopPropagation();
                 });
                 break;
             case pages.ManageItems:
-                $(outerSpanFill).on("click", "input", function(event) {
+                onInputClick(outerSpanFill, function(event) {
                     checkApiKey();
                     warnIfExcluded(this);
                     // this.parentNode.style.display = "none";
@@ -292,7 +315,7 @@
                     event.stopPropagation();
                 });
 
-                // $(outerSpanClear).on("click", "input", function(event) {
+                // onInputClick(outerSpanClear, function(event) {
                 //     this.parentNode.style.display = "none";
                 //     clearQuantity(this, pageType);
                 //     event.stopPropagation();
