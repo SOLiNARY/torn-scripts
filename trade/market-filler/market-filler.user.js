@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Market Filler
 // @namespace    https://github.com/SOLiNARY
-// @version      0.13.0
+// @version      0.13.1
 // @description  On "Fill" click autofills market item price with lowest market price minus $1 (customizable), fills the quantity your quantity mode asks for, marks checkboxes for guns. Click the ⚙ cog on the Fill All bar — or hold the fill button for 2s — to open the settings modal (price delta, quantity mode, API key, prices popup, and per-category overrides — set different discounts/sources/quantities for Clothing, Other, Drug, etc.). Quantity modes: "max" (default), "max-1" to always keep a copy, a fixed number, or "skip" to never list a category. Cycle the star next to the fill button to mark an item as a favourite (★, used by Fill All) or excluded (⊘, never auto-filled). Use "Fill All" to auto-fill every favourite row on both the Add Items and Your Items (view listings) pages, including ones appearing later when switching categories. Drag the Fill All bar anywhere; drop it near a screen edge to clamp and minimise it — its position and state are remembered. Three price sources are available: Torn's item market listings (the default), Torn's market value ([market]) and live player-bazaar data from weav3r.dev ([bazaar], [bazaar:2], [bazaar:avg], [bazaar:median]), which is useful for pricing against what the same item actually sells for in bazaars. After an update a "What's new" popup lists what changed.
 // @author       Silmaril [2665762]
 // @license      MIT License
@@ -17,7 +17,7 @@
     'use strict';
 
     // Keep in sync with @version above — it keys the "What's new" popup.
-    const SCRIPT_VERSION = "0.13.0";
+    const SCRIPT_VERSION = "0.13.1";
 
     const itemUrl = "https://api.torn.com/torn/{itemId}?selections=items&key={apiKey}&comment=MarketFiller";
     const marketUrl = "https://api.torn.com/v2/market/{itemId}?selections=itemMarket&key={apiKey}&comment=MarketFiller";
@@ -1641,11 +1641,11 @@
     }
 
     function ensureSettingsModal(){
-        if (document.querySelector('.tmf-modal-overlay') != null){
+        if (document.querySelector('.tmf-settings-overlay') != null){
             return;
         }
         const overlay = document.createElement('div');
-        overlay.className = 'tmf-modal-overlay';
+        overlay.className = 'tmf-modal-overlay tmf-settings-overlay';
         overlay.innerHTML =
             '<div class="tmf-modal">' +
                 '<h3>Market Filler Settings<span class="tmf-modal-close" title="Close">&times;</span></h3>' +
@@ -1718,7 +1718,7 @@
 
     function openSettingsModal(){
         ensureSettingsModal();
-        const overlay = document.querySelector('.tmf-modal-overlay');
+        const overlay = document.querySelector('.tmf-settings-overlay');
         overlay.querySelector('.tmf-modal-delta').value = priceDeltaRaw;
         overlay.querySelector('.tmf-modal-qty').value = quantityModeRaw;
         overlay.querySelector('.tmf-modal-apikey').value = (apiKey != null && apiKey.indexOf('PDA-APIKEY') === -1) ? apiKey : '';
@@ -1733,14 +1733,14 @@
     }
 
     function closeSettingsModal(){
-        const overlay = document.querySelector('.tmf-modal-overlay');
+        const overlay = document.querySelector('.tmf-settings-overlay');
         if (overlay != null){
             overlay.classList.remove('tmf-modal-overlay--open');
         }
     }
 
     function saveSettingsModal(){
-        const overlay = document.querySelector('.tmf-modal-overlay');
+        const overlay = document.querySelector('.tmf-settings-overlay');
         if (overlay == null){
             return;
         }
