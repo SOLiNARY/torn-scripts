@@ -887,6 +887,13 @@
     // empty one says "Required item". Only matching the first is why this used to see
     // nothing but your own role.
     const ITEM_MARKERS = ['used item', 'required item'];
+    // Torn puts a small badge on the item in the requirement tooltip and dims it when
+    // the person in the role has not got the item. That badge is the only thing on the
+    // page that answers "do they already have one", so it decides whether a chip offers
+    // a loan at all. The class is hashed per build; the "dim" prefix is the stable part.
+    const ABSENT_BADGE = /(?:^|\s)dim___/;
+    const POSSESSION_KEY = 'silmaril-armoury-loan-has';
+    const POSSESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
     const ICON_CHECK = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" ' +
         'stroke-width="2" aria-hidden="true"><path d="M3.2 8.4 6.5 11.7 12.8 5.2" stroke-linecap="round" ' +
@@ -1094,7 +1101,12 @@
         if (tip != null) {
             const wrapper = findSlotWrapper(header);
             if (wrapper != null) {
-                changed = rememberSlotItem(cache, readSlot(wrapper), itemIdIn(tip)) || changed;
+                const slot = readSlot(wrapper);
+                changed = rememberSlotItem(cache, slot, itemIdIn(tip)) || changed;
+                const badge = tip.querySelector('[class*="requirementIcon___"]');
+                if (slot != null && badge != null) {
+                    rememberPossession(slot, !ABSENT_BADGE.test((badge.className || '').toString()));
+                }
             }
         }
 
@@ -1131,6 +1143,45 @@
         return at != null && Date.now() - at < HELD_TTL_MS;
     }
 
+    // Possession is per person in per role: it is keyed by the occupant as well as the
+    // slot, so a role changing hands never inherits the last holder's answer.
+    function possessionKey(slot) {
+        return slot.occupant != null ? slot.ocKey + '::' + slot.occupant.id : null;
+    }
+
+    function getPossessionStore() {
+        try {
+            const parsed = JSON.parse(localStorage.getItem(POSSESSION_KEY));
+            return parsed && typeof parsed === 'object' ? parsed : {};
+        } catch (e) {
+            return {};
+        }
+    }
+
+    function rememberPossession(slot, has) {
+        const key = possessionKey(slot);
+        if (key == null || has == null) return;
+        const store = getPossessionStore();
+        const current = store[key];
+        if (current != null && current.has === has && Date.now() - current.at < 60000) return;
+        store[key] = { has: has, at: Date.now() };
+        for (const other of Object.keys(store)) {
+            if (Date.now() - (store[other]?.at ?? 0) > POSSESSION_TTL_MS) delete store[other];
+        }
+        try {
+            localStorage.setItem(POSSESSION_KEY, JSON.stringify(store));
+        } catch (e) { /* ignore quota errors */ }
+    }
+
+    // true, false, or null for "the tooltip has never been opened on this role".
+    function getPossession(slot) {
+        const key = possessionKey(slot);
+        if (key == null) return null;
+        const entry = getPossessionStore()[key];
+        if (entry == null || Date.now() - entry.at > POSSESSION_TTL_MS) return null;
+        return entry.has === true;
+    }
+
     // --- chip state -------------------------------------------------------------
 
     function computeState(slot) {
@@ -1143,7 +1194,13 @@
         const entry = getStoredItems()[itemId] ?? null;
         const failure = slotFailures.get(slot.ocKey);
         if (failure != null) return { kind: 'fail', itemId: itemId, entry: entry, message: failure };
-        if (isHeld(itemId, slot.occupant.id)) return { kind: 'out', itemId: itemId, entry: entry };
+        // Torn saying they have it settles the matter. Torn saying they have not outranks
+        // the armoury's list of who is holding what, which can be a page-load out of date.
+        const known = getPossession(slot);
+        const held = isHeld(itemId, slot.occupant.id);
+        if (known === true || (known == null && held)) {
+            return { kind: 'out', itemId: itemId, entry: entry, onLoan: held };
+        }
         if (entry == null) return { kind: 'cold', itemId: itemId, entry: null };
         const free = entry.armoryIds?.length ?? 0;
         if (free === 0) return { kind: 'gone', itemId: itemId, entry: entry };
@@ -1166,10 +1223,10 @@
                 };
             case 'out':
                 return {
-                    label: 'Loaned',
+                    label: state.onLoan ? 'Loaned' : 'Has item',
                     sub: name,
                     title: (isMine ? 'You already have' : slot.occupant.name + ' already has') +
-                        ' ' + name + ' on loan.'
+                        ' ' + name + (state.onLoan ? ' on loan from the armoury.' : '.')
                 };
             case 'gone':
                 return {
@@ -1564,7 +1621,7 @@
 
     // Sends one loan. The only thing that changes between loaning to yourself and
     // loaning to a crew member is this user field.
-    async function performLoan(itemId, recipient) {
+    async function performLoan(itemId, recipient, slot) {
         const entry = getStoredItems()[itemId];
         if (!entry) {
             return { ok: false, message: 'Open the armoury once so this can see what is loanable.' };
@@ -1614,6 +1671,7 @@
                     saveItems(store);
                 }
                 markHeld(itemId, recipient.id);
+                if (slot != null) rememberPossession(slot, true);
                 return { ok: true, message: result.message };
             }
             if (looksDenied(result.message)) {
@@ -1658,7 +1716,7 @@
     async function startLoan(slot, itemId, wrap) {
         if (wrap.dataset.silmarilBusy === '1') return;
         setChipBusy(wrap);
-        const result = await performLoan(itemId, slot.occupant);
+        const result = await performLoan(itemId, slot.occupant, slot);
         wrap.dataset.silmarilBusy = '0';
         if (result.denied) {
             markDenied();
@@ -1674,7 +1732,7 @@
         for (const candidate of candidates) {
             const wrap = candidate.slot.wrapper.querySelector('.silmaril-chip-wrap');
             if (wrap != null) setChipBusy(wrap);
-            const result = await performLoan(candidate.state.itemId, candidate.slot.occupant);
+            const result = await performLoan(candidate.state.itemId, candidate.slot.occupant, candidate.slot);
             if (wrap != null) wrap.dataset.silmarilBusy = '0';
             if (result.denied) {
                 markDenied();
