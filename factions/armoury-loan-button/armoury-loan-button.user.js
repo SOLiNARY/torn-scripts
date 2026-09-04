@@ -894,6 +894,18 @@
     const ABSENT_BADGE = /(?:^|\s)dim___/;
     const POSSESSION_KEY = 'silmaril-armoury-loan-has';
     const POSSESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+    // The crimes page asks its own server for the list it renders, and that answer
+    // carries every role's required item and whether the person in the role already has
+    // one. Reading Torn's own traffic is free and needs no hovering; the request below
+    // is only for the case where the page loaded before this script was listening.
+    const CRIME_LIST_MARKERS = ['sid=organizedcrimesdata', 'step=crimelist'];
+    const CRIME_FETCH_COOLDOWN_MS = 20000;
+    const CRIME_FETCH_MAX_PAGES = 5;
+    const CRIME_FETCH_GIVE_UP = 5;
+    // A role that needs no item is recorded as such, so "we have not looked yet" and
+    // "there is nothing to loan here" stop looking the same and the fetch below knows
+    // when it can stop asking.
+    const NO_ITEM = 'none';
 
     const ICON_CHECK = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" ' +
         'stroke-width="2" aria-hidden="true"><path d="M3.2 8.4 6.5 11.7 12.8 5.2" stroke-linecap="round" ' +
@@ -1058,7 +1070,9 @@
 
     function getSlotItemId(slot) {
         const cache = getSlotItemCache();
-        return cache[slot.ocKey] ?? (slot.scenarioKey != null ? cache[slot.scenarioKey] : null) ?? null;
+        const own = cache[slot.ocKey];
+        if (own === NO_ITEM) return NO_ITEM;
+        return own ?? (slot.scenarioKey != null ? cache[slot.scenarioKey] : null) ?? null;
     }
 
     // The scenario key is the valuable half: the item belongs to the role in that
@@ -1111,6 +1125,160 @@
         }
 
         if (changed) saveSlotItemCache(cache);
+    }
+
+    // --- Torn's own crime list ---------------------------------------------------
+
+    let crimeFetchAt = 0;
+    let crimeFetchInFlight = false;
+    // If asking never teaches us anything - the endpoint moved, or answers in a shape
+    // this does not understand - stop asking rather than repeating it for as long as the
+    // page is open.
+    let crimeFetchFruitless = 0;
+
+    function isCrimeListUrl(url) {
+        if (typeof url !== 'string') return false;
+        const lower = url.toLowerCase();
+        return CRIME_LIST_MARKERS.every(function (marker) { return lower.includes(marker); });
+    }
+
+    // Reads one crime list answer into the same two caches the tooltips feed, so the
+    // rest of the script neither knows nor cares which of them supplied an answer.
+    function ingestCrimeList(payload) {
+        if (payload == null || payload.success !== true || !Array.isArray(payload.data)) return false;
+        const cache = getSlotItemCache();
+        let changed = false;
+        for (const crime of payload.data) {
+            const ocId = crime?.ID;
+            const scenario = crime?.scenario?.name;
+            if (ocId == null) continue;
+            for (const slot of crime.playerSlots ?? []) {
+                const role = slot?.name;
+                if (role == null) continue;
+                const player = slot.player;
+                const known = {
+                    ocKey: ocId + '::' + role,
+                    scenarioKey: scenario ? 'sc::' + scenario + '::' + role : null,
+                    occupant: player?.ID != null
+                        ? { id: String(player.ID), name: String(player.name ?? '') }
+                        : null
+                };
+                const requirement = slot.requirement;
+                if (requirement?.id != null) {
+                    changed = rememberSlotItem(cache, known, String(requirement.id)) || changed;
+                    // doesExist is Torn's own answer to "has the person in this role got
+                    // one", the same thing the tooltip badge shows.
+                    if (typeof requirement.doesExist === 'boolean') {
+                        rememberPossession(known, requirement.doesExist);
+                    }
+                } else if (cache[known.ocKey] == null) {
+                    // Only ever against this crime: a role needing nothing here says
+                    // nothing about the same role in another copy of the scenario.
+                    cache[known.ocKey] = NO_ITEM;
+                    changed = true;
+                }
+            }
+        }
+        if (changed) saveSlotItemCache(cache);
+        return changed;
+    }
+
+    function handleCrimeListText(text) {
+        try {
+            if (ingestCrimeList(JSON.parse(text))) scheduleScan();
+        } catch (e) { /* not the JSON we are after */ }
+    }
+
+    // Torn drives this page with both fetch and XHR depending on the route, so both are
+    // wrapped. Each wrapper hands the call straight on and only ever reads a copy of
+    // the answer, so nothing here can change what the page itself receives.
+    function listenForCrimeList() {
+        try {
+            const nativeFetch = window.fetch;
+            if (typeof nativeFetch === 'function') {
+                window.fetch = function (input, init) {
+                    const url = typeof input === 'string' ? input : input?.url;
+                    const result = nativeFetch.apply(this, arguments);
+                    if (isCrimeListUrl(url)) {
+                        result.then(function (response) {
+                            response.clone().text().then(handleCrimeListText).catch(function () {});
+                        }).catch(function () {});
+                    }
+                    return result;
+                };
+            }
+        } catch (e) {
+            console.warn(LOG_PREFIX + ' Could not watch fetch:', e);
+        }
+
+        try {
+            const open = XMLHttpRequest.prototype.open;
+            const send = XMLHttpRequest.prototype.send;
+            XMLHttpRequest.prototype.open = function (method, url) {
+                this.silmarilCrimeList = isCrimeListUrl(url);
+                return open.apply(this, arguments);
+            };
+            XMLHttpRequest.prototype.send = function () {
+                if (this.silmarilCrimeList === true) {
+                    this.addEventListener('load', function () {
+                        handleCrimeListText(this.responseText);
+                    });
+                }
+                return send.apply(this, arguments);
+            };
+        } catch (e) {
+            console.warn(LOG_PREFIX + ' Could not watch XHR:', e);
+        }
+    }
+
+    function activeCrimeGroup() {
+        const active = document.querySelector('[class*="buttonsContainer___"] button[class*="active___"]');
+        const name = active?.querySelector('[class*="tabName___"]')?.textContent.trim() ?? '';
+        if (name === '') return 'Planning';
+        return name.charAt(0).toUpperCase() + name.slice(1).toLowerCase();
+    }
+
+    // Only runs when the page is showing roles this script still knows nothing about,
+    // and at most once every cooldown, so a page that Torn has already described costs
+    // no requests at all.
+    async function fetchCrimeList() {
+        if (crimeFetchInFlight || crimeFetchFruitless >= CRIME_FETCH_GIVE_UP) return;
+        if (Date.now() - crimeFetchAt < CRIME_FETCH_COOLDOWN_MS) return;
+        const rfcv = getRfcv();
+        if (!rfcv) return;
+        crimeFetchInFlight = true;
+        crimeFetchAt = Date.now();
+        const group = activeCrimeGroup();
+        try {
+            let learned = false;
+            let startFrom = 0;
+            for (let page = 0; page < CRIME_FETCH_MAX_PAGES; page++) {
+                const response = await fetch(
+                    '/page.php?sid=organizedCrimesData&step=crimeList&rfcv=' + encodeURIComponent(rfcv),
+                    {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/x-www-form-urlencoded',
+                            'X-Requested-With': 'XMLHttpRequest'
+                        },
+                        body: new URLSearchParams({ group: group, startFrom: String(startFrom) }).toString()
+                    });
+                if (!response.ok) break;
+                const payload = JSON.parse(await response.text());
+                if (ingestCrimeList(payload)) learned = true;
+                const next = payload?.nextStartFrom;
+                if (!Array.isArray(payload?.data) || payload.data.length === 0) break;
+                if (typeof next !== 'number' || next <= startFrom) break;
+                startFrom = next;
+            }
+            crimeFetchFruitless = learned ? 0 : crimeFetchFruitless + 1;
+            scheduleScan();
+        } catch (error) {
+            crimeFetchFruitless++;
+            console.warn(LOG_PREFIX + ' Could not read the crime list:', error);
+        } finally {
+            crimeFetchInFlight = false;
+        }
     }
 
     // --- who is already holding one --------------------------------------------
@@ -1190,7 +1358,7 @@
         // No cached item means either the role needs none or its tooltip has never been
         // opened. The two are indistinguishable from here, so nothing is drawn - a chip
         // on a role that needs no item would be worse than no chip at all.
-        if (itemId == null) return null;
+        if (itemId == null || itemId === NO_ITEM) return null;
         const entry = getStoredItems()[itemId] ?? null;
         const failure = slotFailures.get(slot.ocKey);
         if (failure != null) return { kind: 'fail', itemId: itemId, entry: entry, message: failure };
@@ -1817,10 +1985,12 @@
 
         const ownId = getUser()?.id ?? null;
         const byRow = new Map();
+        let unknownRoles = 0;
         for (const wrapper of findAllSlotWrappers()) {
             const slot = readSlot(wrapper);
             if (slot == null) continue;
             const state = computeState(slot);
+            if (slot.occupant != null && getSlotItemId(slot) == null) unknownRoles++;
             const isMine = slot.occupant != null && ownId != null && slot.occupant.id === ownId;
             applyChip(slot, state, isMine);
             if (state == null) continue;
@@ -1841,6 +2011,7 @@
         // The popover is anchored to a chip; if Torn has re-rendered that chip away,
         // there is nothing left for the confirmation to be about.
         if (openPopover != null && !document.body.contains(openPopover)) openPopover = null;
+        if (unknownRoles > 0) fetchCrimeList();
     }
 
     // --- wiring ----------------------------------------------------------------
@@ -1862,6 +2033,8 @@
             }, delay);
         };
     }
+
+    listenForCrimeList();
 
     function runScan() {
         scanArmoury();
