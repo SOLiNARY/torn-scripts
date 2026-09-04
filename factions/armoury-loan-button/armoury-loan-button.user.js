@@ -34,9 +34,9 @@
             'The Loan button leaves the slot menu. Every occupied role that needs an item now carries a chip under the member name, showing the item and how many are free.',
             'Loans can go to anyone, not just you. The chip loans to whoever holds that role. Your own role still loans in one click, and any other role asks for confirmation first.',
             'A line above each crime counts the roles still missing kit, and hands the whole crew over in one confirmed step.',
-            'A role that already has its item goes quiet instead of offering the loan again.',
             'Failures stay on the slot until you retry them instead of vanishing with the menu, and the messages are written for players rather than for the console.',
-            'Hovering one role now teaches every copy of that scenario on the page which item it needs.'
+            'Nothing needs hovering any more. The chips read the crime list the page already loads, so they know which item every role needs and who is already carrying one.',
+            'A role whose player already has the item no longer offers a loan. It shows a quiet green mark instead, so the raised chips are only the people still missing kit.'
             ]
         },
         {
@@ -896,15 +896,13 @@
     const POSSESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
     // The crimes page asks its own server for the list it renders, and that answer
     // carries every role's required item and whether the person in the role already has
-    // one. Reading Torn's own traffic is free and needs no hovering; the request below
-    // is only for the case where the page loaded before this script was listening.
+    // one. That traffic is read as it arrives and nothing is ever requested on its own
+    // account, so this costs the page no extra call and Torn sees no request it was not
+    // already going to serve.
     const CRIME_LIST_MARKERS = ['sid=organizedcrimesdata', 'step=crimelist'];
-    const CRIME_FETCH_COOLDOWN_MS = 20000;
-    const CRIME_FETCH_MAX_PAGES = 5;
-    const CRIME_FETCH_GIVE_UP = 5;
     // A role that needs no item is recorded as such, so "we have not looked yet" and
-    // "there is nothing to loan here" stop looking the same and the fetch below knows
-    // when it can stop asking.
+    // "there is nothing to loan here" stop looking the same, and the count above each
+    // crime can be honest about how many roles are in play.
     const NO_ITEM = 'none';
 
     const ICON_CHECK = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" ' +
@@ -1129,13 +1127,6 @@
 
     // --- Torn's own crime list ---------------------------------------------------
 
-    let crimeFetchAt = 0;
-    let crimeFetchInFlight = false;
-    // If asking never teaches us anything - the endpoint moved, or answers in a shape
-    // this does not understand - stop asking rather than repeating it for as long as the
-    // page is open.
-    let crimeFetchFruitless = 0;
-
     function isCrimeListUrl(url) {
         if (typeof url !== 'string') return false;
         const lower = url.toLowerCase();
@@ -1228,56 +1219,6 @@
             };
         } catch (e) {
             console.warn(LOG_PREFIX + ' Could not watch XHR:', e);
-        }
-    }
-
-    function activeCrimeGroup() {
-        const active = document.querySelector('[class*="buttonsContainer___"] button[class*="active___"]');
-        const name = active?.querySelector('[class*="tabName___"]')?.textContent.trim() ?? '';
-        if (name === '') return 'Planning';
-        return name.charAt(0).toUpperCase() + name.slice(1).toLowerCase();
-    }
-
-    // Only runs when the page is showing roles this script still knows nothing about,
-    // and at most once every cooldown, so a page that Torn has already described costs
-    // no requests at all.
-    async function fetchCrimeList() {
-        if (crimeFetchInFlight || crimeFetchFruitless >= CRIME_FETCH_GIVE_UP) return;
-        if (Date.now() - crimeFetchAt < CRIME_FETCH_COOLDOWN_MS) return;
-        const rfcv = getRfcv();
-        if (!rfcv) return;
-        crimeFetchInFlight = true;
-        crimeFetchAt = Date.now();
-        const group = activeCrimeGroup();
-        try {
-            let learned = false;
-            let startFrom = 0;
-            for (let page = 0; page < CRIME_FETCH_MAX_PAGES; page++) {
-                const response = await fetch(
-                    '/page.php?sid=organizedCrimesData&step=crimeList&rfcv=' + encodeURIComponent(rfcv),
-                    {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/x-www-form-urlencoded',
-                            'X-Requested-With': 'XMLHttpRequest'
-                        },
-                        body: new URLSearchParams({ group: group, startFrom: String(startFrom) }).toString()
-                    });
-                if (!response.ok) break;
-                const payload = JSON.parse(await response.text());
-                if (ingestCrimeList(payload)) learned = true;
-                const next = payload?.nextStartFrom;
-                if (!Array.isArray(payload?.data) || payload.data.length === 0) break;
-                if (typeof next !== 'number' || next <= startFrom) break;
-                startFrom = next;
-            }
-            crimeFetchFruitless = learned ? 0 : crimeFetchFruitless + 1;
-            scheduleScan();
-        } catch (error) {
-            crimeFetchFruitless++;
-            console.warn(LOG_PREFIX + ' Could not read the crime list:', error);
-        } finally {
-            crimeFetchInFlight = false;
         }
     }
 
@@ -1985,12 +1926,10 @@
 
         const ownId = getUser()?.id ?? null;
         const byRow = new Map();
-        let unknownRoles = 0;
         for (const wrapper of findAllSlotWrappers()) {
             const slot = readSlot(wrapper);
             if (slot == null) continue;
             const state = computeState(slot);
-            if (slot.occupant != null && getSlotItemId(slot) == null) unknownRoles++;
             const isMine = slot.occupant != null && ownId != null && slot.occupant.id === ownId;
             applyChip(slot, state, isMine);
             if (state == null) continue;
@@ -2011,7 +1950,6 @@
         // The popover is anchored to a chip; if Torn has re-rendered that chip away,
         // there is nothing left for the confirmation to be about.
         if (openPopover != null && !document.body.contains(openPopover)) openPopover = null;
-        if (unknownRoles > 0) fetchCrimeList();
     }
 
     // --- wiring ----------------------------------------------------------------
