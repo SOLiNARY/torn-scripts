@@ -87,26 +87,30 @@
     const lastSeenVersionKey = "silmaril-torn-bazaar-filler-last-seen-version";
     // Newest release first. Everything a user could have skipped over is listed, so updating
     // across several versions still shows the whole gap in one popup.
+    // Write every line for a player, not a developer: one short sentence, plain words,
+    // what changed for them rather than what changed in the code.
     const CHANGELOG = [
         {
             version: "1.9.3",
             date: "2026-09-07",
             changes: [
-                'Fixed: the <code>[bazaar]</code> price sources never worked. The browser refused the call to weav3r.dev before it left the page, so the row just went red. weav3r is now requested through the userscript manager, which is not subject to the page\'s cross-origin restrictions — this needs the updated script to be granted its new permission, so accept the prompt if your manager shows one.',
-                'A bazaar-only setup is no longer asked for a Torn API key it never uses, and no longer fails a row over a category refresh it cannot make.',
-                'A failed bazaar lookup now says what went wrong instead of only colouring the row red.'
+                'Fixed: the <code>[bazaar]</code> prices never worked at all. They do now.',
+                'Your userscript manager may ask for a new permission on this update. Say yes, or bazaar prices stay broken.',
+                'If you only use bazaar prices, the script no longer asks for a Torn API key it does not need.',
+                'A bazaar price that cannot be fetched now tells you why, instead of just going red.'
             ]
         },
         {
             version: "1.9.0",
             date: "2026-09-02",
             changes: [
-                'New price source: live player-bazaar data from <b>weav3r.dev</b>. Use <code>[bazaar]</code> to undercut the cheapest bazaar, <code>[bazaar:2]</code> for the 3rd cheapest, <code>[bazaar:avg]</code> for the current bazaar average, or <code>[bazaar:median]</code> for the median listing.',
-                'Bazaars normally sell under the item market, so <code>[bazaar]</code> prices you against the sellers you actually compete with. Needs no API key.',
-                'Sponsored listings, listings the crawler has not re-checked in 30 minutes, and listings far below the bazaar average are all ignored — so a single troll listing cannot re-price a Fill All run.',
-                'An item weav3r cannot price falls back to the item market instead of failing the row.',
-                'A formula with no discount (<code>[market]</code>, <code>[bazaar]</code>) now fills at the source price instead of erroring.',
-                'This popup: after an update, a short list of what changed. Re-open it any time from the Tampermonkey menu.'
+                'New: price against player bazaars, not just the item market. Put <code>[bazaar]</code> in your price setting to undercut the cheapest bazaar. No API key needed.',
+                'That is who you actually compete with, since bazaars usually sell below the item market.',
+                'Also <code>[bazaar:2]</code> for the 3rd cheapest, <code>[bazaar:avg]</code> for the average and <code>[bazaar:median]</code> for the middle price.',
+                'Sponsored, stale and silly-cheap listings are ignored, so one troll price cannot drag Fill All down.',
+                'An item with no bazaar price falls back to the item market instead of failing.',
+                'Fixed: a price with no discount, such as <code>[market]</code> on its own, no longer errors.',
+                'New: this popup. After an update it lists what changed, then stays quiet until the next one.'
             ]
         }
     ];
