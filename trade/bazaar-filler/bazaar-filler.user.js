@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Bazaar Filler
 // @namespace    https://github.com/SOLiNARY
-// @version      1.9.2
+// @version      1.9.3
 // @description  On "Fill" click autofills bazaar item price with lowest market price currently minus $1 (can be customised), shows current price coefficient compared to 3rd lowest, fills the quantity your quantity mode asks for, marks checkboxes for guns. Click the ⚙ cog on the Fill All bar — or hold a Fill/Update button for 3s — to open the settings modal (price delta, quantity mode, API key, and per-category overrides — set different discounts/sources/quantities for Clothing, Other, Drug, etc.). Quantity modes: "max" (default), "max-1" to always keep a copy, a fixed number, or "skip" to never list a category. Cycle the star next to Fill/Update to mark an item as a favourite (★, used by Fill All) or excluded (⊘, never auto-filled). Use "Fill All" to auto-fill every favourite row on both the Add Items and Manage Items pages, including ones appearing later via infinite scroll or category switches. Drag the Fill All bar anywhere; drop it near a screen edge to clamp and minimise it — its position and state are remembered. Three price sources are available: Torn's item market listings (the default), Torn's market value ([market]) and live player-bazaar data from weav3r.dev ([bazaar], [bazaar:2], [bazaar:avg], [bazaar:median]) — the last one prices you against the bazaars you actually compete with. After an update a "What's new" popup lists what changed.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT License
@@ -12,18 +12,25 @@
 // @run-at       document-idle
 // @grant        GM_addStyle
 // @grant        GM_registerMenuCommand
+// @grant        GM_xmlhttpRequest
+// @connect      weav3r.dev
 // ==/UserScript==
 
 (function() {
     'use strict';
 
     // Keep in sync with @version above — it keys the "What's new" popup.
-    const SCRIPT_VERSION = "1.9.2";
+    const SCRIPT_VERSION = "1.9.3";
 
     const marketUrl = "https://api.torn.com/v2/market?id={itemId}&selections=itemMarket&key={apiKey}&comment=BazaarFiller";
     const itemUrl = "https://api.torn.com/torn/{itemId}?selections=items&key={apiKey}&comment=BazaarFiller";
-    // weav3r.dev aggregates live player-bazaar listings. Public, no API key, CORS-open, but
-    // shared across every consumer at 100 req/min, so responses are cached client-side too.
+    // weav3r.dev aggregates live player-bazaar listings. Public and needs no API key, but it is
+    // a third-party host, and a request the Torn page issues itself has to satisfy both Torn's
+    // Content-Security-Policy and weav3r's CORS headers — which is why a plain fetch to it never
+    // got off the ground. Every weav3r call therefore goes through the userscript manager's
+    // cross-origin transport (see requestJson), which runs outside the page and is bound by
+    // neither. weav3r is also shared across every consumer at 100 req/min, so responses are
+    // cached client-side too.
     const weav3rItemUrl = "https://weav3r.dev/api/marketplace/{itemId}";
     const weav3rAllUrl = "https://weav3r.dev/api/marketplace";
 
@@ -42,8 +49,14 @@
     // A bazaar price this far below the bazaar average is treated as an outlier rather than
     // undercut — a single troll listing must never re-price a whole Fill All run.
     const BAZAAR_SANITY_FLOOR_RATIO = 0.25;
+    // How long a single weav3r call may hang before the row gives up and falls back to Torn.
+    const WEAV3R_TIMEOUT_MS = 15 * 1000;
+    // A Fill All run hits the same weav3r failure on every row; one notice a minute explains the
+    // red bars without burying the page in toasts.
+    const WEAV3R_NOTICE_THROTTLE_MS = 60 * 1000;
     let weav3rItemCache = new Map();
     let weav3rAllCache = null;
+    let lastWeav3rNoticeTs = 0;
     let priceDeltaRaw = localStorage.getItem("silmaril-torn-bazaar-filler-price-delta") ?? '-1';
     // How many units to list per item: "max" (all of them), "max-N" (keep N back), a fixed
     // number, or "skip"/"0" to never list. Defaults to "max" — the behaviour before this existed.
@@ -75,6 +88,15 @@
     // Newest release first. Everything a user could have skipped over is listed, so updating
     // across several versions still shows the whole gap in one popup.
     const CHANGELOG = [
+        {
+            version: "1.9.3",
+            date: "2026-09-07",
+            changes: [
+                'Fixed: the <code>[bazaar]</code> price sources never worked. The browser refused the call to weav3r.dev before it left the page, so the row just went red. weav3r is now requested through the userscript manager, which is not subject to the page\'s cross-origin restrictions — this needs the updated script to be granted its new permission, so accept the prompt if your manager shows one.',
+                'A bazaar-only setup is no longer asked for a Torn API key it never uses, and no longer fails a row over a category refresh it cannot make.',
+                'A failed bazaar lookup now says what went wrong instead of only colouring the row red.'
+            ]
+        },
         {
             version: "1.9.0",
             date: "2026-09-02",
@@ -674,7 +696,7 @@
         }
         if (data.error.code === 2) {
             apiKey = null;
-            localStorage.setItem("silmaril-torn-bazaar-filler-apikey", null);
+            localStorage.removeItem("silmaril-torn-bazaar-filler-apikey");
             wave.style.backgroundColor = "red";
             wave.style.animationDuration = "5s";
             console.error("[TornBazaarFiller] Incorrect Api Key:", data);
@@ -1376,10 +1398,125 @@
         return { kind: 'slot', index: isNaN(slot) ? 0 : slot };
     }
 
+    // ---- Cross-origin transport -------------------------------------------------------------
+    // Torn's CSP and weav3r's CORS headers both police what the page itself issues, so weav3r
+    // has to be reached from outside the page. Every userscript manager offers a way to do that;
+    // they just disagree on its name. Detection is by typeof so an undeclared name never throws.
+
+    function crossOriginGet(url){
+        if (typeof GM_xmlhttpRequest === 'function'){
+            return gmGet(GM_xmlhttpRequest, url);
+        }
+        if (typeof GM !== 'undefined' && GM != null && typeof GM.xmlHttpRequest === 'function'){
+            return gmGet(GM.xmlHttpRequest.bind(GM), url);
+        }
+        // Torn PDA builds before GM_xmlhttpRequest support expose this instead.
+        if (typeof PDA_httpGet === 'function'){
+            return pdaGet(url);
+        }
+        return null;
+    }
+
+    // The name of the transport a call would use, for error messages that have to distinguish
+    // "weav3r said no" from "the browser never let us ask".
+    function crossOriginTransport(){
+        if (typeof GM_xmlhttpRequest === 'function'){
+            return 'GM_xmlhttpRequest';
+        }
+        if (typeof GM !== 'undefined' && GM != null && typeof GM.xmlHttpRequest === 'function'){
+            return 'GM.xmlHttpRequest';
+        }
+        if (typeof PDA_httpGet === 'function'){
+            return 'PDA_httpGet';
+        }
+        return 'fetch';
+    }
+
+    function gmGet(request, url){
+        return new Promise(function(resolve, reject){
+            request({
+                method: 'GET',
+                url: url,
+                headers: { 'Accept': 'application/json' },
+                timeout: WEAV3R_TIMEOUT_MS,
+                onload: function(response){
+                    resolve({ status: response.status, text: response.responseText ?? '' });
+                },
+                onerror: function(){ reject(new Error('network error')); },
+                onabort: function(){ reject(new Error('aborted')); },
+                ontimeout: function(){ reject(new Error('timed out')); }
+            });
+        });
+    }
+
+    // PDA_httpGet resolves to a response whose body is either already a string or behind a
+    // text() call, depending on the PDA build; both shapes are normalised here.
+    function pdaGet(url){
+        return Promise.resolve(PDA_httpGet(url)).then(function(response){
+            if (response == null){
+                throw new Error('empty PDA response');
+            }
+            let status = response.status ?? 200;
+            if (typeof response.responseText === 'string'){
+                return { status: status, text: response.responseText };
+            }
+            if (typeof response.text === 'function'){
+                return Promise.resolve(response.text()).then(function(text){
+                    return { status: status, text: String(text ?? '') };
+                });
+            }
+            return { status: status, text: String(response) };
+        });
+    }
+
+    // One entry point for every weav3r call: the manager's transport when there is one, plain
+    // fetch only as a last resort so a manager-less environment still gets to try.
+    async function requestJson(url){
+        let pending = crossOriginGet(url);
+        if (pending == null){
+            let fetched = await fetch(url, { headers: { 'Accept': 'application/json' } });
+            return { status: fetched.status, ok: fetched.ok, text: await fetched.text() };
+        }
+        let response = await pending;
+        return {
+            status: response.status,
+            ok: response.status >= 200 && response.status < 300,
+            text: response.text
+        };
+    }
+
+    function parseJsonBody(text){
+        try {
+            return JSON.parse(text);
+        } catch (error) {
+            throw new Error('non-JSON response body');
+        }
+    }
+
+    // A failure on the plain-fetch path means the page, not weav3r, refused the call, and the
+    // two need very different fixes — so the message says which one the user is looking at.
+    function describeTransportFailure(error){
+        let reason = error == null ? 'unknown error' : (error.message ?? String(error));
+        if (crossOriginTransport() !== 'fetch'){
+            return reason;
+        }
+        return reason + ' (this userscript manager exposes no cross-origin request API, so the'
+            + ' call had to go through the page, where Torn\'s CSP and weav3r\'s CORS policy both'
+            + ' apply — update the script in your manager so its GM_xmlhttpRequest grant is'
+            + ' picked up)';
+    }
+
     // Shape a weav3r failure like a Torn error payload so one set of handlers covers both.
     // A 429 borrows Torn's rate-limit code, which already drives the Fill All back-off.
+    // A red bar on its own tells the user nothing, so the reason is logged and toasted too.
     function weav3rError(status, message){
-        return { error: { code: status === 429 ? 5 : -1, error: "weav3r: " + message } };
+        let text = "weav3r: " + message;
+        console.error("[TornBazaarFiller] " + text);
+        if (Date.now() - lastWeav3rNoticeTs >= WEAV3R_NOTICE_THROTTLE_MS){
+            lastWeav3rNoticeTs = Date.now();
+            showToast('Bazaar prices unavailable — ' + text);
+        }
+        return { error: { code: status === 429 ? 5 : -1, error: text } };
     }
 
     async function fetchWeav3rItem(itemId){
@@ -1389,13 +1526,13 @@
         }
         let payload;
         try {
-            let response = await fetch(weav3rItemUrl.replace("{itemId}", itemId));
+            let response = await requestJson(weav3rItemUrl.replace("{itemId}", itemId));
             if (!response.ok){
                 return weav3rError(response.status, "HTTP " + response.status);
             }
-            payload = await response.json();
+            payload = parseJsonBody(response.text);
         } catch (error) {
-            return weav3rError(0, String(error));
+            return weav3rError(0, describeTransportFailure(error));
         }
         // weav3r reports failures as a bare string, unlike Torn's {code, error} object.
         if (payload == null || payload.error != null){
@@ -1411,11 +1548,11 @@
         if (weav3rAllCache != null && (Date.now() - weav3rAllCache.ts) < WEAV3R_ALL_TTL_MS){
             return weav3rAllCache.byId;
         }
-        let response = await fetch(weav3rAllUrl);
+        let response = await requestJson(weav3rAllUrl);
         if (!response.ok){
             throw new Error("weav3r snapshot HTTP " + response.status);
         }
-        let payload = await response.json();
+        let payload = parseJsonBody(response.text);
         let byId = new Map();
         (payload.items ?? []).forEach(function(item){ byId.set(item.item_id, item); });
         weav3rAllCache = { ts: Date.now(), byId: byId };
@@ -1476,6 +1613,18 @@
         return { price: Math.round(performOperation(basis, stripDeltaBracket(formula))), listings: listings };
     }
 
+    function hasUsableApiKey(){
+        return typeof apiKey === 'string' && apiKey.length === 16;
+    }
+
+    // A bazaar-only setup never calls Torn, so it must never be asked for a key. Any other
+    // source among the active formulas — including the bare default — still needs one.
+    function needsTornApiKey(){
+        return [priceDeltaRaw].concat(Object.values(categoryDeltas)).some(function(formula){
+            return sourceOf(String(formula ?? '')) !== SOURCE_BAZAAR;
+        });
+    }
+
     function buildTornPriceUrl(source, itemId){
         return (source === SOURCE_MARKET_VALUE ? itemUrl : marketUrl)
             .replace("{itemId}", itemId)
@@ -1519,6 +1668,11 @@
             // A thin or unanswerable item falls back to Torn rather than failing the row, so one
             // bad item never stops a Fill All run. The delta carries over; the selector cannot.
             console.warn("[TornBazaarFiller] No usable weav3r bazaar price for item " + itemId + "; using the item market.");
+            if (!hasUsableApiKey()){
+                // A bazaar-only setup was never asked for a key, so there is nothing to fall
+                // back with. Say that instead of spending a call on a guaranteed key error.
+                return { error: weav3rError(0, "no price for item " + itemId + ", and no API key is set for the item-market fallback") };
+            }
             let fallbackFormula = stripDeltaBracket(pricing.formula);
             let data = await fetchForSource(SOURCE_ITEM_MARKET, fallbackFormula, itemId);
             if (data.error != null){
@@ -1605,7 +1759,9 @@
         let guessFormula = getEffectiveDelta(guessCategory);
         // When stale/unknown, force the items endpoint so we definitively re-learn the type even if
         // the chosen source omits it; otherwise guess from the cached category to stay 1 call.
-        let firstSource = expired ? SOURCE_MARKET_VALUE : sourceOf(guessFormula);
+        // Without a key that refresh can only fail, and failing it would take a bazaar-only setup
+        // down with it — so there we just price from the guess and re-learn the type another day.
+        let firstSource = (expired && hasUsableApiKey()) ? SOURCE_MARKET_VALUE : sourceOf(guessFormula);
         let data = await fetchForSource(firstSource, guessFormula, itemId);
         if (data.error != null){
             return { data: data, formula: guessFormula, source: firstSource, category: guessCategory };
@@ -1921,7 +2077,10 @@
     }
 
     function checkApiKey(checkExisting = true) {
-        if (!checkExisting || apiKey === null || apiKey.length != 16){
+        if (!needsTornApiKey()){
+            return;
+        }
+        if (!checkExisting || !hasUsableApiKey()){
             let userInput = prompt("Please enter a PUBLIC Api Key, it will be used to get current bazaar prices:", apiKey ?? '');
             if (userInput !== null && userInput.length == 16) {
                 apiKey = userInput;
