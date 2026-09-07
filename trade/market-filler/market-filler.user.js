@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Market Filler
 // @namespace    https://github.com/SOLiNARY
-// @version      0.13.2
+// @version      0.13.3
 // @description  On "Fill" click autofills market item price with lowest market price minus $1 (customizable), fills the quantity your quantity mode asks for, marks checkboxes for guns. Click the ⚙ cog on the Fill All bar — or hold the fill button for 2s — to open the settings modal (price delta, quantity mode, API key, prices popup, and per-category overrides — set different discounts/sources/quantities for Clothing, Other, Drug, etc.). Quantity modes: "max" (default), "max-1" to always keep a copy, a fixed number, or "skip" to never list a category. Cycle the star next to the fill button to mark an item as a favourite (★, used by Fill All) or excluded (⊘, never auto-filled). Use "Fill All" to auto-fill every favourite row on both the Add Items and Your Items (view listings) pages, including ones appearing later when switching categories. Drag the Fill All bar anywhere; drop it near a screen edge to clamp and minimise it — its position and state are remembered. Three price sources are available: Torn's item market listings (the default), Torn's market value ([market]) and live player-bazaar data from weav3r.dev ([bazaar], [bazaar:2], [bazaar:avg], [bazaar:median]), which is useful for pricing against what the same item actually sells for in bazaars. After an update a "What's new" popup lists what changed.
 // @author       Silmaril [2665762]
 // @license      MIT License
@@ -19,7 +19,7 @@
     'use strict';
 
     // Keep in sync with @version above — it keys the "What's new" popup.
-    const SCRIPT_VERSION = "0.13.2";
+    const SCRIPT_VERSION = "0.13.3";
 
     const itemUrl = "https://api.torn.com/torn/{itemId}?selections=items&key={apiKey}&comment=MarketFiller";
     const marketUrl = "https://api.torn.com/v2/market/{itemId}?selections=itemMarket&key={apiKey}&comment=MarketFiller";
@@ -175,7 +175,9 @@
     let holdTimer;
     const LOADING_THE_PRICES = 'Loading the prices...';
     const isMobileView = window.innerWidth <= 784;
-    const observerTarget = document.querySelector("#item-market-root");
+    // Falling back to the body keeps the scan and the observer alive if the root is renamed
+    // or has not mounted yet; the row selectors below are specific enough to stay correct.
+    const observerTarget = document.querySelector("#item-market-root") ?? document.body;
     const observerConfig = { attributes: false, childList: true, characterData: false, subtree: true };
 
     // Debounced whole-root scan instead of matching specific mutation targets: rows on the
