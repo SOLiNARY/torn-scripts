@@ -97,7 +97,7 @@
             ]
         },
         {
-            version: "0.13.2",
+            version: "0.13.3",
             date: "2026-09-07",
             changes: [
                 'Fixed: the <code>[bazaar]</code> prices never worked at all. They do now.',
