@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Torn Market Filler
 // @namespace    https://github.com/SOLiNARY
-// @version      0.13.3
-// @description  On "Fill" click autofills market item price with lowest market price minus $1 (customizable), fills the quantity your quantity mode asks for, marks checkboxes for guns. Click the ⚙ cog on the Fill All bar — or hold the fill button for 2s — to open the settings modal (price delta, quantity mode, API key, prices popup, and per-category overrides — set different discounts/sources/quantities for Clothing, Other, Drug, etc.). Quantity modes: "max" (default), "max-1" to always keep a copy, a fixed number, or "skip" to never list a category. Cycle the star next to the fill button to mark an item as a favourite (★, used by Fill All) or excluded (⊘, never auto-filled). Use "Fill All" to auto-fill every favourite row on both the Add Items and Your Items (view listings) pages, including ones appearing later when switching categories. Drag the Fill All bar anywhere; drop it near a screen edge to clamp and minimise it — its position and state are remembered. Three price sources are available: Torn's item market listings (the default), Torn's market value ([market]) and live player-bazaar data from weav3r.dev ([bazaar], [bazaar:2], [bazaar:avg], [bazaar:median]), which is useful for pricing against what the same item actually sells for in bazaars. After an update a "What's new" popup lists what changed.
+// @version      1.0.0
+// @description  On "Fill" click autofills market item price with lowest market price minus $1 (customizable), fills the quantity your quantity mode asks for, marks checkboxes for guns. Click the ⚙ cog on the Fill All bar — or hold the fill button for 2s — to open the settings modal (price delta, quantity mode, API key, prices popup, and per-category overrides — set different discounts/sources/quantities for Clothing, Other, Drug, etc.). Quantity modes: "max" (default), "max-1" to always keep a copy, a fixed number, or "skip" to never list a category. Cycle the star next to the fill button to mark an item as a favourite (★, used by Fill All) or excluded (⊘, never auto-filled). Use "Fill All" to auto-fill every favourite row on both the Add Items and Your Items (view listings) pages, including ones appearing later when switching categories. Drag the Fill All bar anywhere; drop it near a screen edge to clamp and minimise it — its position and state are remembered. Three price sources are available: Torn's item market listings (the default), Torn's market value ([market]) and live player-bazaar data from weav3r.dev ([bazaar], [bazaar:2], [bazaar:avg], [bazaar:median]), which is useful for pricing against what the same item actually sells for in bazaars. Sources can be combined: -1[bazaar] | -1[0] or max(-1[bazaar], -1[0]) prices every formula listed and fills the highest, so one source acts as a floor under the other, and min(...) fills the lowest to undercut whichever source is cheapest. Settings are validated on save. After an update a "What's new" popup lists what changed.
 // @author       Silmaril [2665762]
 // @license      MIT License
 // @match        https://www.torn.com/page.php?sid=ItemMarket*
@@ -19,7 +19,7 @@
     'use strict';
 
     // Keep in sync with @version above — it keys the "What's new" popup.
-    const SCRIPT_VERSION = "0.13.3";
+    const SCRIPT_VERSION = "1.0.0";
 
     const itemUrl = "https://api.torn.com/torn/{itemId}?selections=items&key={apiKey}&comment=MarketFiller";
     const marketUrl = "https://api.torn.com/v2/market/{itemId}?selections=itemMarket&key={apiKey}&comment=MarketFiller";
@@ -78,7 +78,7 @@
     };
     GM_addStyle(`#item-market-root [class^=addListingWrapper___] [class^=panels___] [class^=priceInputWrapper___]>.input-money-group>.input-money,#item-market-root [class^=viewListingWrapper___] [class^=priceInputWrapper___]>.input-money-group>.input-money{font-size:smaller!important;border-bottom-left-radius:0!important;border-top-left-radius:0!important}.silmaril-market-filler-popup{background:var(--tooltip-bg-color);padding:12px 18px;border-radius:8px;border:1px solid #888;box-shadow:0 4px 18px 0 #0009;color:var(--info-msg-font-color);z-index:99999;position:fixed;font-size:1em!important;line-height:1.5;pointer-events:auto}.silmaril-market-filler-popup-close{position:absolute;top:4px;right:7px;font-size:1em;color:#aaa;cursor:pointer}.silmaril-market-filler-popup-draggable{user-select:none;cursor:move}.silmaril-torn-market-filler-popup-price{cursor:pointer}.tmf-fav{cursor:pointer;display:inline-flex;align-items:center;justify-content:center;width:18px;font-size:16px;line-height:1;color:#888;align-self:center;margin-right:2px;user-select:none;-webkit-user-select:none}.tmf-fav.tmf-fav--on{color:gold;text-shadow:0 0 3px rgba(255,215,0,.7)}.tmf-fillall-bar{position:fixed;bottom:110px;right:16px;display:flex;align-items:center;gap:6px;padding:6px 8px;background:rgba(0,0,0,.55);border-radius:20px;z-index:999999;touch-action:none;transition:box-shadow .2s ease}.tmf-fillall-grip{cursor:grab;color:#bbb;font-size:14px;line-height:1;letter-spacing:-2px;min-width:12px;text-align:center;align-self:center;user-select:none;-webkit-user-select:none}.tmf-fillall-bar--dragging{cursor:grabbing;opacity:.92}.tmf-fillall-bar--dragging .tmf-fillall-grip{cursor:grabbing}.tmf-fillall-cog{cursor:pointer;flex:0 0 auto;display:flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:rgba(255,255,255,.12);color:#ddd;font-size:13px;line-height:1;user-select:none;-webkit-user-select:none}.tmf-fillall-cog:hover{background:rgba(255,255,255,.28);color:#fff}.tmf-fillall-bar--min{padding:5px 7px;gap:4px}.tmf-fillall-bar--min .tmf-fillall-btn,.tmf-fillall-bar--min .tmf-fillall-cog{display:none}.tmf-fillall-bar--min .tmf-fillall-grip{font-size:16px}.tmf-autofill-dot{display:none;width:10px;height:10px;border-radius:50%;background:gold;box-shadow:0 0 4px gold;animation:tmfPulse 1s ease-in-out infinite}.tmf-fillall-bar--active .tmf-autofill-dot{display:inline-block}.tmf-fillall-bar--active{box-shadow:0 0 10px 2px rgba(255,215,0,.75)}@keyframes tmfPulse{0%,100%{opacity:.3;transform:scale(.8)}50%{opacity:1;transform:scale(1.2)}}.tmf-viewport-border{display:none;position:fixed;top:0;right:0;bottom:0;left:0;border:3px solid gold;box-shadow:inset 0 0 12px rgba(255,215,0,.6);pointer-events:none;z-index:999998}.tmf-viewport-border--active{display:block}.tmf-toast{position:fixed;bottom:158px;right:16px;max-width:280px;background:rgba(0,0,0,.85);color:#fff;padding:10px 14px;border-radius:8px;border:1px solid gold;font-size:13px;line-height:1.4;z-index:1000000;opacity:0;visibility:hidden;transition:opacity .3s,visibility .3s}.tmf-toast--visible{opacity:1;visibility:visible}.tmf-fav.tmf-fav--off{color:#ff6b6b;text-shadow:none}`);
 
-    GM_addStyle(`.tmf-modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:2147483000;justify-content:center;align-items:flex-start;overflow:auto;padding:24px 12px;box-sizing:border-box}.tmf-modal-overlay--open{display:flex}.tmf-modal{background:#1f1f1f;color:#e6e6e6;width:100%;max-width:420px;border:1px solid #666;border-radius:10px;box-shadow:0 10px 40px rgba(0,0,0,.6);padding:16px 18px;box-sizing:border-box;font-size:13px;line-height:1.5}.tmf-modal h3{margin:0 0 12px;font-size:15px;display:flex;justify-content:space-between;align-items:center;color:#fff}.tmf-modal-close{cursor:pointer;color:#bbb;font-size:22px;line-height:1}.tmf-modal label{display:block;margin:10px 0 3px;font-weight:bold;color:#cfcfcf}.tmf-modal input[type=text]{width:100%;box-sizing:border-box;padding:7px 9px;border-radius:5px;border:1px solid #666;background:#111;color:#eee;font-size:13px}.tmf-modal-toggle{display:flex;align-items:center;gap:8px;margin-top:10px;font-weight:bold;color:#cfcfcf}.tmf-modal-toggle input{width:auto}.tmf-modal-cats{margin-top:4px}.tmf-modal-cat-row{display:flex;gap:6px;margin-bottom:6px;align-items:center}.tmf-modal-cat-row .tmf-modal-cat-name{flex:1 1 55%}.tmf-modal-cat-row .tmf-modal-cat-formula{flex:1 1 45%}.tmf-modal-cat-del{cursor:pointer;color:#ff6b6b;font-size:20px;line-height:1;flex:0 0 auto;width:22px;text-align:center}.tmf-modal-addcat{margin-top:2px;cursor:pointer;background:#333;color:#eee;border:1px solid #666;border-radius:5px;padding:5px 10px;font-size:12px}.tmf-modal-resetcat{margin:2px 0 0 8px;cursor:pointer;background:#3a2a2a;color:#ddd;border:1px solid #774;border-radius:5px;padding:5px 10px;font-size:12px}.tmf-modal-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:16px}.tmf-modal-actions button{cursor:pointer;padding:7px 16px;border-radius:5px;border:1px solid #666;background:#333;color:#eee;font-size:13px}.tmf-modal-save{background:#2e7d32!important;border-color:#2e7d32!important;color:#fff!important}.tmf-modal-help{margin-top:12px;font-size:11px;color:#9a9a9a;line-height:1.5}.tmf-modal-help code{background:#000;padding:1px 4px;border-radius:3px;color:#cfc}.tmf-modal-cat-row input{min-width:0}.tmf-modal-cat-row .tmf-modal-cat-name{flex:1 1 38%}.tmf-modal-cat-row .tmf-modal-cat-formula{flex:1 1 32%}.tmf-modal-cat-row .tmf-modal-cat-qty{flex:1 1 30%}.tmf-modal-cat-head{display:flex;gap:6px;margin:0 0 4px;font-size:11px;color:#9a9a9a}.tmf-modal-cat-head span:nth-child(1){flex:1 1 38%}.tmf-modal-cat-head span:nth-child(2){flex:1 1 32%}.tmf-modal-cat-head span:nth-child(3){flex:1 1 30%}.tmf-modal-cat-head span:nth-child(4){flex:0 0 22px}.tmf-modal-clearexcl{margin:2px 0 0 8px;cursor:pointer;background:#3a2a2a;color:#ddd;border:1px solid #774;border-radius:5px;padding:5px 10px;font-size:12px}`);
+    GM_addStyle(`.tmf-modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:2147483000;justify-content:center;align-items:flex-start;overflow:auto;padding:24px 12px;box-sizing:border-box}.tmf-modal-overlay--open{display:flex}.tmf-modal{background:#1f1f1f;color:#e6e6e6;width:100%;max-width:420px;border:1px solid #666;border-radius:10px;box-shadow:0 10px 40px rgba(0,0,0,.6);padding:16px 18px;box-sizing:border-box;font-size:13px;line-height:1.5}.tmf-modal h3{margin:0 0 12px;font-size:15px;display:flex;justify-content:space-between;align-items:center;color:#fff}.tmf-modal-close{cursor:pointer;color:#bbb;font-size:22px;line-height:1}.tmf-modal label{display:block;margin:10px 0 3px;font-weight:bold;color:#cfcfcf}.tmf-modal input[type=text]{width:100%;box-sizing:border-box;padding:7px 9px;border-radius:5px;border:1px solid #666;background:#111;color:#eee;font-size:13px}.tmf-modal-toggle{display:flex;align-items:center;gap:8px;margin-top:10px;font-weight:bold;color:#cfcfcf}.tmf-modal-toggle input{width:auto}.tmf-modal-cats{margin-top:4px}.tmf-modal-cat-row{display:flex;gap:6px;margin-bottom:6px;align-items:center}.tmf-modal-cat-row .tmf-modal-cat-name{flex:1 1 55%}.tmf-modal-cat-row .tmf-modal-cat-formula{flex:1 1 45%}.tmf-modal-cat-del{cursor:pointer;color:#ff6b6b;font-size:20px;line-height:1;flex:0 0 auto;width:22px;text-align:center}.tmf-modal-addcat{margin-top:2px;cursor:pointer;background:#333;color:#eee;border:1px solid #666;border-radius:5px;padding:5px 10px;font-size:12px}.tmf-modal-resetcat{margin:2px 0 0 8px;cursor:pointer;background:#3a2a2a;color:#ddd;border:1px solid #774;border-radius:5px;padding:5px 10px;font-size:12px}.tmf-modal-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:16px}.tmf-modal-actions button{cursor:pointer;padding:7px 16px;border-radius:5px;border:1px solid #666;background:#333;color:#eee;font-size:13px}.tmf-modal-save{background:#2e7d32!important;border-color:#2e7d32!important;color:#fff!important}.tmf-modal-help{margin-top:12px;font-size:11px;color:#9a9a9a;line-height:1.5}.tmf-modal-help code{background:#000;padding:1px 4px;border-radius:3px;color:#cfc}.tmf-modal-cat-row input{min-width:0}.tmf-modal-cat-row .tmf-modal-cat-name{flex:1 1 38%}.tmf-modal-cat-row .tmf-modal-cat-formula{flex:1 1 32%}.tmf-modal-cat-row .tmf-modal-cat-qty{flex:1 1 30%}.tmf-modal-cat-head{display:flex;gap:6px;margin:0 0 4px;font-size:11px;color:#9a9a9a}.tmf-modal-cat-head span:nth-child(1){flex:1 1 38%}.tmf-modal-cat-head span:nth-child(2){flex:1 1 32%}.tmf-modal-cat-head span:nth-child(3){flex:1 1 30%}.tmf-modal-cat-head span:nth-child(4){flex:0 0 22px}.tmf-modal-clearexcl{margin:2px 0 0 8px;cursor:pointer;background:#3a2a2a;color:#ddd;border:1px solid #774;border-radius:5px;padding:5px 10px;font-size:12px}.tmf-modal-error{display:none;margin-top:12px;padding:8px 10px;border-radius:5px;background:#3a1f1f;border:1px solid #a34;color:#ffb3b3;font-size:12px;line-height:1.4}.tmf-modal input.tmf-modal-invalid{border-color:#ff6b6b;box-shadow:0 0 0 1px rgba(255,107,107,.45)}`);
 
     GM_addStyle(`.tmf-changelog-release{margin:0 0 14px}.tmf-changelog-release:last-of-type{margin-bottom:0}.tmf-changelog-ver{display:flex;align-items:baseline;gap:8px;margin:0 0 6px}.tmf-changelog-ver b{color:#fff;font-size:13px}.tmf-changelog-date{color:#8a8a8a;font-size:11px;margin-left:auto}.tmf-changelog-badge{background:#2e7d32;color:#fff;border-radius:10px;padding:1px 7px;font-size:10px;text-transform:uppercase;letter-spacing:.04em}.tmf-changelog-items{margin:0;padding-left:18px;color:#cfcfcf}.tmf-changelog-items li{margin:0 0 5px}.tmf-changelog-items code{background:#000;padding:1px 4px;border-radius:3px;color:#cfc}`);
 
@@ -88,6 +88,15 @@
     // Write every line for a player, not a developer: one short sentence, plain words,
     // what changed for them rather than what changed in the code.
     const CHANGELOG = [
+        {
+            version: "1.0.0",
+            date: "2026-09-07",
+            changes: [
+                'New: combine price sources. Write <code>-1[bazaar] | -1[0]</code> and both are priced, then the higher one is filled. Use it to put a floor under a source that sometimes goes cheap.',
+                'The same thing spelled out is <code>max(-1[bazaar], -1[0])</code>. Use <code>min(-1[bazaar], -1[0])</code> instead to fill the lower one and undercut whichever source is cheapest.',
+                'Settings now checks what you type. A price or quantity it cannot use is refused with a note saying which field is wrong and why, instead of being saved and failing on every item later.'
+            ]
+        },
         {
             version: "0.13.3",
             date: "2026-09-07",
@@ -327,6 +336,31 @@
 
     function stripDeltaBracket(formula){
         return formula.indexOf('[') == -1 ? formula : formula.substring(0, formula.indexOf('['));
+    }
+
+    // A setting may combine several formulas. "a | b" and "max(a, b)" both fill the highest of
+    // them; "min(a, b)" fills the lowest, to undercut whichever source is cheapest. A lone
+    // formula is simply a one-branch max.
+    function parseSetting(setting){
+        let raw = String(setting ?? '').trim();
+        let call = raw.match(/^(min|max)\s*\(([\s\S]*)\)$/i);
+        let body = call != null ? call[2] : raw;
+        let branches = body.split(/[|,]/).map(function(branch){ return branch.trim(); })
+            .filter(function(branch){ return branch !== ''; });
+        return {
+            combine: call != null ? call[1].toLowerCase() : 'max',
+            branches: branches.length > 0 ? branches : [body.trim()]
+        };
+    }
+
+    function formulaBranches(setting){
+        return parseSetting(setting).branches;
+    }
+
+    // The branch a one-formula decision has to look at: which endpoint to try first, and
+    // whether a Torn key is needed at all.
+    function firstBranch(setting){
+        return formulaBranches(setting)[0];
     }
 
     function sourceOf(formula){
@@ -573,8 +607,10 @@
     // A bazaar-only setup never calls Torn, so it must never be asked for a key. Any other
     // source among the active formulas — including the bare default — still needs one.
     function needsTornApiKey(){
-        return [priceDeltaRaw].concat(Object.values(categoryDeltas)).some(function(formula){
-            return sourceOf(String(formula ?? '')) !== SOURCE_BAZAAR;
+        return [priceDeltaRaw].concat(Object.values(categoryDeltas)).some(function(setting){
+            return formulaBranches(setting).some(function(branch){
+                return sourceOf(branch) !== SOURCE_BAZAAR;
+            });
         });
     }
 
@@ -669,6 +705,76 @@
         return priceDeltaRaw;
     }
 
+    // Can a response already fetched for this item answer for this branch too?
+    function preloadMatches(preloaded, branch, source){
+        if (preloaded == null || preloaded.source !== source){
+            return false;
+        }
+        // The two bazaar reads differ: [bazaar:avg] comes from the bulk snapshot, every other
+        // selector from the per-item endpoint, so only a matching kind may reuse a response.
+        return source !== SOURCE_BAZAAR ||
+            (bazaarSelector(preloaded.formula).kind === 'avg') === (bazaarSelector(branch).kind === 'avg');
+    }
+
+    // Price one branch of a setting. `allowFallback` is off while several branches compete:
+    // the user has already named their own alternative, so a thin bazaar item should let the
+    // next branch answer instead of quietly spending a Torn call on the item market.
+    async function priceBranch(branch, itemId, category, preloaded, allowFallback){
+        let source = sourceOf(branch);
+        let data = preloadMatches(preloaded, branch, source)
+            ? preloaded.data
+            : await fetchForSource(source, branch, itemId);
+        let error = mapApiError(data);
+        if (error != null){
+            return { prices: error, formula: branch, category: category };
+        }
+        let prices = parsePrices(data, itemId, source, branch);
+        if (prices == null && !allowFallback){
+            return { prices: null, formula: branch, category: category };
+        }
+        return withBazaarFallback(prices, branch, source, itemId, category);
+    }
+
+    // What a branch would actually fill, or null when it errored or priced nothing. A formula
+    // stored before Save started validating them can still throw here, and that is one dead
+    // branch rather than a dead row.
+    function branchPrice(result){
+        try {
+            let price = GetPrice(result.prices, result.formula);
+            return typeof price === 'number' && isFinite(price) ? price : null;
+        } catch (error) {
+            console.warn("[TornMarketFiller] Formula '" + result.formula + "' could not be applied:", error);
+            return null;
+        }
+    }
+
+    // Price every branch of a setting and keep the highest, or the lowest under min(). One
+    // branch takes exactly the path, and costs exactly the calls, it did before any of this.
+    async function priceSetting(setting, itemId, category, preloaded){
+        let parsed = parseSetting(setting);
+        let branches = parsed.branches;
+        if (branches.length === 1){
+            return priceBranch(branches[0], itemId, category, preloaded, true);
+        }
+        let best = null;
+        let bestPrice = null;
+        for (let i = 0; i < branches.length; i++){
+            let result = await priceBranch(branches[i], itemId, category, preloaded, false);
+            let price = branchPrice(result);
+            if (price == null){
+                console.warn("[TornMarketFiller] '" + branches[i] + "' priced nothing for item " + itemId + ".");
+                continue;
+            }
+            if (bestPrice == null || (parsed.combine === 'min' ? price < bestPrice : price > bestPrice)){
+                best = result;
+                bestPrice = price;
+            }
+        }
+        // Nothing priced: re-run the first branch the ordinary way, so the row reports the same
+        // error — and gets the same item-market fallback — as a setting with no pipes at all.
+        return best ?? priceBranch(branches[0], itemId, category, preloaded, true);
+    }
+
     // Fetch pricing for an item using the price source its (possibly per-category) formula needs.
     // The item's category is read from the first response and cached; only the first ever fill of
     // an item whose category overrides the source costs a second request.
@@ -678,19 +784,15 @@
             // No per-category overrides of either kind → category is irrelevant; behave like
             // the default path.
             if (Object.keys(categoryDeltas).length === 0 && !hasCategoryQuantityOverrides()){
-                let source = sourceOf(priceDeltaRaw);
-                let data = await fetchForSource(source, priceDeltaRaw, itemId);
-                let error = mapApiError(data);
-                if (error != null){
-                    return { prices: error, formula: priceDeltaRaw, category: null };
-                }
-                return withBazaarFallback(parsePrices(data, itemId, source, priceDeltaRaw), priceDeltaRaw, source, itemId, null);
+                return priceSetting(priceDeltaRaw, itemId, null, null);
             }
 
             let cached = getCachedCategory(itemId);
             let expired = cached == null || (Date.now() - cached.ts) > CATEGORY_TTL_MS;
             let guessCategory = cached != null ? cached.type : null;
-            let guessFormula = getEffectiveDelta(guessCategory);
+            // Only the first branch decides which endpoint to try first; the rest are priced
+            // once the category is known.
+            let guessFormula = firstBranch(getEffectiveDelta(guessCategory));
             // When stale/unknown, force the items endpoint so we definitively re-learn the type even
             // if the chosen source omits it; otherwise guess from the cache to stay 1 call.
             // Without a key that refresh can only fail, and failing it would take a bazaar-only
@@ -706,16 +808,8 @@
             if (actualType != null && (cached == null || cached.type !== actualType || expired)){
                 cacheItemCategory(itemId, actualType);
             }
-            let formula = getEffectiveDelta(category);
-            let source = sourceOf(formula);
-            if (source !== firstSource){
-                data = await fetchForSource(source, formula, itemId);
-                let error2 = mapApiError(data);
-                if (error2 != null){
-                    return { prices: error2, formula: formula, category: category };
-                }
-            }
-            return withBazaarFallback(parsePrices(data, itemId, source, formula), formula, source, itemId, category);
+            return priceSetting(getEffectiveDelta(category), itemId, category,
+                                { source: firstSource, formula: guessFormula, data: data });
         } catch (error) {
             console.error("[TornMarketFiller] Error fetching data:", error);
             return { prices: 'Failed!', formula: priceDeltaRaw, category: null };
@@ -1828,12 +1922,14 @@
                 '<button type="button" class="tmf-modal-addcat">+ Add category</button>' +
                 '<button type="button" class="tmf-modal-resetcat" title="Forget cached item categories. Use if Torn recategorised an item and a wrong discount is being applied.">Reset learned categories</button>' +
                 '<button type="button" class="tmf-modal-clearexcl" title="Un-exclude every item marked ⊘, including ones not currently on screen.">Clear exclusions</button>' +
+                '<div class="tmf-modal-error"></div>' +
                 '<div class="tmf-modal-actions">' +
                     '<button type="button" class="tmf-modal-cancel">Cancel</button>' +
                     '<button type="button" class="tmf-modal-save">Save</button>' +
                 '</div>' +
                 '<div class="tmf-modal-help">Item market: <code>-1[0]</code> (lowest listing − $1), <code>-5%</code>, <code>-1[1]</code> (2nd lowest listing), <code>[market]</code> (Torn market value), <code>-1[median]</code> (median listing).<br>' +
                 'Player bazaars, via weav3r.dev, no API key: <code>-1[bazaar]</code> (cheapest bazaar − $1), <code>-1[bazaar:2]</code> (3rd cheapest), <code>-5%[bazaar:avg]</code> (bazaar average), <code>[bazaar:median]</code>.<br>' +
+                'Combine sources: <code>-1[bazaar] | -1[0]</code> prices both and fills the higher one, so the second is a floor under the first. <code>max(-1[bazaar], -1[0])</code> is the same; <code>min(-1[bazaar], -1[0])</code> fills the lower one, to undercut whichever source is cheapest.<br>' +
                 'Quantity examples: <code>max</code> (all of them), <code>max-1</code> (keep one back), <code>max-3</code>, <code>1</code> (always list one), <code>skip</code> (never list this category).<br>' +
                 'Category rows accept the same syntax and fall back to the defaults above when blank.</div>' +
             '</div>' +
@@ -1885,6 +1981,7 @@
     function openSettingsModal(){
         ensureSettingsModal();
         const overlay = document.querySelector('.tmf-settings-overlay');
+        clearSettingsError(overlay);
         overlay.querySelector('.tmf-modal-delta').value = priceDeltaRaw;
         overlay.querySelector('.tmf-modal-qty').value = quantityModeRaw;
         overlay.querySelector('.tmf-modal-apikey').value = (apiKey != null && apiKey.indexOf('PDA-APIKEY') === -1) ? apiKey : '';
@@ -1905,9 +2002,153 @@
         }
     }
 
+    // ---- Settings validation ----------------------------------------------------------
+    // Save refuses anything the filler could not act on later. A bad formula used to be stored
+    // happily and then fail every row that reached it, with nothing on screen to say why.
+
+    // A price formula is an optional discount ("-1", "+5", "-5%") followed by an optional
+    // source in brackets. Either half may be left out; a bare source means "as it stands".
+    function formulaProblem(branch){
+        let open = branch.indexOf('[');
+        let delta = (open === -1 ? branch : branch.substring(0, open)).trim();
+        if (delta !== '' && !/^[-+]?\d+(\.\d+)?%?$/.test(delta)){
+            return "'" + delta + "' is not a discount. Use -1, +5, -5%, or nothing at all.";
+        }
+        if (open === -1){
+            return null;
+        }
+        let close = branch.indexOf(']', open);
+        if (close === -1){
+            return "'" + branch + "' is missing its closing ].";
+        }
+        if (branch.substring(close + 1).trim() !== ''){
+            return "'" + branch + "' has stray text after the ].";
+        }
+        let token = bracketToken(branch);
+        if (token === 'market' || token === 'median' || /^\d+$/.test(token)){
+            return null;
+        }
+        if (token === 'bazaar' || token.indexOf('bazaar:') === 0){
+            let argument = token.substring('bazaar'.length).replace(/^:/, '').trim();
+            if (argument === '' || argument === 'avg' || argument === 'average' || argument === 'median' || /^\d+$/.test(argument)){
+                return null;
+            }
+            return "[" + token + "] is not a bazaar source. Use [bazaar], [bazaar:2], [bazaar:avg] or [bazaar:median].";
+        }
+        return "[" + token + "] is not a price source. Use [0], [median], [market] or [bazaar].";
+    }
+
+    // Whole setting: a lone formula, "a | b", or min(...)/max(...) around a list of them.
+    // Blank is always fine, since it means "use the default".
+    function settingProblem(setting){
+        let raw = String(setting ?? '').trim();
+        if (raw === ''){
+            return null;
+        }
+        let body = raw;
+        let call = raw.match(/^(min|max)\s*\(([\s\S]*)$/i);
+        if (call != null){
+            if (raw.charAt(raw.length - 1) !== ')'){
+                return raw.indexOf(')') === -1
+                    ? "min() and max() need a closing )."
+                    : "min() and max() take every formula inside one pair of brackets: max(a, b), not max(a) | b.";
+            }
+            body = call[2].substring(0, call[2].length - 1);
+            if (body.trim() === ''){
+                return "min() and max() need at least one formula between the brackets.";
+            }
+        }
+        let parts = body.split(/[|,]/);
+        for (let i = 0; i < parts.length; i++){
+            let branch = parts[i].trim();
+            if (branch === ''){
+                return "there is an empty formula next to a separator.";
+            }
+            if (branch.indexOf('(') !== -1 || branch.indexOf(')') !== -1){
+                return "min() and max() do not nest. Put every formula inside one pair of brackets: max(a, b, c).";
+            }
+            let problem = formulaProblem(branch);
+            if (problem != null){
+                return problem;
+            }
+        }
+        return null;
+    }
+
+    function reportSettingsError(overlay, input, message){
+        let box = overlay.querySelector('.tmf-modal-error');
+        if (box != null){
+            box.textContent = message;
+            box.style.display = 'block';
+        }
+        input.classList.add('tmf-modal-invalid');
+        input.focus();
+        return false;
+    }
+
+    function clearSettingsError(overlay){
+        if (overlay == null){
+            return;
+        }
+        let box = overlay.querySelector('.tmf-modal-error');
+        if (box != null){
+            box.textContent = '';
+            box.style.display = 'none';
+        }
+        overlay.querySelectorAll('.tmf-modal-invalid').forEach(function(input){
+            input.classList.remove('tmf-modal-invalid');
+        });
+    }
+
+    // True when every field can be saved. Otherwise the first bad one is marked, the reason is
+    // shown, and the modal stays open so nothing the user typed is lost.
+    function validateSettingsModal(overlay){
+        clearSettingsError(overlay);
+        let deltaInput = overlay.querySelector('.tmf-modal-delta');
+        let deltaProblem = settingProblem(deltaInput.value);
+        if (deltaProblem != null){
+            return reportSettingsError(overlay, deltaInput, 'Default price delta: ' + deltaProblem);
+        }
+        let qtyInput = overlay.querySelector('.tmf-modal-qty');
+        if (qtyInput.value.trim() !== '' && !isKnownQuantityMode(qtyInput.value)){
+            return reportSettingsError(overlay, qtyInput, 'Default quantity: use max, max-1, a plain number, or skip.');
+        }
+        let keyInput = overlay.querySelector('.tmf-modal-apikey');
+        let key = keyInput.value.trim();
+        if (key !== '' && key.length !== 16){
+            return reportSettingsError(overlay, keyInput, 'Public API key: a Torn key is 16 characters long.');
+        }
+        let rows = overlay.querySelectorAll('.tmf-modal-cat-row');
+        for (let i = 0; i < rows.length; i++){
+            let nameInput = rows[i].querySelector('.tmf-modal-cat-name');
+            let formulaInput = rows[i].querySelector('.tmf-modal-cat-formula');
+            let rowQtyInput = rows[i].querySelector('.tmf-modal-cat-qty');
+            let name = nameInput.value.trim();
+            if (name === ''){
+                // An entirely blank row is dropped on save; only one carrying settings is a
+                // mistake worth stopping for.
+                if (formulaInput.value.trim() !== '' || rowQtyInput.value.trim() !== ''){
+                    return reportSettingsError(overlay, nameInput, 'This category row needs a category name.');
+                }
+                continue;
+            }
+            let rowProblem = settingProblem(formulaInput.value);
+            if (rowProblem != null){
+                return reportSettingsError(overlay, formulaInput, name + ' price: ' + rowProblem);
+            }
+            if (rowQtyInput.value.trim() !== '' && !isKnownQuantityMode(rowQtyInput.value)){
+                return reportSettingsError(overlay, rowQtyInput, name + ' quantity: use max, max-1, a plain number, or skip.');
+            }
+        }
+        return true;
+    }
+
     function saveSettingsModal(){
         const overlay = document.querySelector('.tmf-settings-overlay');
         if (overlay == null){
+            return;
+        }
+        if (!validateSettingsModal(overlay)){
             return;
         }
         let deltaVal = overlay.querySelector('.tmf-modal-delta').value.trim();
@@ -1922,8 +2163,6 @@
         if (keyVal.length === 16){
             apiKey = keyVal;
             localStorage.setItem("silmaril-torn-bazaar-filler-apikey", keyVal);
-        } else if (keyVal !== ''){
-            console.warn("[TornMarketFiller] API key must be 16 characters; ignored.");
         }
         showPricesPopup = overlay.querySelector('.tmf-modal-popup').checked;
         localStorage.setItem('silmaril-torn-market-filler-show-prices-popup', showPricesPopup ? '1' : '0');
