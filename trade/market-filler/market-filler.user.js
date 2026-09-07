@@ -2,7 +2,7 @@
 // @name         Torn Market Filler
 // @namespace    https://github.com/SOLiNARY
 // @version      1.0.0
-// @description  On "Fill" click autofills market item price with lowest market price minus $1 (customizable), fills the quantity your quantity mode asks for, marks checkboxes for guns. Click the ⚙ cog on the Fill All bar — or hold the fill button for 2s — to open the settings modal (price delta, quantity mode, API key, prices popup, and per-category overrides — set different discounts/sources/quantities for Clothing, Other, Drug, etc.). Quantity modes: "max" (default), "max-1" to always keep a copy, a fixed number, or "skip" to never list a category. Cycle the star next to the fill button to mark an item as a favourite (★, used by Fill All) or excluded (⊘, never auto-filled). Use "Fill All" to auto-fill every favourite row on both the Add Items and Your Items (view listings) pages, including ones appearing later when switching categories. Drag the Fill All bar anywhere; drop it near a screen edge to clamp and minimise it — its position and state are remembered. Three price sources are available: Torn's item market listings (the default), Torn's market value ([market]) and live player-bazaar data from weav3r.dev ([bazaar], [bazaar:2], [bazaar:avg], [bazaar:median]), which is useful for pricing against what the same item actually sells for in bazaars. Sources can be combined with a pipe ([bazaar]-1 | -1[0]): every formula listed is priced and the highest one is filled, so one source acts as a floor under the other. Settings are validated on save. After an update a "What's new" popup lists what changed.
+// @description  On "Fill" click autofills market item price with lowest market price minus $1 (customizable), fills the quantity your quantity mode asks for, marks checkboxes for guns. Click the ⚙ cog on the Fill All bar — or hold the fill button for 2s — to open the settings modal (price delta, quantity mode, API key, prices popup, and per-category overrides — set different discounts/sources/quantities for Clothing, Other, Drug, etc.). Quantity modes: "max" (default), "max-1" to always keep a copy, a fixed number, or "skip" to never list a category. Cycle the star next to the fill button to mark an item as a favourite (★, used by Fill All) or excluded (⊘, never auto-filled). Use "Fill All" to auto-fill every favourite row on both the Add Items and Your Items (view listings) pages, including ones appearing later when switching categories. Drag the Fill All bar anywhere; drop it near a screen edge to clamp and minimise it — its position and state are remembered. Three price sources are available: Torn's item market listings (the default), Torn's market value ([market]) and live player-bazaar data from weav3r.dev ([bazaar], [bazaar:2], [bazaar:avg], [bazaar:median]), which is useful for pricing against what the same item actually sells for in bazaars. Sources can be combined: -1[bazaar] | -1[0] or max(-1[bazaar], -1[0]) prices every formula listed and fills the highest, so one source acts as a floor under the other, and min(...) fills the lowest to undercut whichever source is cheapest. Settings are validated on save. After an update a "What's new" popup lists what changed.
 // @author       Silmaril [2665762]
 // @license      MIT License
 // @match        https://www.torn.com/page.php?sid=ItemMarket*
@@ -92,7 +92,8 @@
             version: "1.0.0",
             date: "2026-09-07",
             changes: [
-                'New: combine price sources with <code>|</code>. Write <code>-1[bazaar] | -1[0]</code> and both are priced, then the higher one is filled. Use it to put a floor under a source that sometimes goes cheap.',
+                'New: combine price sources. Write <code>-1[bazaar] | -1[0]</code> and both are priced, then the higher one is filled. Use it to put a floor under a source that sometimes goes cheap.',
+                'The same thing spelled out is <code>max(-1[bazaar], -1[0])</code>. Use <code>min(-1[bazaar], -1[0])</code> instead to fill the lower one and undercut whichever source is cheapest.',
                 'Settings now checks what you type. A price or quantity it cannot use is refused with a note saying which field is wrong and why, instead of being saved and failing on every item later.'
             ]
         },
@@ -337,12 +338,23 @@
         return formula.indexOf('[') == -1 ? formula : formula.substring(0, formula.indexOf('['));
     }
 
-    // A setting may list several formulas separated by "|". Each one is priced on its own and
-    // the highest result wins, so a second source becomes a floor under the first.
-    function formulaBranches(setting){
-        let branches = String(setting ?? '').split('|').map(function(branch){ return branch.trim(); })
+    // A setting may combine several formulas. "a | b" and "max(a, b)" both fill the highest of
+    // them; "min(a, b)" fills the lowest, to undercut whichever source is cheapest. A lone
+    // formula is simply a one-branch max.
+    function parseSetting(setting){
+        let raw = String(setting ?? '').trim();
+        let call = raw.match(/^(min|max)\s*\(([\s\S]*)\)$/i);
+        let body = call != null ? call[2] : raw;
+        let branches = body.split(/[|,]/).map(function(branch){ return branch.trim(); })
             .filter(function(branch){ return branch !== ''; });
-        return branches.length > 0 ? branches : [String(setting ?? '').trim()];
+        return {
+            combine: call != null ? call[1].toLowerCase() : 'max',
+            branches: branches.length > 0 ? branches : [body.trim()]
+        };
+    }
+
+    function formulaBranches(setting){
+        return parseSetting(setting).branches;
     }
 
     // The branch a one-formula decision has to look at: which endpoint to try first, and
@@ -736,10 +748,11 @@
         }
     }
 
-    // Price every branch of a setting and keep the highest. One branch takes exactly the path,
-    // and costs exactly the calls, it did before pipes existed.
+    // Price every branch of a setting and keep the highest, or the lowest under min(). One
+    // branch takes exactly the path, and costs exactly the calls, it did before any of this.
     async function priceSetting(setting, itemId, category, preloaded){
-        let branches = formulaBranches(setting);
+        let parsed = parseSetting(setting);
+        let branches = parsed.branches;
         if (branches.length === 1){
             return priceBranch(branches[0], itemId, category, preloaded, true);
         }
@@ -752,7 +765,7 @@
                 console.warn("[TornMarketFiller] '" + branches[i] + "' priced nothing for item " + itemId + ".");
                 continue;
             }
-            if (bestPrice == null || price > bestPrice){
+            if (bestPrice == null || (parsed.combine === 'min' ? price < bestPrice : price > bestPrice)){
                 best = result;
                 bestPrice = price;
             }
@@ -1916,7 +1929,7 @@
                 '</div>' +
                 '<div class="tmf-modal-help">Item market: <code>-1[0]</code> (lowest listing − $1), <code>-5%</code>, <code>-1[1]</code> (2nd lowest listing), <code>[market]</code> (Torn market value), <code>-1[median]</code> (median listing).<br>' +
                 'Player bazaars, via weav3r.dev, no API key: <code>-1[bazaar]</code> (cheapest bazaar − $1), <code>-1[bazaar:2]</code> (3rd cheapest), <code>-5%[bazaar:avg]</code> (bazaar average), <code>[bazaar:median]</code>.<br>' +
-                'Combine sources with <code>|</code>: <code>-1[bazaar] | -1[0]</code> prices both and fills the higher one, so the second is a floor under the first.<br>' +
+                'Combine sources: <code>-1[bazaar] | -1[0]</code> prices both and fills the higher one, so the second is a floor under the first. <code>max(-1[bazaar], -1[0])</code> is the same; <code>min(-1[bazaar], -1[0])</code> fills the lower one, to undercut whichever source is cheapest.<br>' +
                 'Quantity examples: <code>max</code> (all of them), <code>max-1</code> (keep one back), <code>max-3</code>, <code>1</code> (always list one), <code>skip</code> (never list this category).<br>' +
                 'Category rows accept the same syntax and fall back to the defaults above when blank.</div>' +
             '</div>' +
@@ -2025,17 +2038,34 @@
         return "[" + token + "] is not a price source. Use [0], [median], [market] or [bazaar].";
     }
 
-    // Whole setting, pipes included. Blank is always fine: it means "use the default".
+    // Whole setting: a lone formula, "a | b", or min(...)/max(...) around a list of them.
+    // Blank is always fine, since it means "use the default".
     function settingProblem(setting){
-        let raw = String(setting ?? '');
-        if (raw.trim() === ''){
+        let raw = String(setting ?? '').trim();
+        if (raw === ''){
             return null;
         }
-        let parts = raw.split('|');
+        let body = raw;
+        let call = raw.match(/^(min|max)\s*\(([\s\S]*)$/i);
+        if (call != null){
+            if (raw.charAt(raw.length - 1) !== ')'){
+                return raw.indexOf(')') === -1
+                    ? "min() and max() need a closing )."
+                    : "min() and max() take every formula inside one pair of brackets: max(a, b), not max(a) | b.";
+            }
+            body = call[2].substring(0, call[2].length - 1);
+            if (body.trim() === ''){
+                return "min() and max() need at least one formula between the brackets.";
+            }
+        }
+        let parts = body.split(/[|,]/);
         for (let i = 0; i < parts.length; i++){
             let branch = parts[i].trim();
             if (branch === ''){
-                return "there is an empty formula next to a | separator.";
+                return "there is an empty formula next to a separator.";
+            }
+            if (branch.indexOf('(') !== -1 || branch.indexOf(')') !== -1){
+                return "min() and max() do not nest. Put every formula inside one pair of brackets: max(a, b, c).";
             }
             let problem = formulaProblem(branch);
             if (problem != null){
