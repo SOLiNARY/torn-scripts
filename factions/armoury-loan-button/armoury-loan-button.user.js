@@ -250,10 +250,13 @@
     const API_SYNC_KEY = 'silmaril-armoury-loan-api-sync';
     const API_URL = 'https://api.torn.com/v2/faction/inventory';
     const API_KEY_LENGTH = 16;
-    // Every armoury category, because an organized crime can ask for anything in any of
-    // them. Torn serves them one at a time.
-    const API_CATEGORIES = ['weapons', 'armor', 'temporary', 'medical', 'consumables',
-        'drugs', 'boosters', 'utilities', 'loot'];
+    // Torn serves one category per call and will not say which one an item lives in, so
+    // an item nothing has seen yet can only be found by sweeping. The order is the one
+    // organized crimes ask for most often, because the sweep stops as soon as everything
+    // the chips are waiting for has turned up; once an item has been found, its category
+    // is remembered and later reads ask for that alone.
+    const API_CATEGORIES = ['temporary', 'medical', 'drugs', 'utilities', 'weapons',
+        'armor', 'consumables', 'boosters', 'loot'];
     const API_PAGE_SIZE = 100;
     // A faction holding more than six hundred distinct items in one category does not
     // exist; the cap is only there so a broken answer cannot loop for ever.
@@ -831,7 +834,7 @@
         let changed = false;
         for (const itemId of Object.keys(seen)) {
             if (!itemsEqual(stored[itemId], seen[itemId])) {
-                stored[itemId] = { ...seen[itemId], updated: Date.now() };
+                stored[itemId] = { ...seen[itemId], source: 'page', updated: Date.now() };
                 changed = true;
             }
         }
@@ -946,14 +949,16 @@
     // One item arrives as several entries: the copies nobody has taken, and one more for
     // each copy out on loan. They are folded back into the single record the rest of the
     // script reads - these uids can be lent, these people are holding the others.
-    function foldInventory(entries) {
+    function foldInventory(entries, category) {
         const folded = {};
         for (const entry of entries) {
             if (entry?.id == null) continue;
             const itemId = String(entry.id);
             let item = folded[itemId];
             if (item == null) {
-                item = folded[itemId] = { name: '', type: '', armoryIds: [], holders: [], free: 0 };
+                item = folded[itemId] = {
+                    name: '', type: '', cat: category, armoryIds: [], holders: [], free: 0
+                };
             }
             if (typeof entry.name === 'string' && entry.name !== '') item.name = entry.name;
             if (typeof entry.type === 'string' && entry.type !== '') item.type = entry.type;
@@ -981,12 +986,19 @@
         return folded;
     }
 
-    function storeInventory(folded) {
+    // `snapshotAt` is when Torn took the answer, not when it arrived: the selection is
+    // served from an hour-old cache, so an answer can easily describe an armoury older
+    // than the one the player was looking at a minute ago. Anything this script watched
+    // happen after that - a row on the armoury page, a loan it sent itself - is the
+    // better record and is left alone until Torn's own copy catches up.
+    function storeInventory(folded, snapshotAt) {
         const store = getStoredItems();
         let changed = false;
         for (const itemId of Object.keys(folded)) {
-            if (itemsEqual(store[itemId], folded[itemId])) continue;
-            store[itemId] = { ...folded[itemId], updated: Date.now() };
+            const current = store[itemId];
+            if (current != null && current.source !== 'api' && (current.updated ?? 0) > snapshotAt) continue;
+            if (itemsEqual(current, folded[itemId])) continue;
+            store[itemId] = { ...folded[itemId], source: 'api', updated: Date.now() };
             changed = true;
         }
         if (changed) saveItems(store);
@@ -994,17 +1006,52 @@
 
     async function fetchCategory(category, force) {
         const items = [];
+        // Torn stamps every answer with the moment its cached copy was built. Without one
+        // the answer is taken at face value, which is the only thing left to do with it.
+        let snapshotAt = Date.now();
         for (let page = 0; page < API_MAX_PAGES; page++) {
             const response = await fetch(inventoryUrl(category, page * API_PAGE_SIZE, force));
             const payload = await response.json();
             const failure = apiError(payload);
             if (failure != null) throw new Error(failure);
+            if (Number.isFinite(payload?.inventory_timestamp)) {
+                snapshotAt = payload.inventory_timestamp * 1000;
+            }
             const batch = payload?.inventory ?? [];
             items.push(...batch);
             if (batch.length < API_PAGE_SIZE) break;
             await delay(API_GAP_MS);
         }
-        return items;
+        return { items: items, snapshotAt: snapshotAt };
+    }
+
+    // The items the chips on screen are waiting on. Kept by the crimes scan so a read
+    // can ask for the categories those items live in rather than all nine: a role that
+    // needs Ipecac Syrup has no business asking Torn about the faction's weapons.
+    const wantedItems = new Set();
+
+    function categoryOf(itemId) {
+        const cat = getStoredItems()[itemId]?.cat;
+        return API_CATEGORIES.includes(cat) ? cat : null;
+    }
+
+    function categoriesToRead() {
+        if (wantedItems.size === 0) return API_CATEGORIES;
+        const categories = [];
+        for (const itemId of wantedItems) {
+            const cat = categoryOf(itemId);
+            // One item whose home is still unknown, and the sweep has to happen anyway.
+            if (cat == null) return API_CATEGORIES;
+            if (!categories.includes(cat)) categories.push(cat);
+        }
+        return categories;
+    }
+
+    function everyWantedItemFound() {
+        for (const itemId of wantedItems) {
+            if (categoryOf(itemId) == null) return false;
+        }
+        return wantedItems.size > 0;
     }
 
     // Never throws: every caller only wants the cache as fresh as it can be, and a
@@ -1020,22 +1067,28 @@
         apiSyncing = true;
         scheduleScan();
         try {
-            let learned = 0;
-            // Stored a category at a time rather than all nine at the end: an item never
+            const categories = categoriesToRead();
+            const sweeping = categories === API_CATEGORIES;
+            const read = [];
+            // Stored a category at a time rather than all of them at the end: an item never
             // spans two categories, so folding them separately loses nothing, chips light
             // up as their own category lands instead of waiting on the rest, and a read
             // that fails half way keeps what already arrived.
-            for (const category of API_CATEGORIES) {
-                const folded = foldInventory(await fetchCategory(category, force));
-                storeInventory(folded);
-                learned += Object.keys(folded).length;
+            for (const category of categories) {
+                const answer = await fetchCategory(category, force);
+                storeInventory(foldInventory(answer.items, category), answer.snapshotAt);
+                read.push(category);
                 scheduleScan();
+                // A sweep is only running because something had not been found yet. Once
+                // everything on screen has been, the rest of it would read categories no
+                // chip is waiting on.
+                if (sweeping && everyWantedItemFound()) break;
                 await delay(API_GAP_MS);
             }
             setLastSync(Date.now());
             apiRetryAt = 0;
             apiNote = null;
-            console.log(`${LOG_PREFIX} Armoury read from the API:`, learned, 'item(s)');
+            console.log(`${LOG_PREFIX} Armoury read from the API:`, read.join(', '));
         } catch (error) {
             apiNote = String(error?.message || 'The armoury read did not get through.');
             apiRetryAt = Date.now() + API_RETRY_MS;
@@ -2053,6 +2106,10 @@
                 if (fresh?.armoryIds) {
                     fresh.armoryIds = fresh.armoryIds.filter(function (id) { return id !== armoryId; });
                     if (typeof fresh.free === 'number') fresh.free = Math.max(0, fresh.free - 1);
+                    // Watched rather than fetched, so an older answer from Torn's cache
+                    // cannot put the copy back.
+                    fresh.source = 'local';
+                    fresh.updated = Date.now();
                     saveItems(store);
                 }
                 markHeld(itemId, recipient.id);
@@ -2202,6 +2259,7 @@
 
         const ownId = getUser()?.id ?? null;
         const byRow = new Map();
+        wantedItems.clear();
         for (const wrapper of findAllSlotWrappers()) {
             const slot = readSlot(wrapper);
             if (slot == null) continue;
@@ -2209,6 +2267,7 @@
             const isMine = slot.occupant != null && ownId != null && slot.occupant.id === ownId;
             applyChip(slot, state, isMine);
             if (state == null) continue;
+            wantedItems.add(state.itemId);
             const row = wrapper.parentElement;
             if (row == null) continue;
             if (!byRow.has(row)) byRow.set(row, []);
