@@ -1020,17 +1020,22 @@
         apiSyncing = true;
         scheduleScan();
         try {
-            const items = [];
+            let learned = 0;
+            // Stored a category at a time rather than all nine at the end: an item never
+            // spans two categories, so folding them separately loses nothing, chips light
+            // up as their own category lands instead of waiting on the rest, and a read
+            // that fails half way keeps what already arrived.
             for (const category of API_CATEGORIES) {
-                items.push(...await fetchCategory(category, force));
+                const folded = foldInventory(await fetchCategory(category, force));
+                storeInventory(folded);
+                learned += Object.keys(folded).length;
+                scheduleScan();
                 await delay(API_GAP_MS);
             }
-            const folded = foldInventory(items);
-            storeInventory(folded);
             setLastSync(Date.now());
             apiRetryAt = 0;
             apiNote = null;
-            console.log(`${LOG_PREFIX} Armoury read from the API:`, Object.keys(folded).length, 'item(s)');
+            console.log(`${LOG_PREFIX} Armoury read from the API:`, learned, 'item(s)');
         } catch (error) {
             apiNote = String(error?.message || 'The armoury read did not get through.');
             apiRetryAt = Date.now() + API_RETRY_MS;
