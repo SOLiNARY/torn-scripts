@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Torn Armoury Loan Button
 // @namespace    https://github.com/SOLiNARY
-// @version      0.5.0
-// @description  Caches loanable faction armoury items and adds a "Loan" chip to every organized crime role that needs one, loaning the item to whoever holds that role. Your own role loans in one click, any other role confirms first. After an update, a "What's new" popup lists what changed.
+// @version      0.6.0
+// @description  Caches loanable faction armoury items and adds a "Loan" chip to every organized crime role that needs one, loaning the item to whoever holds that role. Your own role loans in one click, any other role confirms first. Give it a limited API key and it reads the armoury straight from Torn, so weapon and armour counts stay right without opening the armoury tab. After an update, a "What's new" popup lists what changed.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT License
 // @match        https://www.torn.com/factions.php*
@@ -21,12 +21,23 @@
     // shows one panel, not eight. The DOM is the channel because userscript sandboxes cannot see
     // each other's globals, and it needs no grants beyond what each script already asks for.
 
-    const SCRIPT_VERSION = "0.5.0";  // keep in sync with @version above
+    const SCRIPT_VERSION = "0.6.0";  // keep in sync with @version above
     const WHATS_NEW_NAME = "Armoury Loan Button";
     const WHATS_NEW_KEY = "silmaril-armoury-loan-button-last-seen-version";
     // Newest release first. Every release above the version last seen is shown at once, so
     // updating across several versions still reports the whole gap.
     const CHANGELOG = [
+        {
+            version: "0.6.0",
+            date: "2026-09-08",
+            changes: [
+            'The armoury no longer has to be opened for weapons and armour. Click a chip that says Armoury, give it a limited API key, and the chips read what is free straight from Torn.',
+            'Items that stack, such as medical and tools, still need the armoury opened once each: Torn counts those over the API but never says which copy to loan. The chip says how many are free and takes you there.',
+            'Counts cover the whole stack now, not only the copies the armoury page happened to have on screen.',
+            'A free stack of medical items no longer shows as none free.',
+            'A role whose item has never been seen says what it is waiting for: a key, a read in progress, or whatever Torn said when the read failed. Clicking it acts on that.'
+            ]
+        },
         {
             version: "0.5.0",
             date: "2026-09-04",
@@ -55,6 +66,8 @@
     const WHATS_NEW_OPEN_DELAY_MS = 150;
 
     try {
+        GM_registerMenuCommand("Set Api Key", function(){ if (promptForApiKey()) syncArmoury(true); });
+        GM_registerMenuCommand("Refresh armoury now", function(){ syncArmoury(true); });
         GM_registerMenuCommand("What's new", function(){ showWhatsNew(CHANGELOG); });
     } catch (error) {
         // No menu host (an ungranted script, or Torn PDA). The popup still appears on update.
@@ -235,6 +248,29 @@
     const USER_KEY = 'silmaril-armoury-loan-user';
     const RFCV_KEY = 'silmaril-armoury-loan-rfcv';
     const RFCV_ARG = 'rfcv=';
+    const ITEM_CATS_KEY = 'silmaril-armoury-loan-cats';
+    const API_KEY_KEY = 'silmaril-armoury-loan-apikey';
+    const API_SYNC_KEY = 'silmaril-armoury-loan-api-sync';
+    const API_URL = 'https://api.torn.com/v2/faction/inventory';
+    const API_KEY_LENGTH = 16;
+    // Torn serves one category per call and will not say which one an item lives in, so
+    // an item nothing has seen yet can only be found by sweeping. The order is the one
+    // organized crimes ask for most often, because the sweep stops as soon as everything
+    // the chips are waiting for has turned up; once an item has been found, its category
+    // is remembered and later reads ask for that alone.
+    const API_CATEGORIES = ['temporary', 'medical', 'drugs', 'utilities', 'weapons',
+        'armor', 'consumables', 'boosters', 'loot'];
+    const API_PAGE_SIZE = 100;
+    // A faction holding more than six hundred distinct items in one category does not
+    // exist; the cap is only there so a broken answer cannot loop for ever.
+    const API_MAX_PAGES = 6;
+    const API_GAP_MS = 250;
+    // Torn caches this selection for an hour, so syncing faster than this would mostly
+    // re-read the same answer.
+    const API_SYNC_TTL_MS = 10 * 60 * 1000;
+    // A failed read waits far less than a good one, so fixing a key or waiting out a
+    // rate limit does not mean sitting through the full interval.
+    const API_RETRY_MS = 2 * 60 * 1000;
     const USER_ID_KEYS = ['userID', 'userId', 'user_id', 'playerId', 'playerID', 'uid'];
     const USER_NAME_KEYS = ['playername', 'playerName', 'username', 'userName', 'user_name'];
 
@@ -726,14 +762,26 @@
         return clone.textContent.trim().replace(/\s*x$/i, '');
     }
 
+    // Torn puts "active" on the row's leading action, not on the ones that are possible:
+    // an item the faction can use leads with Use, so a shelf full of free syrup carries
+    // an inactive Loan and used to be read as nothing free at all. The Loaned column is
+    // the honest answer - it says "Available" or it names the borrower - and the action
+    // only has to exist.
     function isRowLoanable(row) {
         const loanBtn = row.querySelector('.item-action [data-role="loan"], .item-action .loan');
-        if (!loanBtn || !loanBtn.classList.contains('active')) return false;
+        if (!loanBtn) return false;
         const loanedEl = row.querySelector('.loaned');
         if (!loanedEl) return false;
         const clone = loanedEl.cloneNode(true);
         clone.querySelectorAll('.t-show').forEach((label) => label.remove());
         return clone.textContent.trim().toLowerCase().includes('available');
+    }
+
+    // Stacked items are one row carrying a count - "Ipecac Syrup x74" - where a weapon is
+    // one row per copy.
+    function getRowQuantity(row) {
+        const qty = parseInt(row.querySelector('.name .qty')?.textContent.trim() ?? '', 10);
+        return Number.isFinite(qty) && qty > 0 ? qty : 1;
     }
 
     // A row that cannot be loaned may still say who has it. Where Torn does not link
@@ -753,7 +801,18 @@
     function itemsEqual(a, b) {
         if (!a || !b) return false;
         if (a.name !== b.name || a.type !== b.type) return false;
+        if ((a.free ?? null) !== (b.free ?? null)) return false;
         return sameList(a.armoryIds, b.armoryIds) && sameList(a.holders, b.holders);
+    }
+
+    // How many copies are free, which is not the same as how many can be named. The page
+    // counts only the rows it has drawn; the API counts every copy but names none of them
+    // for a stacked item. Whichever source knows the larger number is the one to believe,
+    // and it is never fewer than the copies actually named.
+    function freeCount(entry) {
+        const listed = entry?.armoryIds?.length ?? 0;
+        const counted = entry?.free;
+        return typeof counted === 'number' ? Math.max(counted, listed) : listed;
     }
 
     // Collects every armoury row currently rendered and remembers which armoury
@@ -776,11 +835,17 @@
                     name: getItemName(row),
                     type: row.querySelector('.type')?.textContent.trim() ?? '',
                     armoryIds: [],
-                    holders: []
+                    holders: [],
+                    free: 0
                 };
             }
             if (isRowLoanable(row)) {
-                if (!entry.armoryIds.includes(armoryId)) entry.armoryIds.push(armoryId);
+                if (!entry.armoryIds.includes(armoryId)) {
+                    entry.armoryIds.push(armoryId);
+                    // One id can stand for a whole shelf, so what is free is the count on
+                    // the row rather than the number of ids collected.
+                    entry.free += getRowQuantity(row);
+                }
             } else {
                 const holder = getRowHolderId(row);
                 if (holder != null && !entry.holders.includes(holder)) entry.holders.push(holder);
@@ -791,7 +856,7 @@
         let changed = false;
         for (const itemId of Object.keys(seen)) {
             if (!itemsEqual(stored[itemId], seen[itemId])) {
-                stored[itemId] = { ...seen[itemId], updated: Date.now() };
+                stored[itemId] = { ...seen[itemId], source: 'page', updated: Date.now() };
                 changed = true;
             }
         }
@@ -799,6 +864,363 @@
             saveItems(stored);
             console.log(`${LOG_PREFIX} Armoury cache updated:`, Object.keys(seen).length, 'item(s) on screen');
         }
+    }
+
+    // --- the armoury over the API ----------------------------------------------
+    // Reading the armoury off the page costs the player a visit to it, and the answer
+    // goes stale the moment somebody else loans something. Torn's API answers the same
+    // question with no page load: one call per category returns every item, how many
+    // copies are free, the uid of each free copy - the same id a loan is sent with -
+    // and who is holding the rest.
+    //
+    // Two things about that answer shape the code below. Torn caches the selection for
+    // an hour, so syncing is worth doing on a timer rather than on every scan; and a
+    // copy already out on loan comes back as its own entry naming the borrower, so the
+    // entries for one item are folded back together before they are stored. Opening the
+    // armoury tab still overwrites all of this, because a page the player is looking at
+    // is never stale.
+
+    function readStored(key) {
+        try {
+            return localStorage.getItem(key);
+        } catch (e) {
+            return null;
+        }
+    }
+
+    let apiKey = readStored(API_KEY_KEY);
+    // Why the last sync had nothing to show, so a missing key or a refused call reaches
+    // the player instead of only the console.
+    let apiNote = null;
+    let apiSyncing = false;
+    let apiRetryAt = 0;
+
+    function hasApiKey() {
+        return typeof apiKey === 'string' && apiKey.length === API_KEY_LENGTH;
+    }
+
+    function promptForApiKey() {
+        const entered = prompt('Please enter a LIMITED Api Key. It is used to read your ' +
+            'faction armoury without opening it:', apiKey ?? '');
+        if (entered == null) return false;
+        const trimmed = entered.trim();
+        if (trimmed.length !== API_KEY_LENGTH) {
+            console.error(`${LOG_PREFIX} That is not a Torn API key.`);
+            apiNote = 'That key is not 16 characters long.';
+            return false;
+        }
+        apiKey = trimmed;
+        apiNote = null;
+        apiRetryAt = 0;
+        try {
+            localStorage.setItem(API_KEY_KEY, trimmed);
+        } catch (e) { /* ignore quota errors */ }
+        return true;
+    }
+
+    function forgetApiKey() {
+        apiKey = null;
+        try {
+            localStorage.removeItem(API_KEY_KEY);
+        } catch (e) { /* ignore */ }
+    }
+
+    function getLastSync() {
+        const at = Number(readStored(API_SYNC_KEY));
+        return Number.isFinite(at) ? at : 0;
+    }
+
+    function setLastSync(at) {
+        try {
+            localStorage.setItem(API_SYNC_KEY, String(at));
+        } catch (e) { /* ignore quota errors */ }
+    }
+
+    function inventoryUrl(category, offset, force) {
+        const params = new URLSearchParams({
+            cat: category,
+            limit: String(API_PAGE_SIZE),
+            offset: String(offset),
+            key: apiKey,
+            comment: 'ArmouryLoanButton'
+        });
+        // A sync the player asked for by hand says so, which is the documented way to
+        // ask past Torn's hour-old copy of the answer.
+        if (force) params.set('timestamp', String(Math.floor(Date.now() / 1000)));
+        return API_URL + '?' + params.toString();
+    }
+
+    // Torn answers a refused call with 200 and an error body, so the status code on its
+    // own never says whether a page actually arrived.
+    function apiError(payload) {
+        const error = payload?.error;
+        if (error == null) return null;
+        // Only a key Torn calls wrong is thrown away. A key disabled for inactivity, or
+        // one refused while the API is down, works again later and should be kept.
+        if (error.code === 2) {
+            forgetApiKey();
+            return 'Torn did not accept that API key.';
+        }
+        if (error.code === 16) return 'That key cannot read the faction armoury.';
+        if (error.code === 5) return 'Torn is rate limiting. Try again in a minute.';
+        return typeof error.error === 'string' && error.error !== ''
+            ? 'Torn said: ' + error.error
+            : 'Torn turned the armoury read down.';
+    }
+
+    // One item arrives as several entries: the copies nobody has taken, and one more for
+    // each copy out on loan. They are folded back into the single record the rest of the
+    // script reads - these uids can be lent, these people are holding the others.
+    //
+    // Torn only names copies for weapons and armour. Everything that stacks - medical,
+    // drugs, tools, materials - is counted and never named, so those records carry a
+    // number and no uid at all. They are stored anyway: the count is worth having, and
+    // so is knowing which category the item lives in.
+    function foldInventory(entries) {
+        const folded = {};
+        for (const entry of entries) {
+            if (entry?.id == null) continue;
+            const itemId = String(entry.id);
+            let item = folded[itemId];
+            if (item == null) {
+                item = folded[itemId] = {
+                    name: '', type: '', armoryIds: [], holders: [], free: 0
+                };
+            }
+            if (typeof entry.name === 'string' && entry.name !== '') item.name = entry.name;
+            if (typeof entry.type === 'string' && entry.type !== '') item.type = entry.type;
+            if (entry.loaned?.id != null) {
+                const holder = String(entry.loaned.id);
+                if (!item.holders.includes(holder)) item.holders.push(holder);
+                continue;
+            }
+            for (const uid of entry.uids ?? []) {
+                const id = String(uid);
+                if (!item.armoryIds.includes(id)) item.armoryIds.push(id);
+            }
+            item.free += Number.isInteger(entry.amount) ? entry.amount : (entry.uids?.length ?? 0);
+        }
+        return folded;
+    }
+
+    // `snapshotAt` is when Torn took the answer, not when it arrived: the selection is
+    // served from an hour-old cache, so an answer can easily describe an armoury older
+    // than the one the player was looking at a minute ago. Anything this script watched
+    // happen after that - a row on the armoury page, a loan it sent itself - is the
+    // better record and is left alone until Torn's own copy catches up.
+    function storeInventory(folded, snapshotAt, category) {
+        const store = getStoredItems();
+        let changed = false;
+        for (const itemId of Object.keys(folded)) {
+            const current = store[itemId];
+            const fresh = folded[itemId];
+            // Where an item lives is the one thing about it that cannot go stale, and it is
+            // what keeps the next read down to a single call, so it is written down even
+            // when the rest of the answer is ignored or says nothing new.
+            rememberCategory(itemId, category);
+            if (current != null && current.source !== 'api' && (current.updated ?? 0) > snapshotAt) continue;
+            // A stacked item is named by the armoury page and by nothing else, so an id
+            // learned there is the only one there will ever be. It is carried over for as
+            // long as Torn still says copies are free.
+            if (fresh.armoryIds.length === 0 && fresh.free > 0 && current?.armoryIds?.length) {
+                fresh.armoryIds = current.armoryIds.slice();
+            }
+            if (itemsEqual(current, fresh)) continue;
+            store[itemId] = { ...fresh, source: 'api', updated: Date.now() };
+            changed = true;
+        }
+        if (changed) saveItems(store);
+    }
+
+    async function fetchCategory(category, force) {
+        const items = [];
+        // Torn stamps every answer with the moment its cached copy was built. Without one
+        // the answer is taken at face value, which is the only thing left to do with it.
+        let snapshotAt = Date.now();
+        for (let page = 0; page < API_MAX_PAGES; page++) {
+            const response = await fetch(inventoryUrl(category, page * API_PAGE_SIZE, force));
+            const payload = await response.json();
+            const failure = apiError(payload);
+            if (failure != null) throw new Error(failure);
+            if (Number.isFinite(payload?.inventory_timestamp)) {
+                snapshotAt = payload.inventory_timestamp * 1000;
+            }
+            const batch = payload?.inventory ?? [];
+            items.push(...batch);
+            if (batch.length < API_PAGE_SIZE) break;
+            await delay(API_GAP_MS);
+        }
+        return { items: items, snapshotAt: snapshotAt };
+    }
+
+    // The items the chips on screen are waiting on. Kept by the crimes scan so a read
+    // can ask for the categories those items live in rather than all nine: a role that
+    // needs Ipecac Syrup has no business asking Torn about the faction's weapons.
+    const wantedItems = new Set();
+
+    // Which category each item was found in, kept apart from the items themselves. The
+    // armoury page rewrites an item's record from the rows it can see, and this has to
+    // outlive that. An empty string is the other thing worth remembering: a sweep went
+    // through every category without finding the item, so the faction holds none.
+    function getCategoryMemory() {
+        try {
+            const parsed = JSON.parse(localStorage.getItem(ITEM_CATS_KEY));
+            return parsed && typeof parsed === 'object' ? parsed : {};
+        } catch (e) {
+            return {};
+        }
+    }
+
+    function rememberCategory(itemId, category) {
+        const memory = getCategoryMemory();
+        if (memory[itemId] === category) return;
+        if (category == null) {
+            if (!(itemId in memory)) return;
+            delete memory[itemId];
+        } else {
+            memory[itemId] = category;
+        }
+        try {
+            localStorage.setItem(ITEM_CATS_KEY, JSON.stringify(memory));
+        } catch (e) { /* ignore quota errors */ }
+    }
+
+    function categoryOf(itemId) {
+        const cat = getCategoryMemory()[itemId];
+        return API_CATEGORIES.includes(cat) ? cat : null;
+    }
+
+    // A sweep has already looked everywhere for this one and come back empty.
+    function knownAbsent(itemId) {
+        return getCategoryMemory()[itemId] === '';
+    }
+
+    // What a read should ask Torn for, given the items it is meant to answer for. One
+    // item nobody has ever placed forces the sweep; everything else is a short list of
+    // the categories those items live in.
+    function planRead(wanted) {
+        const categories = [];
+        for (const itemId of wanted) {
+            if (knownAbsent(itemId)) continue;
+            const cat = categoryOf(itemId);
+            if (cat == null) return { categories: API_CATEGORIES, sweeping: true };
+            if (!categories.includes(cat)) categories.push(cat);
+        }
+        // Nothing on screen to go by - the first run, or a refresh asked for by hand.
+        if (wanted.size === 0) return { categories: API_CATEGORIES, sweeping: true };
+        return { categories: categories, sweeping: false };
+    }
+
+    function everyItemFound(wanted) {
+        for (const itemId of wanted) {
+            if (categoryOf(itemId) == null && !knownAbsent(itemId)) return false;
+        }
+        return wanted.size > 0;
+    }
+
+    // Never throws: every caller only wants the cache as fresh as it can be, and a
+    // failure belongs on the chips rather than thrown at a page Torn is still drawing.
+    //
+    // `only` is the item a player clicked for. A click is about one role's item, so the
+    // read is too: it stops at the category that item turns up in instead of carrying on
+    // through the other eight on behalf of every chip on the page.
+    async function syncArmoury(force, only) {
+        if (apiSyncing) return;
+        if (!hasApiKey()) {
+            apiNote = null;
+            return;
+        }
+        const now = Date.now();
+        if (!force && (now < apiRetryAt || now - getLastSync() < API_SYNC_TTL_MS)) return;
+        const wanted = only != null ? new Set([only]) : new Set(wantedItems);
+        // Asked for by hand, so whatever an earlier sweep concluded about these is worth
+        // re-testing - the faction may have been given one since.
+        if (force) {
+            for (const itemId of wanted) {
+                if (knownAbsent(itemId)) rememberCategory(itemId, null);
+            }
+        }
+        const plan = planRead(wanted);
+        if (plan.categories.length === 0) return;
+        apiSyncing = true;
+        scheduleScan();
+        try {
+            const read = [];
+            let stoppedEarly = false;
+            // Stored a category at a time rather than all of them at the end: an item never
+            // spans two categories, so folding them separately loses nothing, chips light
+            // up as their own category lands instead of waiting on the rest, and a read
+            // that fails half way keeps what already arrived.
+            for (const category of plan.categories) {
+                const answer = await fetchCategory(category, force);
+                storeInventory(foldInventory(answer.items), answer.snapshotAt, category);
+                read.push(category);
+                scheduleScan();
+                // A sweep is only running because something had not been found yet. Once
+                // everything it was asked about has been, the rest of it would read
+                // categories no chip is waiting on.
+                if (plan.sweeping && everyItemFound(wanted)) {
+                    stoppedEarly = true;
+                    break;
+                }
+                await delay(API_GAP_MS);
+            }
+            // A sweep that ran to the end has been everywhere there is to look, so an item
+            // still missing is one the faction does not hold. Saying so keeps the next read
+            // from sweeping all nine categories again for the same answer.
+            if (plan.sweeping && !stoppedEarly) {
+                for (const itemId of wanted) {
+                    if (categoryOf(itemId) == null) rememberCategory(itemId, '');
+                }
+            }
+            setLastSync(Date.now());
+            apiRetryAt = 0;
+            apiNote = null;
+            console.log(`${LOG_PREFIX} Armoury read from the API:`, read.join(', '));
+        } catch (error) {
+            apiNote = String(error?.message || 'The armoury read did not get through.');
+            apiRetryAt = Date.now() + API_RETRY_MS;
+            console.warn(`${LOG_PREFIX} Armoury API read failed:`, error);
+        } finally {
+            apiSyncing = false;
+            scheduleScan();
+        }
+    }
+
+    // What a chip for an item the script has never seen should say, and what clicking it
+    // should be expected to do.
+    function armouryHint() {
+        if (apiSyncing) return 'Reading armoury';
+        if (!hasApiKey()) return 'Add API key';
+        if (apiNote != null) return apiNote;
+        return 'Not seen yet';
+    }
+
+    function armouryHintTitle() {
+        if (apiSyncing) return 'Reading the armoury from Torn now.';
+        if (!hasApiKey()) {
+            return 'Click to add a limited API key, and the armoury is read without opening it. ' +
+                'Skip the key and the armoury tab is opened instead.';
+        }
+        if (apiNote != null) return apiNote + ' Click to try again.';
+        return 'Click to read the armoury from Torn.';
+    }
+
+    // The click a cold chip carries: fetch what is loanable, asking for a key first if
+    // there is none, and falling back to the armoury tab when the player has no key to
+    // give.
+    function refreshArmoury(state) {
+        // An item Torn counts but will not name is one the armoury page has to be opened
+        // on once; reading it again over the API would return the same nameless count.
+        if (state?.entry != null) {
+            openArmoury();
+            return;
+        }
+        if (!hasApiKey() && !promptForApiKey()) {
+            openArmoury();
+            return;
+        }
+        syncArmoury(true, state?.itemId ?? null);
     }
 
     // --- current user ----------------------------------------------------------
@@ -1310,9 +1732,15 @@
         if (known === true || (known == null && held)) {
             return { kind: 'out', itemId: itemId, entry: entry, onLoan: held };
         }
-        if (entry == null) return { kind: 'cold', itemId: itemId, entry: null };
-        const free = entry.armoryIds?.length ?? 0;
+        if (entry == null) return { kind: 'cold', itemId: itemId, entry: null, hint: armouryHint() };
+        const free = freeCount(entry);
         if (free === 0) return { kind: 'gone', itemId: itemId, entry: entry };
+        // Counted, and with nothing to send. Torn's API names the copies of a weapon but
+        // never those of a stacked item, so until the armoury page has been opened on one
+        // there is a number here and no way to act on it.
+        if ((entry.armoryIds?.length ?? 0) === 0) {
+            return { kind: 'cold', itemId: itemId, entry: entry, hint: free + ' free · open armoury' };
+        }
         return { kind: 'ready', itemId: itemId, entry: entry, free: free };
     }
 
@@ -1346,8 +1774,11 @@
             case 'cold':
                 return {
                     label: 'Armoury',
-                    sub: 'Not seen yet',
-                    title: 'Open the armoury once so this can see what is loanable.'
+                    sub: state.hint ?? 'Not seen yet',
+                    title: state.entry != null
+                        ? 'Torn counts ' + name + ' over the API but never names a copy to ' +
+                            'loan. Click to open the armoury, and this can loan it from then on.'
+                        : armouryHintTitle()
                 };
             case 'fail':
                 return { label: 'Failed', sub: state.message, title: state.message };
@@ -1450,7 +1881,7 @@
         if (existing != null && existing.dataset.silmarilBusy === '1') return;
 
         const signature = [
-            state.kind, state.itemId, state.free ?? '', state.message ?? '',
+            state.kind, state.itemId, state.free ?? '', state.message ?? '', state.hint ?? '',
             slot.occupant.id, isMine ? 'mine' : 'theirs'
         ].join('|');
         let wrap = existing;
@@ -1472,7 +1903,7 @@
             event.preventDefault();
             event.stopPropagation();
             if (state.kind === 'cold') {
-                openArmoury();
+                refreshArmoury(state);
                 return;
             }
             // Retrying clears the old verdict and takes the normal route again, which
@@ -1771,12 +2202,22 @@
             const text = await response.text();
             const result = parseLoanResponse(response, text);
             if (result.success) {
-                // That armoury copy is out now, so drop it and let the next loan take a
-                // fresh one.
+                // One copy is out now. For a weapon that means the id just used is spent,
+                // but a stacked item keeps its id for as long as the shelf it names has
+                // anything left on it - which is exactly when the count outruns the ids.
                 const store = getStoredItems();
                 const fresh = store[itemId];
                 if (fresh?.armoryIds) {
-                    fresh.armoryIds = fresh.armoryIds.filter(function (id) { return id !== armoryId; });
+                    const stacked = freeCount(fresh) > fresh.armoryIds.length;
+                    if (!stacked) {
+                        fresh.armoryIds = fresh.armoryIds.filter(function (id) { return id !== armoryId; });
+                    }
+                    if (typeof fresh.free === 'number') fresh.free = Math.max(0, fresh.free - 1);
+                    if (freeCount(fresh) === 0) fresh.armoryIds = [];
+                    // Watched rather than fetched, so an older answer from Torn's cache
+                    // cannot put the copy back.
+                    fresh.source = 'local';
+                    fresh.updated = Date.now();
                     saveItems(store);
                 }
                 markHeld(itemId, recipient.id);
@@ -1926,6 +2367,7 @@
 
         const ownId = getUser()?.id ?? null;
         const byRow = new Map();
+        wantedItems.clear();
         for (const wrapper of findAllSlotWrappers()) {
             const slot = readSlot(wrapper);
             if (slot == null) continue;
@@ -1933,6 +2375,9 @@
             const isMine = slot.occupant != null && ownId != null && slot.occupant.id === ownId;
             applyChip(slot, state, isMine);
             if (state == null) continue;
+            // A role that already has its item needs nothing from the armoury, so it does
+            // not widen the read.
+            if (state.kind !== 'out') wantedItems.add(state.itemId);
             const row = wrapper.parentElement;
             if (row == null) continue;
             if (!byRow.has(row)) byRow.set(row, []);
@@ -1941,6 +2386,9 @@
         for (const [row, entries] of byRow) {
             applyItemBar(row, entries, ownId);
         }
+        // Only a page actually showing chips is worth spending a call on, and the sync
+        // holds its own interval, so this asks on every scan and answers rarely.
+        if (byRow.size > 0) syncArmoury(false);
         // A bar whose row lost every chip - a crime that finished, or a tab switch that
         // reused the container - would otherwise sit there claiming nothing.
         document.querySelectorAll('.silmaril-itembar').forEach(function (bar) {
