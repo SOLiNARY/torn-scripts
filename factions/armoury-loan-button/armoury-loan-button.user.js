@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Armoury Loan Button
 // @namespace    https://github.com/SOLiNARY
-// @version      0.6.0
+// @version      0.6.3
 // @description  Caches loanable faction armoury items and adds a "Loan" chip to every organized crime role that needs one, loaning the item to whoever holds that role. Your own role loans in one click, any other role confirms first. Give it a limited API key and it reads the armoury straight from Torn, so weapon and armour counts stay right without opening the armoury tab. After an update, a "What's new" popup lists what changed.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT License
@@ -21,12 +21,28 @@
     // shows one panel, not eight. The DOM is the channel because userscript sandboxes cannot see
     // each other's globals, and it needs no grants beyond what each script already asks for.
 
-    const SCRIPT_VERSION = "0.6.0";  // keep in sync with @version above
+    const SCRIPT_VERSION = "0.6.3";  // keep in sync with @version above
     const WHATS_NEW_NAME = "Armoury Loan Button";
     const WHATS_NEW_KEY = "silmaril-armoury-loan-button-last-seen-version";
     // Newest release first. Every release above the version last seen is shown at once, so
     // updating across several versions still reports the whole gap.
     const CHANGELOG = [
+        {
+            version: "0.6.2",
+            date: "2026-09-09",
+            changes: [
+            'Chips now appear on phones and in script managers that keep scripts at arm&rsquo;s length from the page. The script used to learn what each role needs by listening to the page, which does not always work; with an API key set it can now ask Torn directly instead.',
+            'No hovering needed anywhere. A role never hovered, in a browser where listening works, gets its chip too.',
+            'With a key set, the chips come up as soon as the page does rather than after a pause, and keep up on their own as roles are filled and people get hold of their kit.'
+            ]
+        },
+        {
+            version: "0.6.1",
+            date: "2026-09-09",
+            changes: [
+            'Fixed: on a narrow screen every chip could disappear. Torn shortens the crime tab names there, and the script was hiding the chips whenever it did not recognise one.'
+            ]
+        },
         {
             version: "0.6.0",
             date: "2026-09-08",
@@ -252,6 +268,14 @@
     const API_KEY_KEY = 'silmaril-armoury-loan-apikey';
     const API_SYNC_KEY = 'silmaril-armoury-loan-api-sync';
     const API_URL = 'https://api.torn.com/v2/faction/inventory';
+    const CRIMES_URL = 'https://api.torn.com/v2/faction/crimes';
+    // How often the crimes page is re-read while it is open. Roles get filled and people
+    // get hold of their kit while somebody is sitting on the planning screen, and this is
+    // what notices.
+    const CRIMES_TTL_MS = 60 * 1000;
+    // A read that told us nothing new is not worth repeating at the same rate. It happens
+    // when a crime is one Torn does not list as available, or a role this cannot match.
+    const CRIMES_IDLE_MS = 10 * 60 * 1000;
     const API_KEY_LENGTH = 16;
     // Torn serves one category per call and will not say which one an item lives in, so
     // an item nothing has seen yet can only be found by sweeping. The order is the one
@@ -1644,6 +1668,138 @@
         }
     }
 
+
+    // --- the crimes list over the API --------------------------------------------
+    // Which item a role needs can be learned by listening to the answer Torn's own page
+    // already asks for. That listening is done by replacing window.fetch, which only
+    // works where the script shares a window with the page. Several script managers -
+    // Violentmonkey among them, and it is the usual one on Android - can put a script in
+    // a world of its own, where the fetch it replaces is not the one Torn uses. Nothing
+    // arrives, and the only other source is a tooltip, which needs a hover a phone has
+    // not got. The result is a crimes page with no chips at all.
+    //
+    // So where there is a key, the question goes to Torn directly and the listening is
+    // what stands in reserve. Asking outright works in every browser and every script
+    // manager, needs no hover, and answers before Torn's own page has got round to it -
+    // and it keeps answering, so a slot filled or an item bought while somebody sits on
+    // the planning screen is noticed rather than waited out. The listener stays where it
+    // is: it costs nothing, it covers the seconds before the first answer lands, and it
+    // is the whole of the story for anyone who has set no key.
+    //
+    // Both land in the same two caches, so nothing downstream knows which answered.
+
+    let crimesReading = false;
+    let crimesNextAt = 0;
+    // Set by the crimes scan: whether there are occupied roles at all, and whether any of
+    // them is still unexplained.
+    let slotsOnScreen = false;
+    let slotsAwaitingItems = false;
+
+    function crimesUrl() {
+        return CRIMES_URL + '?' + new URLSearchParams({
+            // Recruiting and planning together: the only crimes a loan can still help.
+            cat: 'available',
+            limit: '100',
+            key: apiKey,
+            comment: 'ArmouryLoanButton'
+        }).toString();
+    }
+
+    // The names a role might be going by in the page. Torn labels a slot in more than one
+    // way and has changed which it renders, so every candidate is written down; a name the
+    // page never uses is a cache key nothing ever reads.
+    //
+    // The bare position is the ambiguous one - a crime with two Muscles has two slots
+    // answering to it - so it is only used where it names one slot in that crime.
+    function slotRoleNames(slot, positionCounts) {
+        const names = [];
+        const label = slot?.position_info?.label;
+        if (typeof label === 'string' && label.trim() !== '') names.push(label.trim());
+        const position = typeof slot?.position === 'string' ? slot.position.trim() : '';
+        const number = slot?.position_info?.number;
+        if (position !== '' && Number.isInteger(number) && number > 0) {
+            names.push(position + ' #' + number);
+        }
+        if (position !== '' && positionCounts[position] === 1) names.push(position);
+        return names.filter(function (name, i) { return names.indexOf(name) === i; });
+    }
+
+    function countPositions(slots) {
+        const counts = {};
+        for (const slot of slots) {
+            const position = typeof slot?.position === 'string' ? slot.position.trim() : '';
+            if (position !== '') counts[position] = (counts[position] ?? 0) + 1;
+        }
+        return counts;
+    }
+
+    // Deliberately shaped like the listener's own ingest, and writing the same keys, so
+    // the two can disagree about nothing.
+    function ingestApiCrimes(crimes) {
+        const cache = getSlotItemCache();
+        let changed = false;
+        for (const crime of crimes) {
+            const ocId = crime?.id;
+            if (ocId == null) continue;
+            const scenario = typeof crime.name === 'string' ? crime.name.trim() : '';
+            const slots = Array.isArray(crime.slots) ? crime.slots : [];
+            const counts = countPositions(slots);
+            for (const slot of slots) {
+                const requirement = slot?.item_requirement;
+                for (const role of slotRoleNames(slot, counts)) {
+                    const known = {
+                        ocKey: ocId + '::' + role,
+                        scenarioKey: scenario !== '' ? 'sc::' + scenario + '::' + role : null,
+                        occupant: slot.user?.id != null ? { id: String(slot.user.id), name: '' } : null
+                    };
+                    if (requirement?.id != null) {
+                        changed = rememberSlotItem(cache, known, String(requirement.id)) || changed;
+                        // Torn's own answer to "has the person in this role got one", the
+                        // same thing the tooltip badge shows.
+                        if (typeof requirement.is_available === 'boolean' && known.occupant != null) {
+                            rememberPossession(known, requirement.is_available);
+                        }
+                    } else if (cache[known.ocKey] == null) {
+                        // Only ever against this crime: a role needing nothing here says
+                        // nothing about the same role in another copy of the scenario.
+                        cache[known.ocKey] = NO_ITEM;
+                        changed = true;
+                    }
+                }
+            }
+        }
+        if (changed) saveSlotItemCache(cache);
+        return changed;
+    }
+
+    // Never throws, for the same reason the armoury read does not.
+    async function syncCrimes(force) {
+        if (crimesReading || !hasApiKey()) return;
+        if (!force && Date.now() < crimesNextAt) return;
+        crimesReading = true;
+        // A read that leaves a role as unexplained as it found it is one Torn cannot
+        // answer - a crime it does not count as available, or a role name this cannot
+        // match - and repeating it every minute would never do better.
+        const awaitingBefore = slotsAwaitingItems;
+        try {
+            const response = await fetch(crimesUrl());
+            const payload = await response.json();
+            const failure = apiError(payload);
+            if (failure != null) throw new Error(failure);
+            const crimes = Array.isArray(payload?.crimes) ? payload.crimes : [];
+            const changed = ingestApiCrimes(crimes);
+            crimesNextAt = Date.now() + (awaitingBefore && !changed ? CRIMES_IDLE_MS : CRIMES_TTL_MS);
+            console.log(`${LOG_PREFIX} Crimes read from the API:`, crimes.length,
+                'crime(s),', changed ? 'roles learned' : 'nothing new');
+            if (changed) scheduleScan();
+        } catch (error) {
+            crimesNextAt = Date.now() + API_RETRY_MS;
+            console.warn(`${LOG_PREFIX} Crimes API read failed:`, error);
+        } finally {
+            crimesReading = false;
+        }
+    }
+
     // --- who is already holding one --------------------------------------------
 
     function getHeld() {
@@ -2344,12 +2500,22 @@
 
     // Chips belong on crimes that can still be equipped. A finished crime keeps the same
     // markup, so the active tab is what says whether any of this is worth offering.
+    //
+    // Only a tab that is definitely finished hides them. Matching the other way round -
+    // requiring the word "planning" or "recruiting" - swept every chip off the page on a
+    // narrow screen, where Torn shortens these labels, and would do it again the next
+    // time it renames one. Guessing wrong in this direction shows a chip on a crime that
+    // cannot take a loan, which is a chip that reports a refusal; guessing wrong in the
+    // other shows nothing at all and looks like a broken script.
+    const FINISHED_TABS = ['successful', 'success', 'failure', 'failed', 'completed', 'expired'];
+
     function crimesTabIsActionable() {
         const active = document.querySelector('[class*="buttonsContainer___"] button[class*="active___"]');
         if (active == null) return true;
-        const name = active.querySelector('[class*="tabName___"]')?.textContent.trim().toLowerCase() ?? '';
-        if (name === '') return true;
-        return name === 'planning' || name === 'recruiting';
+        // The whole button, not just its label element: on some layouts Torn renders the
+        // name without the tabName wrapper this used to insist on.
+        const name = (active.textContent ?? '').trim().toLowerCase();
+        return !FINISHED_TABS.some(function (finished) { return name.includes(finished); });
     }
 
     function scanCrimes() {
@@ -2368,9 +2534,18 @@
         const ownId = getUser()?.id ?? null;
         const byRow = new Map();
         wantedItems.clear();
+        slotsAwaitingItems = false;
+        slotsOnScreen = false;
         for (const wrapper of findAllSlotWrappers()) {
             const slot = readSlot(wrapper);
             if (slot == null) continue;
+            if (slot.occupant != null) {
+                slotsOnScreen = true;
+                // Still unexplained: either it needs an item and nobody has said which, or
+                // it needs none and nobody has said that either. Only used to decide how
+                // hard to keep asking.
+                if (getSlotItemId(slot) == null) slotsAwaitingItems = true;
+            }
             const state = computeState(slot);
             const isMine = slot.occupant != null && ownId != null && slot.occupant.id === ownId;
             applyChip(slot, state, isMine);
@@ -2389,6 +2564,10 @@
         // Only a page actually showing chips is worth spending a call on, and the sync
         // holds its own interval, so this asks on every scan and answers rarely.
         if (byRow.size > 0) syncArmoury(false);
+        // And this one keeps the roles themselves current. Same arrangement: asked on
+        // every scan, answered on its own interval, and only while there are roles on
+        // screen for it to be about.
+        if (slotsOnScreen) syncCrimes(false);
         // A bar whose row lost every chip - a crime that finished, or a tab switch that
         // reused the container - would otherwise sit there claiming nothing.
         document.querySelectorAll('.silmaril-itembar').forEach(function (bar) {
