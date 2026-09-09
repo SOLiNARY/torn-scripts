@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Armoury Loan Button
 // @namespace    https://github.com/SOLiNARY
-// @version      0.6.0
+// @version      0.6.1
 // @description  Caches loanable faction armoury items and adds a "Loan" chip to every organized crime role that needs one, loaning the item to whoever holds that role. Your own role loans in one click, any other role confirms first. Give it a limited API key and it reads the armoury straight from Torn, so weapon and armour counts stay right without opening the armoury tab. After an update, a "What's new" popup lists what changed.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT License
@@ -21,12 +21,19 @@
     // shows one panel, not eight. The DOM is the channel because userscript sandboxes cannot see
     // each other's globals, and it needs no grants beyond what each script already asks for.
 
-    const SCRIPT_VERSION = "0.6.0";  // keep in sync with @version above
+    const SCRIPT_VERSION = "0.6.1";  // keep in sync with @version above
     const WHATS_NEW_NAME = "Armoury Loan Button";
     const WHATS_NEW_KEY = "silmaril-armoury-loan-button-last-seen-version";
     // Newest release first. Every release above the version last seen is shown at once, so
     // updating across several versions still reports the whole gap.
     const CHANGELOG = [
+        {
+            version: "0.6.1",
+            date: "2026-09-09",
+            changes: [
+            'Fixed: on a narrow screen every chip could disappear. Torn shortens the crime tab names there, and the script was hiding the chips whenever it did not recognise one.'
+            ]
+        },
         {
             version: "0.6.0",
             date: "2026-09-08",
@@ -2344,12 +2351,22 @@
 
     // Chips belong on crimes that can still be equipped. A finished crime keeps the same
     // markup, so the active tab is what says whether any of this is worth offering.
+    //
+    // Only a tab that is definitely finished hides them. Matching the other way round -
+    // requiring the word "planning" or "recruiting" - swept every chip off the page on a
+    // narrow screen, where Torn shortens these labels, and would do it again the next
+    // time it renames one. Guessing wrong in this direction shows a chip on a crime that
+    // cannot take a loan, which is a chip that reports a refusal; guessing wrong in the
+    // other shows nothing at all and looks like a broken script.
+    const FINISHED_TABS = ['successful', 'success', 'failure', 'failed', 'completed', 'expired'];
+
     function crimesTabIsActionable() {
         const active = document.querySelector('[class*="buttonsContainer___"] button[class*="active___"]');
         if (active == null) return true;
-        const name = active.querySelector('[class*="tabName___"]')?.textContent.trim().toLowerCase() ?? '';
-        if (name === '') return true;
-        return name === 'planning' || name === 'recruiting';
+        // The whole button, not just its label element: on some layouts Torn renders the
+        // name without the tabName wrapper this used to insist on.
+        const name = (active.textContent ?? '').trim().toLowerCase();
+        return !FINISHED_TABS.some(function (finished) { return name.includes(finished); });
     }
 
     function scanCrimes() {
