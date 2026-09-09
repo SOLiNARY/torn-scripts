@@ -1,14 +1,15 @@
 // ==UserScript==
 // @name         Torn Armoury Loan Button
 // @namespace    https://github.com/SOLiNARY
-// @version      0.6.3
+// @version      0.6.4
 // @description  Caches loanable faction armoury items and adds a "Loan" chip to every organized crime role that needs one, loaning the item to whoever holds that role. Your own role loans in one click, any other role confirms first. Give it a limited API key and it reads the armoury straight from Torn, so weapon and armour counts stay right without opening the armoury tab. After an update, a "What's new" popup lists what changed.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT License
 // @match        https://www.torn.com/factions.php*
 // @match        https://torn.com/factions.php*
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=torn.com
-// @grant        none
+// @grant        GM_registerMenuCommand
+// @grant        unsafeWindow
 // @run-at       document-end
 // ==/UserScript==
 
@@ -21,12 +22,19 @@
     // shows one panel, not eight. The DOM is the channel because userscript sandboxes cannot see
     // each other's globals, and it needs no grants beyond what each script already asks for.
 
-    const SCRIPT_VERSION = "0.6.3";  // keep in sync with @version above
+    const SCRIPT_VERSION = "0.6.4";  // keep in sync with @version above
     const WHATS_NEW_NAME = "Armoury Loan Button";
     const WHATS_NEW_KEY = "silmaril-armoury-loan-button-last-seen-version";
     // Newest release first. Every release above the version last seen is shown at once, so
     // updating across several versions still reports the whole gap.
     const CHANGELOG = [
+        {
+            version: "0.6.4",
+            date: "2026-09-09",
+            changes: [
+            'The API key has a home at last. Your script manager&rsquo;s menu for this page now carries &ldquo;Set up API key&rdquo;, beside the &ldquo;What&rsquo;s new&rdquo; entry, so it no longer has to be typed into a chip.'
+            ]
+        },
         {
             version: "0.6.2",
             date: "2026-09-09",
@@ -82,7 +90,7 @@
     const WHATS_NEW_OPEN_DELAY_MS = 150;
 
     try {
-        GM_registerMenuCommand("Set Api Key", function(){ if (promptForApiKey()) syncArmoury(true); });
+        GM_registerMenuCommand("Set up API key", function(){ if (promptForApiKey()) { syncArmoury(true); syncCrimes(true); } });
         GM_registerMenuCommand("Refresh armoury now", function(){ syncArmoury(true); });
         GM_registerMenuCommand("What's new", function(){ showWhatsNew(CHANGELOG); });
     } catch (error) {
@@ -1629,11 +1637,23 @@
     // Torn drives this page with both fetch and XHR depending on the route, so both are
     // wrapped. Each wrapper hands the call straight on and only ever reads a copy of
     // the answer, so nothing here can change what the page itself receives.
+    // Which window Torn's own code runs in. Asking for a grant puts this script in the
+    // manager's sandbox, where `window` is the sandbox's own: replacing its fetch changes
+    // nothing the page will ever call, and unsafeWindow is the way back to the page.
+    // Without a sandbox - Torn PDA, or a manager that injects straight into the page -
+    // there is no unsafeWindow and `window` already is the page.
+    const pageWindow = (function () {
+        try {
+            if (typeof unsafeWindow !== 'undefined' && unsafeWindow != null) return unsafeWindow;
+        } catch (e) { /* not a name this host defines */ }
+        return window;
+    })();
+
     function listenForCrimeList() {
         try {
-            const nativeFetch = window.fetch;
+            const nativeFetch = pageWindow.fetch;
             if (typeof nativeFetch === 'function') {
-                window.fetch = function (input, init) {
+                pageWindow.fetch = function (input, init) {
                     const url = typeof input === 'string' ? input : input?.url;
                     const result = nativeFetch.apply(this, arguments);
                     if (isCrimeListUrl(url)) {
@@ -1643,19 +1663,27 @@
                     }
                     return result;
                 };
+                // Firefox will not let a sandboxed function be planted on the page's own
+                // window, and says so by quietly leaving the old one in place. Worth a
+                // line in the log, because it is the difference between the page telling
+                // us what each role needs and Torn having to be asked.
+                if (pageWindow.fetch === nativeFetch) {
+                    console.warn(LOG_PREFIX + ' The page kept its own fetch; roles will be read from the API instead.');
+                }
             }
         } catch (e) {
             console.warn(LOG_PREFIX + ' Could not watch fetch:', e);
         }
 
         try {
-            const open = XMLHttpRequest.prototype.open;
-            const send = XMLHttpRequest.prototype.send;
-            XMLHttpRequest.prototype.open = function (method, url) {
+            const xhr = pageWindow.XMLHttpRequest;
+            const open = xhr.prototype.open;
+            const send = xhr.prototype.send;
+            xhr.prototype.open = function (method, url) {
                 this.silmarilCrimeList = isCrimeListUrl(url);
                 return open.apply(this, arguments);
             };
-            XMLHttpRequest.prototype.send = function () {
+            xhr.prototype.send = function () {
                 if (this.silmarilCrimeList === true) {
                     this.addEventListener('load', function () {
                         handleCrimeListText(this.responseText);
