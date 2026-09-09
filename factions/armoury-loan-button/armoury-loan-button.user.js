@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Armoury Loan Button
 // @namespace    https://github.com/SOLiNARY
-// @version      0.6.2
+// @version      0.6.3
 // @description  Caches loanable faction armoury items and adds a "Loan" chip to every organized crime role that needs one, loaning the item to whoever holds that role. Your own role loans in one click, any other role confirms first. Give it a limited API key and it reads the armoury straight from Torn, so weapon and armour counts stay right without opening the armoury tab. After an update, a "What's new" popup lists what changed.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT License
@@ -21,7 +21,7 @@
     // shows one panel, not eight. The DOM is the channel because userscript sandboxes cannot see
     // each other's globals, and it needs no grants beyond what each script already asks for.
 
-    const SCRIPT_VERSION = "0.6.2";  // keep in sync with @version above
+    const SCRIPT_VERSION = "0.6.3";  // keep in sync with @version above
     const WHATS_NEW_NAME = "Armoury Loan Button";
     const WHATS_NEW_KEY = "silmaril-armoury-loan-button-last-seen-version";
     // Newest release first. Every release above the version last seen is shown at once, so
@@ -32,7 +32,8 @@
             date: "2026-09-09",
             changes: [
             'Chips now appear on phones and in script managers that keep scripts at arm&rsquo;s length from the page. The script used to learn what each role needs by listening to the page, which does not always work; with an API key set it can now ask Torn directly instead.',
-            'No hovering needed anywhere. A role never hovered, in a browser where listening works, gets its chip too.'
+            'No hovering needed anywhere. A role never hovered, in a browser where listening works, gets its chip too.',
+            'With a key set, the chips come up as soon as the page does rather than after a pause, and keep up on their own as roles are filled and people get hold of their kit.'
             ]
         },
         {
@@ -268,15 +269,13 @@
     const API_SYNC_KEY = 'silmaril-armoury-loan-api-sync';
     const API_URL = 'https://api.torn.com/v2/faction/inventory';
     const CRIMES_URL = 'https://api.torn.com/v2/faction/crimes';
-    // Only ever read when a role on screen has no item to show for itself, so this bounds
-    // how often that question is put to Torn rather than how fresh the answer is.
+    // How often the crimes page is re-read while it is open. Roles get filled and people
+    // get hold of their kit while somebody is sitting on the planning screen, and this is
+    // what notices.
     const CRIMES_TTL_MS = 60 * 1000;
     // A read that told us nothing new is not worth repeating at the same rate. It happens
     // when a crime is one Torn does not list as available, or a role this cannot match.
     const CRIMES_IDLE_MS = 10 * 60 * 1000;
-    // Long enough for the page's own answer to arrive where listening works, so a browser
-    // that never needed the fallback never pays for it.
-    const CRIMES_GRACE_MS = 4000;
     const API_KEY_LENGTH = 16;
     // Torn serves one category per call and will not say which one an item lives in, so
     // an item nothing has seen yet can only be found by sweeping. The order is the one
@@ -1671,7 +1670,7 @@
 
 
     // --- the crimes list over the API --------------------------------------------
-    // Which item a role needs is learned by listening to the answer Torn's own page
+    // Which item a role needs can be learned by listening to the answer Torn's own page
     // already asks for. That listening is done by replacing window.fetch, which only
     // works where the script shares a window with the page. Several script managers -
     // Violentmonkey among them, and it is the usual one on Android - can put a script in
@@ -1679,17 +1678,22 @@
     // arrives, and the only other source is a tooltip, which needs a hover a phone has
     // not got. The result is a crimes page with no chips at all.
     //
-    // So the same question is put to Torn directly. It costs one call, only when a role
-    // on screen has nothing to show for itself, and it lands in the same two caches the
-    // listener fills, so nothing downstream knows which of them answered.
+    // So where there is a key, the question goes to Torn directly and the listening is
+    // what stands in reserve. Asking outright works in every browser and every script
+    // manager, needs no hover, and answers before Torn's own page has got round to it -
+    // and it keeps answering, so a slot filled or an item bought while somebody sits on
+    // the planning screen is noticed rather than waited out. The listener stays where it
+    // is: it costs nothing, it covers the seconds before the first answer lands, and it
+    // is the whole of the story for anyone who has set no key.
+    //
+    // Both land in the same two caches, so nothing downstream knows which answered.
 
     let crimesReading = false;
     let crimesNextAt = 0;
-    // Set by the crimes scan when a role is occupied and its item is still unknown.
+    // Set by the crimes scan: whether there are occupied roles at all, and whether any of
+    // them is still unexplained.
+    let slotsOnScreen = false;
     let slotsAwaitingItems = false;
-    // When that first became true, so the fallback can hold off while the page's own
-    // answer is still on its way.
-    let awaitingSince = 0;
 
     function crimesUrl() {
         return CRIMES_URL + '?' + new URLSearchParams({
@@ -1773,6 +1777,10 @@
         if (crimesReading || !hasApiKey()) return;
         if (!force && Date.now() < crimesNextAt) return;
         crimesReading = true;
+        // A read that leaves a role as unexplained as it found it is one Torn cannot
+        // answer - a crime it does not count as available, or a role name this cannot
+        // match - and repeating it every minute would never do better.
+        const awaitingBefore = slotsAwaitingItems;
         try {
             const response = await fetch(crimesUrl());
             const payload = await response.json();
@@ -1780,7 +1788,7 @@
             if (failure != null) throw new Error(failure);
             const crimes = Array.isArray(payload?.crimes) ? payload.crimes : [];
             const changed = ingestApiCrimes(crimes);
-            crimesNextAt = Date.now() + (changed ? CRIMES_TTL_MS : CRIMES_IDLE_MS);
+            crimesNextAt = Date.now() + (awaitingBefore && !changed ? CRIMES_IDLE_MS : CRIMES_TTL_MS);
             console.log(`${LOG_PREFIX} Crimes read from the API:`, crimes.length,
                 'crime(s),', changed ? 'roles learned' : 'nothing new');
             if (changed) scheduleScan();
@@ -2527,13 +2535,17 @@
         const byRow = new Map();
         wantedItems.clear();
         slotsAwaitingItems = false;
+        slotsOnScreen = false;
         for (const wrapper of findAllSlotWrappers()) {
             const slot = readSlot(wrapper);
             if (slot == null) continue;
-            // A role somebody is standing in with nothing known about its item is the one
-            // case the API read is for: either it needs one and nobody has told us which,
-            // or it needs none and nobody has told us that either.
-            if (slot.occupant != null && getSlotItemId(slot) == null) slotsAwaitingItems = true;
+            if (slot.occupant != null) {
+                slotsOnScreen = true;
+                // Still unexplained: either it needs an item and nobody has said which, or
+                // it needs none and nobody has said that either. Only used to decide how
+                // hard to keep asking.
+                if (getSlotItemId(slot) == null) slotsAwaitingItems = true;
+            }
             const state = computeState(slot);
             const isMine = slot.occupant != null && ownId != null && slot.occupant.id === ownId;
             applyChip(slot, state, isMine);
@@ -2552,13 +2564,10 @@
         // Only a page actually showing chips is worth spending a call on, and the sync
         // holds its own interval, so this asks on every scan and answers rarely.
         if (byRow.size > 0) syncArmoury(false);
-        // Whereas this one is for a page showing no chips it ought to be showing. Same
-        // arrangement: asked constantly, answered rarely, and only while something on
-        // screen is still unaccounted for - and only once the page has had its own
-        // chance to say, so listening keeps first refusal wherever it works.
-        if (!slotsAwaitingItems) awaitingSince = 0;
-        else if (awaitingSince === 0) awaitingSince = Date.now();
-        else if (Date.now() - awaitingSince > CRIMES_GRACE_MS) syncCrimes(false);
+        // And this one keeps the roles themselves current. Same arrangement: asked on
+        // every scan, answered on its own interval, and only while there are roles on
+        // screen for it to be about.
+        if (slotsOnScreen) syncCrimes(false);
         // A bar whose row lost every chip - a crime that finished, or a tab switch that
         // reused the container - would otherwise sit there claiming nothing.
         document.querySelectorAll('.silmaril-itembar').forEach(function (bar) {
