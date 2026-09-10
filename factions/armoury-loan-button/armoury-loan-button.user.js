@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Armoury Loan Button
 // @namespace    https://github.com/SOLiNARY
-// @version      0.6.4
+// @version      0.6.5
 // @description  Caches loanable faction armoury items and adds a "Loan" chip to every organized crime role that needs one, loaning the item to whoever holds that role. Your own role loans in one click, any other role confirms first. Give it a limited API key and it reads the armoury straight from Torn, so weapon and armour counts stay right without opening the armoury tab. After an update, a "What's new" popup lists what changed.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT License
@@ -22,12 +22,19 @@
     // shows one panel, not eight. The DOM is the channel because userscript sandboxes cannot see
     // each other's globals, and it needs no grants beyond what each script already asks for.
 
-    const SCRIPT_VERSION = "0.6.4";  // keep in sync with @version above
+    const SCRIPT_VERSION = "0.6.5";  // keep in sync with @version above
     const WHATS_NEW_NAME = "Armoury Loan Button";
     const WHATS_NEW_KEY = "silmaril-armoury-loan-button-last-seen-version";
     // Newest release first. Every release above the version last seen is shown at once, so
     // updating across several versions still reports the whole gap.
     const CHANGELOG = [
+        {
+            version: "0.6.5",
+            date: "2026-09-10",
+            changes: [
+            'Fixed: chips would not appear for anyone using the &ldquo;Honor&rdquo; name badges. Torn draws those names differently, and the script only knew how to read the plain kind.'
+            ]
+        },
         {
             version: "0.6.4",
             date: "2026-09-09",
@@ -1482,6 +1489,18 @@
         return wrappers;
     }
 
+    // A player with the "Honor" nameplate style turned on has their name replaced, here
+    // and everywhere else on the site, by a badge: an image plus this text pair - a
+    // decorative glyph-per-letter span carrying no text of its own, and a plain span
+    // next to it holding the actual name. Without that style the name is plain text in
+    // its own element instead. Both are tried because either can be what is on screen.
+    function readSlotName(wrapper) {
+        const honorName = wrapper.querySelector('.honor-text-wrap .honor-text:not(.honor-text-svg)')
+            ?.textContent.trim();
+        if (honorName) return honorName;
+        return wrapper.querySelector('[class*="textName"]')?.textContent.trim() ?? '';
+    }
+
     // Identifies a slot across scans. The OC id pins it to one crime; the scenario name
     // and role pin it to the requirement itself, which is what actually decides the
     // item - so hovering one "Picklock #1" lights up that role in every other copy of
@@ -1494,7 +1513,7 @@
         const scenario = crime?.querySelector('[class*="panelTitle"]')?.textContent.trim() ?? '';
         const id = wrapper.querySelector('a[href*="profiles.php?XID="]')
             ?.getAttribute('href').match(/XID=(\d+)/)?.[1] ?? null;
-        const name = wrapper.querySelector('[class*="textName"]')?.textContent.trim() ?? '';
+        const name = readSlotName(wrapper);
         return {
             wrapper: wrapper,
             crime: crime,
