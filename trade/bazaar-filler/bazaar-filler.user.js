@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Torn Bazaar Filler
 // @namespace    https://github.com/SOLiNARY
-// @version      1.10.0
-// @description  On "Fill" click autofills bazaar item price with lowest market price currently minus $1 (can be customised), shows current price coefficient compared to 3rd lowest, fills the quantity your quantity mode asks for, marks checkboxes for guns. Click the ⚙ cog on the Fill All bar — or hold a Fill/Update button for 3s — to open the settings modal (price delta, quantity mode, API key, and per-category overrides — set different discounts/sources/quantities for Clothing, Other, Drug, etc.). Quantity modes: "max" (default), "max-1" to always keep a copy, a fixed number, or "skip" to never list a category. Cycle the star next to Fill/Update to mark an item as a favourite (★, used by Fill All) or excluded (⊘, never auto-filled). Use "Fill All" to auto-fill every favourite row on both the Add Items and Manage Items pages, including ones appearing later via infinite scroll or category switches. Drag the Fill All bar anywhere; drop it near a screen edge to clamp and minimise it — its position and state are remembered. Three price sources are available: Torn's item market listings (the default), Torn's market value ([market]) and live player-bazaar data from weav3r.dev ([bazaar], [bazaar:2], [bazaar:avg], [bazaar:median]) — the last one prices you against the bazaars you actually compete with. Sources can be combined: -1[bazaar] | -1 or max(-1[bazaar], -1) prices every formula listed and fills the highest, so one source acts as a floor under the other, and min(...) fills the lowest to undercut whichever source is cheapest. Settings are validated on save. After an update a "What's new" popup lists what changed.
+// @version      1.11.0
+// @description  On "Fill" click autofills bazaar item price with lowest market price currently minus $1 (can be customised), shows current price coefficient compared to 3rd lowest, fills the quantity your quantity mode asks for, marks checkboxes for guns. Click the ⚙ cog on the Fill All bar — or hold a Fill/Update button for 3s — to open the settings modal (price delta, quantity mode, API key, and per-category overrides — set different discounts/sources/quantities for Clothing, Other, Drug, etc.). Quantity modes: "max" (default), "max-1" to always keep a copy, a fixed number, or "skip" to never list a category. Cycle the star next to Fill/Update to mark an item as a favourite (★, used by Fill All) or excluded (⊘, never auto-filled). Use "Fill All" to auto-fill every favourite row on both the Add Items and Manage Items pages, including ones appearing later via infinite scroll or category switches. Drag the Fill All bar anywhere; drop it near a screen edge to clamp and minimise it — its position and state are remembered. Three price sources are available: Torn's item market listings (the default), Torn's market value ([market]) and live player-bazaar data from weav3r.dev ([bazaar], [bazaar:2], [bazaar:avg], [bazaar:median]) — the last one prices you against the bazaars you actually compete with. Sources can be combined: -1[bazaar] | -1 or max(-1[bazaar], -1) prices every formula listed and fills the highest, so one source acts as a floor under the other, and min(...) fills the lowest to undercut whichever source is cheapest. min() and max() nest, so a price can be held inside a band: min(max(-1, +10%[market]), -1[14]) never fills below 10% over market value and never above the 15th listing. Settings are validated on save. After an update a "What's new" popup lists what changed.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT License
 // @match        https://www.torn.com/bazaar.php*
@@ -20,7 +20,7 @@
     'use strict';
 
     // Keep in sync with @version above — it keys the "What's new" popup.
-    const SCRIPT_VERSION = "1.10.0";
+    const SCRIPT_VERSION = "1.11.0";
 
     const marketUrl = "https://api.torn.com/v2/market?id={itemId}&selections=itemMarket&key={apiKey}&comment=BazaarFiller";
     const itemUrl = "https://api.torn.com/torn/{itemId}?selections=items&key={apiKey}&comment=BazaarFiller";
@@ -90,6 +90,15 @@
     // Write every line for a player, not a developer: one short sentence, plain words,
     // what changed for them rather than what changed in the code.
     const CHANGELOG = [
+        {
+            version: "1.11.0",
+            date: "2026-09-21",
+            changes: [
+                'New: price ranges. Put <code>min()</code> and <code>max()</code> inside each other to keep a price between a floor and a ceiling.',
+                '<code>min(max(-1, +10%[market]), -1[14])</code> undercuts the cheapest listing, but never goes below 10% over market value, and never above the 15th listing &minus; $1.',
+                'Handy when a big stack would otherwise make you the cheapest seller and you would rather sit further down the list.'
+            ]
+        },
         {
             version: "1.10.0",
             date: "2026-09-07",
@@ -1274,23 +1283,101 @@
 
     const LONG_PRESS_MS = 3000;
 
-    // A setting may combine several formulas. "a | b" and "max(a, b)" both fill the highest of
-    // them; "min(a, b)" fills the lowest, to undercut whichever source is cheapest. A lone
-    // formula is simply a one-branch max.
+    // The index of the ) that closes the ( at `open`, or -1 when nothing does.
+    function matchingParen(text, open){
+        let depth = 0;
+        for (let i = open; i < text.length; i++){
+            if (text.charAt(i) === '('){
+                depth++;
+            } else if (text.charAt(i) === ')'){
+                depth--;
+                if (depth === 0){
+                    return i;
+                }
+            }
+        }
+        return -1;
+    }
+
+    // Split on the separators that belong to this level only: the ones inside a nested
+    // min(...)/max(...) belong to that call, not to us.
+    function splitTopLevel(body){
+        let parts = [];
+        let depth = 0;
+        let current = '';
+        for (let i = 0; i < body.length; i++){
+            let ch = body.charAt(i);
+            if (ch === '('){
+                depth++;
+            } else if (ch === ')'){
+                depth--;
+            } else if ((ch === '|' || ch === ',') && depth <= 0){
+                parts.push(current);
+                current = '';
+                continue;
+            }
+            current += ch;
+        }
+        parts.push(current);
+        return parts;
+    }
+
+    // A setting parses into a tree. A leaf is one formula, {kind:'formula'}; min(...) and
+    // max(...) are {kind:'combine'} nodes over the formulas — or over further calls — inside
+    // them. "a | b" and "max(a, b)" both mean the highest of a and b; "min(a, b)" means the
+    // lowest, to undercut whichever source is cheapest. Calls nest, so a price can be held
+    // inside a band: min(max(a, b), c) is never below b and never above c.
+    // Nothing here throws on a formula it cannot make sense of — a setting saved before Save
+    // started validating them still parses, as the one leaf it will later fail to price.
     function parseSetting(setting){
-        let raw = String(setting ?? '').trim();
-        let call = raw.match(/^(min|max)\s*\(([\s\S]*)\)$/i);
-        let body = call != null ? call[2] : raw;
-        let branches = body.split(/[|,]/).map(function(branch){ return branch.trim(); })
-            .filter(function(branch){ return branch !== ''; });
+        return parseExpression(String(setting ?? '').trim(), 'max');
+    }
+
+    // One level: the terms between this level's separators, combined by `combine`. A single
+    // term needs no node of its own, since the highest — or lowest — of one thing is itself.
+    function parseExpression(body, combine){
+        let terms = splitTopLevel(body).map(function(term){ return term.trim(); })
+            .filter(function(term){ return term !== ''; });
+        if (terms.length === 0){
+            terms = [body.trim()];
+        }
+        if (terms.length === 1){
+            return parseTerm(terms[0]);
+        }
         return {
-            combine: call != null ? call[1].toLowerCase() : 'max',
-            branches: branches.length > 0 ? branches : [body.trim()]
+            kind: 'combine',
+            combine: combine,
+            children: terms.map(parseTerm)
         };
     }
 
+    // Either a min()/max() call wrapping another expression, or a plain formula.
+    function parseTerm(term){
+        let open = term.indexOf('(');
+        if (open !== -1){
+            let name = term.substring(0, open).trim().toLowerCase();
+            let close = matchingParen(term, open);
+            if ((name === 'min' || name === 'max') && close !== -1 && term.substring(close + 1).trim() === ''){
+                return parseExpression(term.substring(open + 1, close), name);
+            }
+        }
+        return { kind: 'formula', formula: term };
+    }
+
+    // Every formula in a setting, in the order it was written, whatever it is nested inside.
+    function collectFormulas(node){
+        if (node.kind === 'formula'){
+            return [node.formula];
+        }
+        let formulas = [];
+        for (let i = 0; i < node.children.length; i++){
+            formulas = formulas.concat(collectFormulas(node.children[i]));
+        }
+        return formulas;
+    }
+
     function formulaBranches(setting){
-        return parseSetting(setting).branches;
+        return collectFormulas(parseSetting(setting));
     }
 
     // The branch a one-formula decision has to look at: which endpoint to try first, and
@@ -1753,35 +1840,59 @@
         return itemMarketPrice(data, branch, itemId);
     }
 
-    // Price every branch of the row's setting and keep the highest, or the lowest under min().
-    // One branch takes exactly the path, and costs exactly the calls, it did before any of this.
-    async function resolveFillPrice(pricing, itemId){
-        let parsed = parseSetting(pricing.setting);
-        let branches = parsed.branches;
-        if (branches.length === 1){
-            return resolveBranchPrice(branches[0], pricing, itemId, true);
+    // Walk the parsed setting and pick the winning branch: the highest under max(), the lowest
+    // under min(), with a nested call resolved to its own winner first. `priced` holds what
+    // every formula came out at; a formula that priced nothing sits the comparison out, and a
+    // call whose every formula priced nothing is null to the level above it.
+    function chooseBranch(node, priced){
+        if (node.kind === 'formula'){
+            return priced.get(node.formula) ?? null;
         }
         let best = null;
-        for (let i = 0; i < branches.length; i++){
+        for (let i = 0; i < node.children.length; i++){
+            let candidate = chooseBranch(node.children[i], priced);
+            if (candidate == null){
+                continue;
+            }
+            if (best == null || (node.combine === 'min' ? candidate.price < best.price : candidate.price > best.price)){
+                best = candidate;
+            }
+        }
+        return best;
+    }
+
+    // Price every formula in the row's setting, then let the min()/max() tree pick which one
+    // fills. One formula takes exactly the path, and costs exactly the calls, it did before any
+    // of this, and a formula written twice in the same setting is still fetched once.
+    async function resolveFillPrice(pricing, itemId){
+        let root = parseSetting(pricing.setting);
+        let formulas = collectFormulas(root);
+        if (root.kind === 'formula'){
+            return resolveBranchPrice(root.formula, pricing, itemId, true);
+        }
+        let priced = new Map();
+        for (let i = 0; i < formulas.length; i++){
+            if (priced.has(formulas[i])){
+                continue;
+            }
             let resolved = null;
             try {
-                resolved = await resolveBranchPrice(branches[i], pricing, itemId, false);
+                resolved = await resolveBranchPrice(formulas[i], pricing, itemId, false);
             } catch (error) {
                 // A formula stored before Save started validating them can still throw here.
                 // That is one dead branch rather than a dead row.
-                console.warn("[TornBazaarFiller] Formula '" + branches[i] + "' could not be applied:", error);
+                console.warn("[TornBazaarFiller] Formula '" + formulas[i] + "' could not be applied:", error);
             }
             if (resolved == null || resolved.error != null || typeof resolved.price !== 'number' || !isFinite(resolved.price)){
-                console.warn("[TornBazaarFiller] '" + branches[i] + "' priced nothing for item " + itemId + ".");
-                continue;
+                console.warn("[TornBazaarFiller] '" + formulas[i] + "' priced nothing for item " + itemId + ".");
+                resolved = null;
             }
-            if (best == null || (parsed.combine === 'min' ? resolved.price < best.price : resolved.price > best.price)){
-                best = resolved;
-            }
+            priced.set(formulas[i], resolved);
         }
-        // Nothing priced: re-run the first branch the ordinary way, so the row reports the same
+        let best = chooseBranch(root, priced);
+        // Nothing priced: re-run the first formula the ordinary way, so the row reports the same
         // error — and gets the same item-market fallback — as a setting with no pipes at all.
-        return best ?? resolveBranchPrice(branches[0], pricing, itemId, true);
+        return best ?? resolveBranchPrice(formulas[0], pricing, itemId, true);
     }
 
     // Colour the row by how far the filled price sits under the 3rd-cheapest listing of whichever
@@ -2017,6 +2128,7 @@
                 '<div class="tbf-modal-help">Item market: <code>-1</code> (lowest listing − $1), <code>-5%</code>, <code>-1[1]</code> (2nd lowest listing), <code>[market]</code> (Torn market value).<br>' +
                 'Player bazaars, via weav3r.dev, no API key: <code>-1[bazaar]</code> (cheapest bazaar − $1), <code>-1[bazaar:2]</code> (3rd cheapest), <code>-5%[bazaar:avg]</code> (bazaar average), <code>[bazaar:median]</code>.<br>' +
                 'Combine sources: <code>-1[bazaar] | -1</code> prices both and fills the higher one, so the second is a floor under the first. <code>max(-1[bazaar], -1)</code> is the same; <code>min(-1[bazaar], -1)</code> fills the lower one, to undercut whichever source is cheapest.<br>' +
+                'Price range: put one inside the other to keep a price between a floor and a ceiling. <code>min(max(-1, +10%[market]), -1[14])</code> never fills below 10% over market value, and never above the 15th listing &minus; $1.<br>' +
                 'Quantity examples: <code>max</code> (all of them), <code>max-1</code> (keep one back), <code>max-3</code>, <code>1</code> (always list one), <code>skip</code> (never list this category).<br>' +
                 'Category rows accept the same syntax and fall back to the defaults above when blank.</div>' +
             '</div>' +
@@ -2124,36 +2236,62 @@
         return "[" + token + "] is not a price source. Use [0], [median], [market] or [bazaar].";
     }
 
-    // Whole setting: a lone formula, "a | b", or min(...)/max(...) around a list of them.
-    // Blank is always fine, since it means "use the default".
+    // Whole setting: a lone formula, "a | b", or min(...)/max(...) around a list of them, which
+    // may themselves hold further calls. Blank is always fine, since it means "use the default".
     function settingProblem(setting){
         let raw = String(setting ?? '').trim();
         if (raw === ''){
             return null;
         }
-        let body = raw;
-        let call = raw.match(/^(min|max)\s*\(([\s\S]*)$/i);
-        if (call != null){
-            if (raw.charAt(raw.length - 1) !== ')'){
-                return raw.indexOf(')') === -1
-                    ? "min() and max() need a closing )."
-                    : "min() and max() take every formula inside one pair of brackets: max(a, b), not max(a) | b.";
-            }
-            body = call[2].substring(0, call[2].length - 1);
-            if (body.trim() === ''){
-                return "min() and max() need at least one formula between the brackets.";
+        // Checked once up front so the term walk below can trust every ( to have its ).
+        let depth = 0;
+        for (let i = 0; i < raw.length; i++){
+            if (raw.charAt(i) === '('){
+                depth++;
+            } else if (raw.charAt(i) === ')'){
+                depth--;
+                if (depth < 0){
+                    return "there is a ) with no ( to open it.";
+                }
             }
         }
-        let parts = body.split(/[|,]/);
-        for (let i = 0; i < parts.length; i++){
-            let branch = parts[i].trim();
-            if (branch === ''){
+        if (depth > 0){
+            return "min() and max() need a closing ).";
+        }
+        return expressionProblem(raw);
+    }
+
+    // One level of a setting: the terms between its separators, each a call or a formula.
+    function expressionProblem(body){
+        let terms = splitTopLevel(body);
+        for (let i = 0; i < terms.length; i++){
+            let term = terms[i].trim();
+            if (term === ''){
                 return "there is an empty formula next to a separator.";
             }
-            if (branch.indexOf('(') !== -1 || branch.indexOf(')') !== -1){
-                return "min() and max() do not nest. Put every formula inside one pair of brackets: max(a, b, c).";
+            let open = term.indexOf('(');
+            if (open === -1){
+                let problem = formulaProblem(term);
+                if (problem != null){
+                    return problem;
+                }
+                continue;
             }
-            let problem = formulaProblem(branch);
+            let name = term.substring(0, open).trim().toLowerCase();
+            if (name !== 'min' && name !== 'max'){
+                return name === ''
+                    ? "a formula cannot start with (. Only min(...) and max(...) use brackets."
+                    : "'" + term.substring(0, open).trim() + "' is not a function. Only min(...) and max(...) use brackets.";
+            }
+            let close = matchingParen(term, open);
+            if (term.substring(close + 1).trim() !== ''){
+                return "'" + term + "' has stray text after the ). Separate formulas with | or ,.";
+            }
+            let inner = term.substring(open + 1, close);
+            if (inner.trim() === ''){
+                return "min() and max() need at least one formula between the brackets.";
+            }
+            let problem = expressionProblem(inner);
             if (problem != null){
                 return problem;
             }
