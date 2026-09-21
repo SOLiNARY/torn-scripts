@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Market Filler
 // @namespace    https://github.com/SOLiNARY
-// @version      1.1.0
+// @version      1.1.1
 // @description  On "Fill" click autofills market item price with lowest market price minus $1 (customizable), fills the quantity your quantity mode asks for, marks checkboxes for guns. Click the ⚙ cog on the Fill All bar — or hold the fill button for 2s — to open the settings modal (price delta, quantity mode, API key, prices popup, and per-category overrides — set different discounts/sources/quantities for Clothing, Other, Drug, etc.). Quantity modes: "max" (default), "max-1" to always keep a copy, a fixed number, or "skip" to never list a category. Cycle the star next to the fill button to mark an item as a favourite (★, used by Fill All) or excluded (⊘, never auto-filled). Use "Fill All" to auto-fill every favourite row on both the Add Items and Your Items (view listings) pages, including ones appearing later when switching categories. Drag the Fill All bar anywhere; drop it near a screen edge to clamp and minimise it — its position and state are remembered. Three price sources are available: Torn's item market listings (the default), Torn's market value ([market]) and live player-bazaar data from weav3r.dev ([bazaar], [bazaar:2], [bazaar:avg], [bazaar:median]), which is useful for pricing against what the same item actually sells for in bazaars. Sources can be combined: -1[bazaar] | -1[0] or max(-1[bazaar], -1[0]) prices every formula listed and fills the highest, so one source acts as a floor under the other, and min(...) fills the lowest to undercut whichever source is cheapest. min() and max() nest, so a price can be held inside a band: min(max(-1[0], +10%[market]), -1[14]) never fills below 10% over market value and never above the 15th listing. Settings are validated on save. After an update a "What's new" popup lists what changed.
 // @author       Silmaril [2665762]
 // @license      MIT License
@@ -19,7 +19,7 @@
     'use strict';
 
     // Keep in sync with @version above — it keys the "What's new" popup.
-    const SCRIPT_VERSION = "1.1.0";
+    const SCRIPT_VERSION = "1.1.1";
 
     const itemUrl = "https://api.torn.com/torn/{itemId}?selections=items&key={apiKey}&comment=MarketFiller";
     const marketUrl = "https://api.torn.com/v2/market/{itemId}?selections=itemMarket&key={apiKey}&comment=MarketFiller";
@@ -155,7 +155,7 @@
     // Item types are mostly immutable but Torn occasionally recategorises an item, so cached
     // categories are re-verified from each response and forcibly refreshed once past this TTL.
     const CATEGORY_TTL_MS = 14 * 24 * 60 * 60 * 1000;
-    const SETTINGS_CATEGORIES = ["Melee","Primary","Secondary","Defensive","Temporary","Drug","Medical","Booster","Energy Drink","Alcohol","Enhancer","Clothing","Jewelry","Material","Flower","Plushie","Car","Supply Pack","Special","Collectible","Artifact","Tool","Other"];
+    const SETTINGS_CATEGORIES = ["Melee","Primary","Secondary","Defensive","Temporary","Drug","Medical","Booster","Energy Drink","Alcohol","Candy","Enhancer","Clothing","Jewelry","Material","Flower","Plushie","Car","Supply Pack","Special","Collectible","Artifact","Tool","Other"];
     let categoryDeltas = loadCategoryDeltas();
     let categoryQuantities = loadCategoryQuantities();
     let itemCategoryCache = loadItemCategoryCache();
