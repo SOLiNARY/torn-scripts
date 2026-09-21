@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Crimes Rewards Value
 // @namespace    https://github.com/SOLiNARY
-// @version      0.6
+// @version      0.6.1
 // @description  Shows the market value of all crime rewards. After an update, a "What's new" popup lists what changed.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT License
@@ -22,7 +22,7 @@
     // shows one panel, not eight. The DOM is the channel because userscript sandboxes cannot see
     // each other's globals, and it needs no grants beyond what each script already asks for.
 
-    const SCRIPT_VERSION = "0.6";  // keep in sync with @version above
+    const SCRIPT_VERSION = "0.6.1";  // keep in sync with @version above
     const WHATS_NEW_NAME = "Crimes Rewards Value";
     const WHATS_NEW_KEY = "silmaril-rewards-value-last-seen-version";
     // Newest release first. Every release above the version last seen is shown at once, so
@@ -410,12 +410,17 @@ span#silmaril-crimes-rewards-value-total {
     observer.observe(targetNode, observerConfig);
  
     function checkApiKey(checkExisting = true) {
-        if (!checkExisting || apiKey === null || apiKey.length != 16){
-            let userInput = prompt("Please enter a PUBLIC Api Key, it will be used to get today's item market values:", apiKey ?? '');
-            if (userInput !== null && userInput.length == 16) {
-                apiKey = userInput;
-                localStorage.setItem("silmaril-crimes-rewards-value-apikey", userInput);
-            } else {
+        const keyIsSet = apiKey !== null && apiKey.length == 16;
+        if (!checkExisting || !keyIsSet){
+            // The saved key is never put in the prompt: a browser prompt shows its contents in
+            // plain text, so anyone looking at the screen reads the key. Blank keeps the old one.
+            let userInput = prompt("Please enter a PUBLIC Api Key, it will be used to get today's item market values:" +
+                (keyIsSet ? "\n\nA key is already saved. Leave this blank to keep it." : ""), '');
+            let entered = userInput === null ? '' : userInput.trim();
+            if (entered.length == 16) {
+                apiKey = entered;
+                localStorage.setItem("silmaril-crimes-rewards-value-apikey", entered);
+            } else if (!(keyIsSet && entered === '')) {
                 console.error("[TornCrimesRewardsValue] User cancelled the Api Key input.");
             }
         }
