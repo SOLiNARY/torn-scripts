@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Armoury Loan Button
 // @namespace    https://github.com/SOLiNARY
-// @version      0.6.5
+// @version      0.6.6
 // @description  Caches loanable faction armoury items and adds a "Loan" chip to every organized crime role that needs one, loaning the item to whoever holds that role. Your own role loans in one click, any other role confirms first. Give it a limited API key and it reads the armoury straight from Torn, so weapon and armour counts stay right without opening the armoury tab. After an update, a "What's new" popup lists what changed.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT License
@@ -22,7 +22,7 @@
     // shows one panel, not eight. The DOM is the channel because userscript sandboxes cannot see
     // each other's globals, and it needs no grants beyond what each script already asks for.
 
-    const SCRIPT_VERSION = "0.6.5";  // keep in sync with @version above
+    const SCRIPT_VERSION = "0.6.6";  // keep in sync with @version above
     const WHATS_NEW_NAME = "Armoury Loan Button";
     const WHATS_NEW_KEY = "silmaril-armoury-loan-button-last-seen-version";
     // Newest release first. Every release above the version last seen is shown at once, so
@@ -679,11 +679,13 @@
 }
 
 /* Torn PDA and other narrow layouts: no hover to fall back on, so the item name goes
-   on the face of the chip and every target grows to 44px. */
+   on the face of the chip. Every chip keeps the same floor, loanable or not, so a Loan
+   chip and the "has item" chip beside it are the same height; a chip showing the item
+   name on its own line grows past that floor on its own. */
 @media (max-width: 800px) {
     .silmaril-chip {
         height: auto;
-        min-height: 44px;
+        min-height: 30px;
         gap: 8px;
         padding: 4px 9px;
     }
@@ -708,10 +710,6 @@
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
-    }
-
-    .silmaril-chip.silmaril-out {
-        min-height: 30px;
     }
 
     .silmaril-chip.silmaril-out .silmaril-chip-sub {
