@@ -29,13 +29,6 @@
     // updating across several versions still reports the whole gap.
     const CHANGELOG = [
         {
-            version: "0.6.6",
-            date: "2026-09-19",
-            changes: [
-            'Fixed: on a phone the Loan chip stood taller than the green &ldquo;has item&rdquo; chip next to it. Both are the same height now.'
-            ]
-        },
-        {
             version: "0.6.5",
             date: "2026-09-10",
             changes: [
