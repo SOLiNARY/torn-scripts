@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Armoury Loan Button
 // @namespace    https://github.com/SOLiNARY
-// @version      0.6.6
+// @version      0.6.7
 // @description  Caches loanable faction armoury items and adds a "Loan" chip to every organized crime role that needs one, loaning the item to whoever holds that role. Your own role loans in one click, any other role confirms first. Give it a limited API key and it reads the armoury straight from Torn, so weapon and armour counts stay right without opening the armoury tab. After an update, a "What's new" popup lists what changed.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT License
@@ -22,7 +22,7 @@
     // shows one panel, not eight. The DOM is the channel because userscript sandboxes cannot see
     // each other's globals, and it needs no grants beyond what each script already asks for.
 
-    const SCRIPT_VERSION = "0.6.6";  // keep in sync with @version above
+    const SCRIPT_VERSION = "0.6.7";  // keep in sync with @version above
     const WHATS_NEW_NAME = "Armoury Loan Button";
     const WHATS_NEW_KEY = "silmaril-armoury-loan-button-last-seen-version";
     // Newest release first. Every release above the version last seen is shown at once, so
@@ -937,10 +937,15 @@
     }
 
     function promptForApiKey() {
+        // The saved key is never put in the prompt: a browser prompt shows its contents in plain
+        // text, so anyone looking at the screen reads the key. Blank keeps the saved one.
+        const keyIsSet = hasApiKey();
         const entered = prompt('Please enter a LIMITED Api Key. It is used to read your ' +
-            'faction armoury without opening it:', apiKey ?? '');
+            'faction armoury without opening it:' +
+            (keyIsSet ? '\n\nA key is already saved. Leave this blank to keep it.' : ''), '');
         if (entered == null) return false;
         const trimmed = entered.trim();
+        if (keyIsSet && trimmed === '') return false;
         if (trimmed.length !== API_KEY_LENGTH) {
             console.error(`${LOG_PREFIX} That is not a Torn API key.`);
             apiNote = 'That key is not 16 characters long.';
