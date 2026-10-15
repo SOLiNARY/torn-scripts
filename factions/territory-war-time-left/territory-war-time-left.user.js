@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Territory War Time Left
 // @namespace    http://tampermonkey.net/
-// @version      0.4
+// @version      0.4.1
 // @description  Shows time left until territory is captured given the current or bestcase attackers & defenders count right underneath war timeout ticker. After an update, a "What's new" popup lists what changed.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT License
@@ -20,12 +20,19 @@
     // shows one panel, not eight. The DOM is the channel because userscript sandboxes cannot see
     // each other's globals, and it needs no grants beyond what each script already asks for.
 
-    const SCRIPT_VERSION = "0.4";  // keep in sync with @version above
+    const SCRIPT_VERSION = "0.4.1";  // keep in sync with @version above
     const WHATS_NEW_NAME = "Territory War Time Left";
     const WHATS_NEW_KEY = "silmaril-territory-war-time-left-last-seen-version";
     // Newest release first. Every release above the version last seen is shown at once, so
     // updating across several versions still reports the whole gap.
     const CHANGELOG = [
+        {
+            version: "0.4.1",
+            date: "2026-10-15",
+            changes: [
+                'Fixed: the countdown no longer shows 60 in the seconds.'
+            ]
+        },
         {
             version: "0.4",
             date: "2026-09-03",
@@ -318,7 +325,7 @@
         const days = Math.floor(seconds / oneDay);
         const hours = Math.floor((seconds % oneDay) / oneHour);
         const minutes = Math.floor((seconds % oneHour) / oneMinute);
-        const remainingSeconds = Math.round(seconds % oneMinute);
+        const remainingSeconds = Math.floor(seconds % oneMinute);
  
         // Construct a formatted string with the results
         let output = '';
