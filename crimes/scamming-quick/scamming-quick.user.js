@@ -233,6 +233,7 @@
 
  
     const isMobileView = window.innerWidth <= 784;
+    const TOOLTIP_CHECK_DELAY_MS = 100;
  
     function addHoverClickListener() {
         const buttons = document.querySelectorAll('div.crime-root.scamming-root button.response-type-button');
@@ -257,16 +258,42 @@
                 }
                 findCommitButton(button)?.dispatchEvent(new Event("click", {bubbles: true}));
             });
-            // mouseenter fires once each time the pointer comes onto the button. mouseover fired
-            // again for every svg path and ring inside it, and each one clicked the response,
-            // which is what left Torn's tooltips stuck open.
+            // mouseenter fires once each time the pointer comes onto the button; mouseover fired
+            // again for every svg path and ring inside it.
             button.addEventListener('mouseenter', function() {
                 if (isSelected() || isDisabled()) {
                     return;
                 }
                 button.dispatchEvent(new Event("click", {bubbles: true}));
             });
+            // Torn's tooltip also opens on a click, and one opened that way stays open after the
+            // pointer leaves, until the next press anywhere else. Selecting on hover is such a
+            // click, so close a tooltip that is still open once the pointer has gone.
+            button.addEventListener('mouseleave', function() {
+                setTimeout(function() {
+                    if (button.getAttribute('data-is-tooltip-opened') !== 'true' || button.matches(':hover')) {
+                        return;
+                    }
+                    // Press on the response the pointer moved to, which keeps that one's tooltip, or
+                    // else on the page itself, which is outside Torn's React tree, so no button sees it.
+                    pressOn(document.querySelector('div.crime-root.scamming-root button.response-type-button:hover') ?? document.body);
+                }, TOOLTIP_CHECK_DELAY_MS);
+            });
         });
+    }
+
+    // A mouse press with no click: what a player's own press elsewhere does to an open tooltip.
+    function pressOn(target) {
+        // Aim at the middle of the part of the target that is on screen.
+        const rect = target.getBoundingClientRect();
+        const init = {bubbles: true, cancelable: true, composed: true, view: window, button: 0,
+                      clientX: (Math.max(rect.left, 0) + Math.min(rect.right, window.innerWidth)) / 2,
+                      clientY: (Math.max(rect.top, 0) + Math.min(rect.bottom, window.innerHeight)) / 2};
+        const pointer = {pointerId: 1, pointerType: 'mouse', isPrimary: true};
+        target.dispatchEvent(new PointerEvent('pointerdown', {...init, ...pointer, buttons: 1}));
+        target.dispatchEvent(new MouseEvent('mousedown', {...init, buttons: 1}));
+        target.dispatchEvent(new PointerEvent('pointerup', {...init, ...pointer, buttons: 0}));
+        target.dispatchEvent(new MouseEvent('mouseup', {...init, buttons: 0}));
     }
 
     // The commit button lives in the same crime row as the responses. The nearest ancestor that
