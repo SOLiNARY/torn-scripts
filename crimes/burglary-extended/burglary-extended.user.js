@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Crimes Burglary Extended
 // @namespace    https://github.com/SOLiNARY
-// @version      0.7.2
+// @version      0.7.3
 // @description  Sorts all scouted by target, created date, expire date, confidence, risk or uniques number. Remembers your choice. After an update, a "What's new" popup lists what changed.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT License
@@ -24,12 +24,19 @@
     // shows one panel, not eight. The DOM is the channel because userscript sandboxes cannot see
     // each other's globals, and it needs no grants beyond what each script already asks for.
 
-    const SCRIPT_VERSION = "0.7.2";  // keep in sync with @version above
+    const SCRIPT_VERSION = "0.7.3";  // keep in sync with @version above
     const WHATS_NEW_NAME = "Crimes Burglary Extended";
     const WHATS_NEW_KEY = "silmaril-burglary-extended-last-seen-version";
     // Newest release first. Every release above the version last seen is shown at once, so
     // updating across several versions still reports the whole gap.
     const CHANGELOG = [
+        {
+            version: "0.7.3",
+            date: "2026-10-15",
+            changes: [
+                'Fixed: sorting by Risk no longer stops when a target has no safety rating.'
+            ]
+        },
         {
             version: "0.7.2",
             date: "2026-09-03",
@@ -1012,8 +1019,8 @@
                     break;
                 case sortBy.Risk:
                     childElements.sort((a, b) => {
-                        const aValue = a.getAttribute('data-safety-level') ?? safetyLevels.Unknown;
-                        const bValue = b.getAttribute('data-safety-level') ?? safetyLevels.Unknown;
+                        const aValue = a.getAttribute('data-safety-level') ?? String(safetyLevels.Unknown);
+                        const bValue = b.getAttribute('data-safety-level') ?? String(safetyLevels.Unknown);
                         return aValue.localeCompare(bValue, undefined, {'numeric': true}) * sortDirection;
                     });
                     break;
