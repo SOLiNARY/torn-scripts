@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Armoury Loan Button
 // @namespace    https://github.com/SOLiNARY
-// @version      0.6.7
+// @version      0.6.8
 // @description  Caches loanable faction armoury items and adds a "Loan" chip to every organized crime role that needs one, loaning the item to whoever holds that role. Your own role loans in one click, any other role confirms first. Give it a limited API key and it reads the armoury straight from Torn, so weapon and armour counts stay right without opening the armoury tab. After an update, a "What's new" popup lists what changed.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT License
@@ -22,12 +22,19 @@
     // shows one panel, not eight. The DOM is the channel because userscript sandboxes cannot see
     // each other's globals, and it needs no grants beyond what each script already asks for.
 
-    const SCRIPT_VERSION = "0.6.7";  // keep in sync with @version above
+    const SCRIPT_VERSION = "0.6.8";  // keep in sync with @version above
     const WHATS_NEW_NAME = "Armoury Loan Button";
     const WHATS_NEW_KEY = "silmaril-armoury-loan-button-last-seen-version";
     // Newest release first. Every release above the version last seen is shown at once, so
     // updating across several versions still reports the whole gap.
     const CHANGELOG = [
+        {
+            version: "0.6.8",
+            date: "2026-10-15",
+            changes: [
+                'Fixed: retrying a failed loan for someone else shows how many are free, instead of "undefined free".'
+            ]
+        },
         {
             version: "0.6.5",
             date: "2026-09-10",
@@ -2189,7 +2196,8 @@
         itemLabel.textContent = name;
         const free = document.createElement('span');
         free.className = 'silmaril-fr';
-        free.textContent = state.free + ' free';
+        // A retried failure arrives without a count of its own, so read it from the entry.
+        free.textContent = (state.free ?? freeCount(state.entry)) + ' free';
         line.appendChild(art);
         line.appendChild(itemLabel);
         line.appendChild(free);
