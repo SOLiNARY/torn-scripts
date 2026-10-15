@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Rigs Layout Switcher
 // @namespace    https://github.com/SOLiNARY
-// @version      0.7.4
+// @version      0.7.5
 // @description  Adds "Save current rig layout" & "Empty rig layout" quick actions to a Cracking crime. After an update, a "What's new" popup lists what changed.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT License
@@ -26,12 +26,20 @@
     // shows one panel, not eight. The DOM is the channel because userscript sandboxes cannot see
     // each other's globals, and it needs no grants beyond what each script already asks for.
 
-    const SCRIPT_VERSION = "0.7.4";  // keep in sync with @version above
+    const SCRIPT_VERSION = "0.7.5";  // keep in sync with @version above
     const WHATS_NEW_NAME = "Rigs Layout Switcher";
     const WHATS_NEW_KEY = "silmaril-cracking-rigs-layout-switcher-last-seen-version";
     // Newest release first. Every release above the version last seen is shown at once, so
     // updating across several versions still reports the whole gap.
     const CHANGELOG = [
+        {
+            version: "0.7.5",
+            date: "2026-10-15",
+            changes: [
+                'Fixed: layout buttons now switch on once the page has loaded, instead of staying greyed out.',
+                'Fixed: pressing Cancel on Save, Delete, Export or Import no longer causes an error.'
+            ]
+        },
         {
             version: "0.7.4",
             date: "2026-09-03",
@@ -311,8 +319,8 @@
             let rfcvIdx = fetchUrl.indexOf(rfcvArg);
             if (rfcvIdx >= 0){
                 rfcv = fetchUrl.substr(rfcvIdx + rfcvArg.length);
-                localStorage.setItem("silmaril-loadout-switcher-rfcv", rfcv);
-                document.querySelectorAll("div.silmaril-torn-rigs-layout-switcher-container button").forEach((button) => button.classList.remove("disabled"));
+                localStorage.setItem("silmaril-rigs-layout-switcher-rfcv", rfcv);
+                document.querySelectorAll("div.silmaril-rigs-layout-switcher-templates button:not(.non-deletable)").forEach((button) => button.classList.remove("disabled"));
                 rfcvUpdatedThisSession = true;
             }
         }
@@ -617,7 +625,7 @@
         saveCurrentLayout.textContent = 'Save current layout';
         saveCurrentLayout.addEventListener('click', () => {
             IS_DEBUG ? console.log('save current layout') : null;
-            let userInput = prompt("Please enter a unique name for a layout (DO NOT USE COMMAS ',')" ?? '').toLowerCase();
+            let userInput = prompt("Please enter a unique name for a layout (DO NOT USE COMMAS ',')")?.toLowerCase() ?? null;
             if (userInput !== null && userInput.length > 0) {
                 rigLayouts = localStorage.getItem("silmaril-rigs-layout-switcher-layouts") ?? "";
                 rigLayoutsArray = rigLayouts.split(',');
@@ -640,7 +648,7 @@
         deleteLayout.textContent = 'Delete layout';
         deleteLayout.addEventListener('click', () => {
             IS_DEBUG ? console.log('delete layout') : null;
-            let userInput = prompt("Please enter a name of a layout to delete" ?? '').toLowerCase();
+            let userInput = prompt("Please enter a name of a layout to delete")?.toLowerCase() ?? null;
             if (userInput !== null && userInput.length > 0) {
                 rigLayouts = localStorage.getItem("silmaril-rigs-layout-switcher-layouts") ?? "";
                 rigLayoutsArray = rigLayouts.split(',');
@@ -703,7 +711,7 @@
         exportLayout.textContent = 'Export layout';
         exportLayout.addEventListener('click', () => {
             IS_DEBUG ? console.log('export layout') : null;
-            let userInput = prompt("Please enter a name of a layout to export" ?? '').toLowerCase();
+            let userInput = prompt("Please enter a name of a layout to export")?.toLowerCase() ?? null;
             if (userInput !== null && userInput.length > 0) {
                 let layoutToExport = {};
                 try {
@@ -734,7 +742,7 @@
         importLayouts.textContent = 'Import layouts';
         importLayouts.addEventListener('click', () => {
             IS_DEBUG ? console.log('save current layout') : null;
-            let userInput = prompt("Please copy-paste the string which has been shared with you" ?? '').toLowerCase();
+            let userInput = prompt("Please copy-paste the string which has been shared with you")?.toLowerCase() ?? null;
             if (userInput !== null && userInput.length > 0) {
                 try {
                     const allLayoutsToImport = JSON.parse(userInput);
