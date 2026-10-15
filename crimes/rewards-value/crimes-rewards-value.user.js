@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Crimes Rewards Value
 // @namespace    https://github.com/SOLiNARY
-// @version      0.6.1
+// @version      0.6.2
 // @description  Shows the market value of all crime rewards. After an update, a "What's new" popup lists what changed.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT License
@@ -22,12 +22,19 @@
     // shows one panel, not eight. The DOM is the channel because userscript sandboxes cannot see
     // each other's globals, and it needs no grants beyond what each script already asks for.
 
-    const SCRIPT_VERSION = "0.6.1";  // keep in sync with @version above
+    const SCRIPT_VERSION = "0.6.2";  // keep in sync with @version above
     const WHATS_NEW_NAME = "Crimes Rewards Value";
     const WHATS_NEW_KEY = "silmaril-rewards-value-last-seen-version";
     // Newest release first. Every release above the version last seen is shown at once, so
     // updating across several versions still reports the whole gap.
     const CHANGELOG = [
+        {
+            version: "0.6.2",
+            date: "2026-10-15",
+            changes: [
+                'Fixed: values no longer land on the wrong item when a reward has no picture.'
+            ]
+        },
         {
             version: "0.6",
             date: "2026-09-03",
@@ -367,13 +374,16 @@ span#silmaril-crimes-rewards-value-total {
                     });
  
                     const itemsInfo = await getData(itemIds);
+                    // itemsInfo only has entries for rewards with an image, so it gets its own index.
+                    let infoIndex = 0;
  
-                    rewards.forEach(async (reward, index) => {
+                    rewards.forEach(async (reward) => {
                         if (reward.hasAttribute('data-unknown-item')) {
                             return;
                         }
+                        const itemInfo = itemsInfo[infoIndex++];
                         const itemQuantity = parseInt(reward.querySelector('span[class*=count___]')?.textContent) ?? 1;
-                        const itemMarketValue = itemsInfo[index]?.marketValue;
+                        const itemMarketValue = itemInfo?.marketValue;
                         if (itemMarketValue == null) {
                             return;
                         }
@@ -483,11 +493,12 @@ span#silmaril-crimes-rewards-value-total {
  
         const results = [];
  
-        const promises = itemIds.map((itemId) => {
+        const promises = itemIds.map((itemId, index) => {
             return new Promise((resolve, reject) => {
                 const request = objectStore.get(itemId);
                 request.onsuccess = function (e) {
-                    results.push(e.target.result);
+                    // By position, not arrival order, so each result stays with its item.
+                    results[index] = e.target.result;
                     resolve();
                 };
                 request.onerror = function (e) {
