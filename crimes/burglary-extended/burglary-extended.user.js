@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Crimes Burglary Extended
 // @namespace    https://github.com/SOLiNARY
-// @version      0.7.2
+// @version      0.7.3
 // @description  Sorts all scouted by target, created date, expire date, confidence, risk or uniques number. Remembers your choice. After an update, a "What's new" popup lists what changed.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT License
@@ -24,7 +24,7 @@
     // shows one panel, not eight. The DOM is the channel because userscript sandboxes cannot see
     // each other's globals, and it needs no grants beyond what each script already asks for.
 
-    const SCRIPT_VERSION = "0.7.2";  // keep in sync with @version above
+    const SCRIPT_VERSION = "0.7.3";  // keep in sync with @version above
     const WHATS_NEW_NAME = "Crimes Burglary Extended";
     const WHATS_NEW_KEY = "silmaril-burglary-extended-last-seen-version";
     // Newest release first. Every release above the version last seen is shown at once, so
@@ -996,9 +996,10 @@
                         const aFill = a.querySelector('[class*=progressFill___]');
                         const bFill = b.querySelector('[class*=progressFill___]');
                         const sizeProp = isMobileView ? 'width' : 'height';
-                        const aValue = aFill ? (aFill.style[sizeProp] || '0%').slice(0, -1) : '0';
-                        const bValue = bFill ? (bFill.style[sizeProp] || '0%').slice(0, -1) : '0';
-                        return aValue.localeCompare(bValue, undefined, {'numeric': true}) * sortDirection;
+                        // Compared as numbers: a numeric string compare puts 45.5 before 45.25.
+                        const aValue = aFill ? parseFloat(aFill.style[sizeProp]) || 0 : 0;
+                        const bValue = bFill ? parseFloat(bFill.style[sizeProp]) || 0 : 0;
+                        return (aValue - bValue) * sortDirection;
                     });
                     break;
                 case sortBy.Status:
@@ -1012,8 +1013,8 @@
                     break;
                 case sortBy.Risk:
                     childElements.sort((a, b) => {
-                        const aValue = a.getAttribute('data-safety-level') ?? safetyLevels.Unknown;
-                        const bValue = b.getAttribute('data-safety-level') ?? safetyLevels.Unknown;
+                        const aValue = a.getAttribute('data-safety-level') ?? String(safetyLevels.Unknown);
+                        const bValue = b.getAttribute('data-safety-level') ?? String(safetyLevels.Unknown);
                         return aValue.localeCompare(bValue, undefined, {'numeric': true}) * sortDirection;
                     });
                     break;

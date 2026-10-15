@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Fake Walls Warning
 // @namespace    https://github.com/SOLiNARY
-// @version      0.6
+// @version      0.6.1
 // @description  Shows warning label over a fake wall territory war. After an update, a "What's new" popup lists what changed.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT License
@@ -20,7 +20,7 @@
     // shows one panel, not eight. The DOM is the channel because userscript sandboxes cannot see
     // each other's globals, and it needs no grants beyond what each script already asks for.
 
-    const SCRIPT_VERSION = "0.6";  // keep in sync with @version above
+    const SCRIPT_VERSION = "0.6.1";  // keep in sync with @version above
     const WHATS_NEW_NAME = "Fake Walls Warning";
     const WHATS_NEW_KEY = "silmaril-fake-walls-warning-last-seen-version";
     // Newest release first. Every release above the version last seen is shown at once, so
@@ -320,7 +320,7 @@ li.warListItem___eE_Ve div.status-wrap.real-wall::before {
         if (factionIds != null){
             return;
         }
-        factionIds = document.querySelectorAll("#react-root > div > div > div.announcement > p > div:nth-child(1)")[0].innerText.split(',');
+        factionIds = document.querySelectorAll("#react-root > div > div > div.announcement > p > div:nth-child(1)")[0].innerText.split(',').map(id => id.trim());
         console.log(factionIds);
     }
 })();

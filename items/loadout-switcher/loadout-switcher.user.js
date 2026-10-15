@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Loadout Switcher
 // @namespace    https://github.com/SOLiNARY
-// @version      0.6.14
+// @version      0.6.15
 // @description  Adds customisable quick loadout change buttons on Items page. After an update, a "What's new" popup lists what changed.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT
@@ -22,7 +22,7 @@
     // shows one panel, not eight. The DOM is the channel because userscript sandboxes cannot see
     // each other's globals, and it needs no grants beyond what each script already asks for.
 
-    const SCRIPT_VERSION = "0.6.14";  // keep in sync with @version above
+    const SCRIPT_VERSION = "0.6.15";  // keep in sync with @version above
     const WHATS_NEW_NAME = "Loadout Switcher";
     const WHATS_NEW_KEY = "silmaril-loadout-switcher-last-seen-version";
     // Newest release first. Every release above the version last seen is shown at once, so
@@ -461,7 +461,12 @@ div.silmaril-torn-loadout-switcher-container a img {
 
     const setLoadoutUrl = "/page.php?sid=itemsLoadouts&step=changeLoadout&setID={loadoutId}&rfcv={rfcv}";
     let selectedLoadouts = localStorage.getItem("silmaril-loadout-switcher-selected-loadouts") ?? "1,2,3";
-    let selectedLoadoutsArray = selectedLoadouts.split(',');
+    let selectedLoadoutsArray = parseSelectedLoadouts(selectedLoadouts);
+
+    // The setting is typed by hand, so "1, 2, 3" has to read the same as "1,2,3".
+    function parseSelectedLoadouts(text) {
+        return text.split(',').map(loadout => loadout.trim()).filter(loadout => loadout !== '');
+    }
 
     const containerClass = 'silmaril-torn-loadout-switcher-container';
     const hostClass = 'silmaril-torn-loadout-switcher-host';
@@ -568,7 +573,7 @@ div.silmaril-torn-loadout-switcher-container a img {
             if (userInput !== null && userInput.length > 0) {
                 localStorage.setItem("silmaril-loadout-switcher-selected-loadouts", userInput);
                 selectedLoadouts = userInput;
-                selectedLoadoutsArray = selectedLoadouts.split(',');
+                selectedLoadoutsArray = parseSelectedLoadouts(selectedLoadouts);
                 root.querySelectorAll("button, a").forEach((item) => item.remove());
                 addLoadoutAndSettingButtons(root);
                 addLogo(root);
@@ -665,12 +670,11 @@ div.silmaril-torn-loadout-switcher-container a img {
         const wave = root.querySelector("div.wave");
         if (!wave) return;
         wave.style.backgroundColor = color;
-        if (durationSeconds) {
-            wave.style.animationDuration = `${durationSeconds}s`;
-        }
         wave.style.animation = 'none';
         wave.offsetHeight;
         wave.style.animation = null;
+        // After the reset, because clearing the animation shorthand also clears its duration.
+        wave.style.animationDuration = durationSeconds ? `${durationSeconds}s` : '';
     }
 
     function sleep(ms) {

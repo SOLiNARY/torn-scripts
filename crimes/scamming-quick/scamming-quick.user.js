@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Crimes Scamming Quick
 // @namespace    https://github.com/SOLiNARY
-// @version      0.1.6
+// @version      0.1.7
 // @description  Makes clicks on response emojis do the respond attempt & hovering on them is like clicking on them. After an update, a "What's new" popup lists what changed.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT License
@@ -21,12 +21,20 @@
     // shows one panel, not eight. The DOM is the channel because userscript sandboxes cannot see
     // each other's globals, and it needs no grants beyond what each script already asks for.
 
-    const SCRIPT_VERSION = "0.1.6";  // keep in sync with @version above
+    const SCRIPT_VERSION = "0.1.7";  // keep in sync with @version above
     const WHATS_NEW_NAME = "Crimes Scamming Quick";
     const WHATS_NEW_KEY = "silmaril-scamming-quick-last-seen-version";
     // Newest release first. Every release above the version last seen is shown at once, so
     // updating across several versions still reports the whole gap.
     const CHANGELOG = [
+        {
+            version: "0.1.7",
+            date: "2026-10-15",
+            changes: [
+                'Fixed: one click no longer commits several times after the page has changed.',
+                'Fixed: moving the mouse off a response now unselects it.'
+            ]
+        },
         {
             version: "0.1.6",
             date: "2026-09-03",
@@ -222,14 +230,26 @@
     function addHoverClickListener() {
         const buttons = document.querySelectorAll('div.crime-root.scamming-root button.response-type-button');
         buttons.forEach(button => {
+            // The observer calls this on every page change, so bind each button only once.
+            if (button.dataset.sqBound) {
+                return;
+            }
+            button.dataset.sqBound = '1';
             let clickEvent = new Event("click", {bubbles: true});
+            // Everything this button marked as selected, by hover or by click, so leaving it can
+            // undo all of it whichever child element the pointer happened to be over.
+            const marked = new Set();
+            const markSelected = function(responseBtn) {
+                responseBtn.classList.add('response-type-button-selected');
+                marked.add(responseBtn);
+            };
             button.addEventListener('click', function(event) {
                 if (!event.isTrusted) {
                     return;
                 }
                 let responseBtn = event.target.parentNode.parentNode;
                 if (!responseBtn.classList.contains('response-type-button-selected')){
-                    responseBtn.classList.add('response-type-button-selected');
+                    markSelected(responseBtn);
                     responseBtn.dispatchEvent(clickEvent);
                     return;
                 }
@@ -241,12 +261,12 @@
                 if (responseBtn.classList.contains('response-type-button-selected') || responseBtn.getAttribute('aria-disabled') === 'true'){
                     return;
                 }
-                responseBtn.classList.add('response-type-button-selected');
+                markSelected(responseBtn);
                 responseBtn.dispatchEvent(clickEvent);
             });
-            button.addEventListener('mouseexit', function(event) {
-                let responseBtn = event.target.parentNode.parentNode;
-                responseBtn.classList.remove('response-type-button-selected');
+            button.addEventListener('mouseleave', function() {
+                marked.forEach(element => element.classList.remove('response-type-button-selected'));
+                marked.clear();
             });
         });
     }

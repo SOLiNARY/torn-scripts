@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Market Filler
 // @namespace    https://github.com/SOLiNARY
-// @version      1.1.3
+// @version      1.1.4
 // @description  Adds a Fill button to every row when you list on the Item Market: one click sets the price and quantity. Price from listings (cheapest minus $1 by default), market value or live bazaars via weav3r.dev, with your own formula and min/max ranges. A popup shows the 5 cheapest listings; click one to undercut it. Quantity modes, per-category settings, favourites with Fill All. Open settings with the cog on the Fill All bar or by holding Fill for 2s.
 // @author       Silmaril [2665762]
 // @license      MIT License
@@ -19,7 +19,7 @@
     'use strict';
 
     // Keep in sync with @version above — it keys the "What's new" popup.
-    const SCRIPT_VERSION = "1.1.3";
+    const SCRIPT_VERSION = "1.1.4";
 
     const itemUrl = "https://api.torn.com/torn/{itemId}?selections=items&key={apiKey}&comment=MarketFiller";
     const marketUrl = "https://api.torn.com/v2/market/{itemId}?selections=itemMarket&key={apiKey}&comment=MarketFiller";
@@ -344,7 +344,8 @@
     }
 
     function stripDeltaBracket(formula){
-        return formula.indexOf('[') == -1 ? formula : formula.substring(0, formula.indexOf('['));
+        // Trimmed, because Save accepts "-1 [0]" and the delta parser does not allow the space.
+        return formula.indexOf('[') == -1 ? formula : formula.substring(0, formula.indexOf('[')).trim();
     }
 
     // The index of the ) that closes the ( at `open`, or -1 when nothing does.
@@ -753,6 +754,9 @@
             let listings = normaliseBazaarListings(data);
             return listings.length > 0 ? listings : null;
         }
+        if (data.itemmarket.listings.length === 0){
+            return {"price": 'No listings!', "amount": 0, "status": 'error'};
+        }
         if (data.itemmarket.listings[0].price == null){
             console.warn("[TornMarketFiller] The API is temporarily disabled, please try again later");
             return {"price": 'API is OFF!', "amount": 0, "status": 'error'};
@@ -893,7 +897,7 @@
             // No per-category overrides of either kind → category is irrelevant; behave like
             // the default path.
             if (Object.keys(categoryDeltas).length === 0 && !hasCategoryQuantityOverrides()){
-                return priceSetting(priceDeltaRaw, itemId, null, null);
+                return await priceSetting(priceDeltaRaw, itemId, null, null);
             }
 
             let cached = getCachedCategory(itemId);
@@ -917,11 +921,12 @@
             if (actualType != null && (cached == null || cached.type !== actualType || expired)){
                 cacheItemCategory(itemId, actualType);
             }
-            return priceSetting(getEffectiveDelta(category), itemId, category,
+            return await priceSetting(getEffectiveDelta(category), itemId, category,
                                 { source: firstSource, formula: guessFormula, data: data });
         } catch (error) {
             console.error("[TornMarketFiller] Error fetching data:", error);
-            return { prices: 'Failed!', formula: priceDeltaRaw, category: null };
+            // The same shape as every other error, so the row shows "Failed!" rather than NaN.
+            return { prices: {"price": 'Failed!', "amount": 0, "status": 'error'}, formula: priceDeltaRaw, category: null };
         }
     }
 
@@ -1237,7 +1242,7 @@
         if (prices != null && typeof prices === 'object'){
             return prices.amount === 0 ? (prices.status ?? 'error') : 'ok';
         }
-        return 'error'; // fetch failure ('Failed!') or anything unexpected
+        return 'error'; // anything unexpected
     }
 
     function hideAllFillPopups() {
@@ -2345,6 +2350,8 @@
 
     function GetPricesBreakdown(prices){
         if (prices == null) return "No prices loaded";
+        // An error has no listings to show, only its message: "Failed!", "No listings!" and so on.
+        if (!Array.isArray(prices) && prices.amount === 0) return prices.price;
         if (prices[0] === undefined){
             prices = Array(prices);
         }
@@ -2404,15 +2411,28 @@
         }
     }
 
+    // The median unit across every listing, weighted by quantity. Walks the sorted listings
+    // instead of expanding them unit by unit, which a stack of millions would never survive.
     function getMedianPrice(items) {
-        const prices = items.flatMap(item => Array(item.amount).fill(item.price));
-        prices.sort((a, b) => a - b);
-        const mid = Math.floor(prices.length / 2);
-        if (prices.length % 2 === 0) {
-            return (prices[mid - 1] + prices[mid]) / 2;
-        } else {
-            return prices[mid];
+        const sorted = items
+            .map(item => ({ price: item.price, amount: Math.max(0, Math.floor(item.amount ?? 1)) }))
+            .filter(item => item.amount > 0)
+            .sort((a, b) => a.price - b.price);
+        const total = sorted.reduce((sum, item) => sum + item.amount, 0);
+        if (total === 0) {
+            return items.length > 0 ? items[0].price : undefined;
         }
+        // The price of the unit at 0-based position `index` in the sorted run.
+        const unitAt = index => {
+            for (const item of sorted) {
+                if (index < item.amount) {
+                    return item.price;
+                }
+                index -= item.amount;
+            }
+        };
+        const mid = Math.floor(total / 2);
+        return total % 2 === 0 ? (unitAt(mid - 1) + unitAt(mid)) / 2 : unitAt(mid);
     }
 
     function getCurrentPage(){
