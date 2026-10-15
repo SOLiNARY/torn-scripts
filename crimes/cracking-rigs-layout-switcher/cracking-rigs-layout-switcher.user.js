@@ -37,7 +37,8 @@
             date: "2026-10-15",
             changes: [
                 'Fixed: layout buttons now switch on once the page has loaded, instead of staying greyed out.',
-                'Fixed: pressing Cancel on Save, Delete, Export or Import no longer causes an error.'
+                'Fixed: pressing Cancel on Save, Delete, Export or Import no longer causes an error.',
+                'Import now keeps a shared layout exactly as it was shared, apart from lowercasing its name.'
             ]
         },
         {
@@ -742,7 +743,7 @@
         importLayouts.textContent = 'Import layouts';
         importLayouts.addEventListener('click', () => {
             IS_DEBUG ? console.log('save current layout') : null;
-            let userInput = prompt("Please copy-paste the string which has been shared with you")?.toLowerCase() ?? null;
+            let userInput = prompt("Please copy-paste the string which has been shared with you");
             if (userInput !== null && userInput.length > 0) {
                 try {
                     const allLayoutsToImport = JSON.parse(userInput);
@@ -785,17 +786,20 @@
         rigLayouts = localStorage.getItem("silmaril-rigs-layout-switcher-layouts") ?? "";
         rigLayoutsArray = rigLayouts.split(',');
  
-        allLayoutNamesToImport.forEach((layoutName) => {
+        allLayoutNamesToImport.forEach((sharedName) => {
+            // Only the name is lowercased, to match how Save names layouts; the layout itself is
+            // stored exactly as it was shared.
+            const layoutName = sharedName.toLowerCase();
             if (layoutName == ''){
                 return;
             }
             IS_DEBUG ? console.log('layoutName', layoutName) : null;
-            IS_DEBUG ? console.log('layout', allLayoutsToImport[layoutName]) : null;
+            IS_DEBUG ? console.log('layout', allLayoutsToImport[sharedName]) : null;
             try {
                 if (!rigLayoutsArray.includes(layoutName)) {
                     rigLayoutsArray.push(layoutName);
                 }
-                localStorage.setItem(`silmaril-rigs-layout-switcher-layout-${layoutName}`, JSON.stringify(allLayoutsToImport[layoutName], customReplacer));
+                localStorage.setItem(`silmaril-rigs-layout-switcher-layout-${layoutName}`, JSON.stringify(allLayoutsToImport[sharedName], customReplacer));
                 IS_DEBUG ? console.log('layougetLayout', localStorage.getItem(`silmaril-rigs-layout-switcher-layout-${layoutName}`)) : null;
             } catch (e) {
                 console.error("[TornRigsLayoutSwitcher] Error while importing Layout", e);
