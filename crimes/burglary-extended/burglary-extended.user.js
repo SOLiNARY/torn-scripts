@@ -996,9 +996,10 @@
                         const aFill = a.querySelector('[class*=progressFill___]');
                         const bFill = b.querySelector('[class*=progressFill___]');
                         const sizeProp = isMobileView ? 'width' : 'height';
-                        const aValue = aFill ? (aFill.style[sizeProp] || '0%').slice(0, -1) : '0';
-                        const bValue = bFill ? (bFill.style[sizeProp] || '0%').slice(0, -1) : '0';
-                        return aValue.localeCompare(bValue, undefined, {'numeric': true}) * sortDirection;
+                        // Compared as numbers: a numeric string compare puts 45.5 before 45.25.
+                        const aValue = aFill ? parseFloat(aFill.style[sizeProp]) || 0 : 0;
+                        const bValue = bFill ? parseFloat(bFill.style[sizeProp]) || 0 : 0;
+                        return (aValue - bValue) * sortDirection;
                     });
                     break;
                 case sortBy.Status:
