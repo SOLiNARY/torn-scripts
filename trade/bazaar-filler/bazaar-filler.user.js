@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Bazaar Filler
 // @namespace    https://github.com/SOLiNARY
-// @version      1.11.3
+// @version      1.11.4
 // @description  Adds a Fill button to every item on your bazaar's Add and Manage pages: one click sets the price and quantity. Price from the item market (cheapest minus $1 by default), market value or live bazaars via weav3r.dev, with your own formula and min/max ranges. Quantity modes, per-category settings, favourites with Fill All, and a bubble that warns when your price is far below the competition. Open settings with the cog on the Fill All bar or by holding Fill for 3s.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT License
@@ -20,7 +20,7 @@
     'use strict';
 
     // Keep in sync with @version above — it keys the "What's new" popup.
-    const SCRIPT_VERSION = "1.11.3";
+    const SCRIPT_VERSION = "1.11.4";
 
     const marketUrl = "https://api.torn.com/v2/market?id={itemId}&selections=itemMarket&key={apiKey}&comment=BazaarFiller";
     const itemUrl = "https://api.torn.com/torn/{itemId}?selections=items&key={apiKey}&comment=BazaarFiller";
@@ -90,6 +90,15 @@
     // Write every line for a player, not a developer: one short sentence, plain words,
     // what changed for them rather than what changed in the code.
     const CHANGELOG = [
+        {
+            version: "1.11.4",
+            date: "2026-10-15",
+            changes: [
+                'Fixed: <code>-1[median]</code> now fills the middle item-market listing minus $1. It was quietly using the cheapest one.',
+                'Fixed: a space before the bracket, as in <code>-1 [0]</code>, no longer stops Fill from working.',
+                'Fixed: <code>[bazaar:median]</code> no longer freezes the page on an item with a huge stack listed.'
+            ]
+        },
         {
             version: "1.11.0",
             date: "2026-09-21",
@@ -1387,7 +1396,8 @@
     }
 
     function stripDeltaBracket(formula){
-        return formula.indexOf('[') == -1 ? formula : formula.substring(0, formula.indexOf('['));
+        // Trimmed, because Save accepts "-1 [0]" and the delta parser does not allow the space.
+        return formula.indexOf('[') == -1 ? formula : formula.substring(0, formula.indexOf('[')).trim();
     }
 
     function getDeltaSlotOffset(formula){
@@ -1779,9 +1789,11 @@
             console.warn("[TornBazaarFiller] The API is BROKEN!");
         }
         let listings = data.itemmarket.listings;
-        let slot = getDeltaSlotOffset(formula);
+        let basis = bracketToken(formula) === 'median'
+            ? getMedianPrice(listings)
+            : listings[Math.min(getDeltaSlotOffset(formula), listings.length - 1)].price;
         return {
-            price: Math.round(performOperation(listings[Math.min(slot, listings.length - 1)].price, stripDeltaBracket(formula))),
+            price: Math.round(performOperation(basis, stripDeltaBracket(formula))),
             listings: listings
         };
     }
@@ -1928,11 +1940,28 @@
         }
     }
 
+    // The median unit across every listing, weighted by quantity. Walks the sorted listings
+    // instead of expanding them unit by unit, which a stack of millions would never survive.
     function getMedianPrice(listings) {
-        const prices = listings.flatMap(listing => Array(listing.amount).fill(listing.price));
-        prices.sort((a, b) => a - b);
-        const mid = Math.floor(prices.length / 2);
-        return prices.length % 2 === 0 ? (prices[mid - 1] + prices[mid]) / 2 : prices[mid];
+        const sorted = listings
+            .map(listing => ({ price: listing.price, amount: Math.max(0, Math.floor(listing.amount ?? 1)) }))
+            .filter(listing => listing.amount > 0)
+            .sort((a, b) => a.price - b.price);
+        const total = sorted.reduce((sum, listing) => sum + listing.amount, 0);
+        if (total === 0) {
+            return listings.length > 0 ? listings[0].price : undefined;
+        }
+        // The price of the unit at 0-based position `index` in the sorted run.
+        const unitAt = index => {
+            for (const listing of sorted) {
+                if (index < listing.amount) {
+                    return listing.price;
+                }
+                index -= listing.amount;
+            }
+        };
+        const mid = Math.floor(total / 2);
+        return total % 2 === 0 ? (unitAt(mid - 1) + unitAt(mid)) / 2 : unitAt(mid);
     }
 
     // weav3r carries no item type, so a bazaar response can never teach us a category — the
