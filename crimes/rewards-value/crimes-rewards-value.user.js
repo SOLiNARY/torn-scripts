@@ -375,7 +375,9 @@ span#silmaril-crimes-rewards-value-total {
                             return;
                         }
                         const itemInfo = itemsInfo[infoIndex++];
-                        const itemQuantity = parseInt(reward.querySelector('span[class*=count___]')?.textContent) ?? 1;
+                        // The first number in the count, so "x2", "2" and "1,000" all read right; no number means 1.
+                        const countMatch = (reward.querySelector('span[class*=count___]')?.textContent ?? '').match(/\d[\d,]*/);
+                        const itemQuantity = countMatch ? parseInt(countMatch[0].replaceAll(',', ''), 10) : 1;
                         const itemMarketValue = itemInfo?.marketValue;
                         if (itemMarketValue == null) {
                             return;
