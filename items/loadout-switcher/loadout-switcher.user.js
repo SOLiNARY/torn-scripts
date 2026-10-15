@@ -461,7 +461,12 @@ div.silmaril-torn-loadout-switcher-container a img {
 
     const setLoadoutUrl = "/page.php?sid=itemsLoadouts&step=changeLoadout&setID={loadoutId}&rfcv={rfcv}";
     let selectedLoadouts = localStorage.getItem("silmaril-loadout-switcher-selected-loadouts") ?? "1,2,3";
-    let selectedLoadoutsArray = selectedLoadouts.split(',');
+    let selectedLoadoutsArray = parseSelectedLoadouts(selectedLoadouts);
+
+    // The setting is typed by hand, so "1, 2, 3" has to read the same as "1,2,3".
+    function parseSelectedLoadouts(text) {
+        return text.split(',').map(loadout => loadout.trim()).filter(loadout => loadout !== '');
+    }
 
     const containerClass = 'silmaril-torn-loadout-switcher-container';
     const hostClass = 'silmaril-torn-loadout-switcher-host';
@@ -568,7 +573,7 @@ div.silmaril-torn-loadout-switcher-container a img {
             if (userInput !== null && userInput.length > 0) {
                 localStorage.setItem("silmaril-loadout-switcher-selected-loadouts", userInput);
                 selectedLoadouts = userInput;
-                selectedLoadoutsArray = selectedLoadouts.split(',');
+                selectedLoadoutsArray = parseSelectedLoadouts(selectedLoadouts);
                 root.querySelectorAll("button, a").forEach((item) => item.remove());
                 addLoadoutAndSettingButtons(root);
                 addLogo(root);
