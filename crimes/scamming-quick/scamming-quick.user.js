@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Crimes Scamming Quick
 // @namespace    https://github.com/SOLiNARY
-// @version      0.1.7
+// @version      0.1.8
 // @description  Makes clicks on response emojis do the respond attempt & hovering on them is like clicking on them. After an update, a "What's new" popup lists what changed.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT License
@@ -21,12 +21,19 @@
     // shows one panel, not eight. The DOM is the channel because userscript sandboxes cannot see
     // each other's globals, and it needs no grants beyond what each script already asks for.
 
-    const SCRIPT_VERSION = "0.1.7";  // keep in sync with @version above
+    const SCRIPT_VERSION = "0.1.8";  // keep in sync with @version above
     const WHATS_NEW_NAME = "Crimes Scamming Quick";
     const WHATS_NEW_KEY = "silmaril-scamming-quick-last-seen-version";
     // Newest release first. Every release above the version last seen is shown at once, so
     // updating across several versions still reports the whole gap.
     const CHANGELOG = [
+        {
+            version: "0.1.8",
+            date: "2026-10-15",
+            changes: [
+                'Fixed: moving the mouse across responses no longer leaves their tooltips stuck open.'
+            ]
+        },
         {
             version: "0.1.7",
             date: "2026-10-15",
@@ -226,6 +233,7 @@
 
  
     const isMobileView = window.innerWidth <= 784;
+    const TOOLTIP_CHECK_DELAY_MS = 100;
  
     function addHoverClickListener() {
         const buttons = document.querySelectorAll('div.crime-root.scamming-root button.response-type-button');
@@ -235,40 +243,69 @@
                 return;
             }
             button.dataset.sqBound = '1';
-            let clickEvent = new Event("click", {bubbles: true});
-            // Everything this button marked as selected, by hover or by click, so leaving it can
-            // undo all of it whichever child element the pointer happened to be over.
-            const marked = new Set();
-            const markSelected = function(responseBtn) {
-                responseBtn.classList.add('response-type-button-selected');
-                marked.add(responseBtn);
+            // Torn keeps the state on the button itself: aria-pressed for the chosen response (with
+            // its selected___ class as a fallback), aria-disabled for one that can't be picked now.
+            const isSelected = function() {
+                const pressed = button.getAttribute('aria-pressed');
+                return pressed != null ? pressed === 'true' : /\bselected___/.test(button.className);
             };
+            const isDisabled = () => button.getAttribute('aria-disabled') === 'true';
             button.addEventListener('click', function(event) {
-                if (!event.isTrusted) {
+                // Our own clicks are skipped, and a response that isn't chosen yet is left to
+                // Torn's own click handler, which runs right after this one.
+                if (!event.isTrusted || !isSelected()) {
                     return;
                 }
-                let responseBtn = event.target.parentNode.parentNode;
-                if (!responseBtn.classList.contains('response-type-button-selected')){
-                    markSelected(responseBtn);
-                    responseBtn.dispatchEvent(clickEvent);
-                    return;
-                }
-                let commitBtn = event.target.parentNode.parentNode.parentNode.parentNode.querySelector('div[class*=commitButtonSection___] button.commit-button');
-                commitBtn.dispatchEvent(clickEvent);
+                findCommitButton(button)?.dispatchEvent(new Event("click", {bubbles: true}));
             });
-            button.addEventListener('mouseover', function(event) {
-                let responseBtn = event.target.parentNode.parentNode;
-                if (responseBtn.classList.contains('response-type-button-selected') || responseBtn.getAttribute('aria-disabled') === 'true'){
+            // mouseenter fires once each time the pointer comes onto the button; mouseover fired
+            // again for every svg path and ring inside it.
+            button.addEventListener('mouseenter', function() {
+                if (isSelected() || isDisabled()) {
                     return;
                 }
-                markSelected(responseBtn);
-                responseBtn.dispatchEvent(clickEvent);
+                button.dispatchEvent(new Event("click", {bubbles: true}));
             });
+            // Torn's tooltip also opens on a click, and one opened that way stays open after the
+            // pointer leaves, until the next press anywhere else. Selecting on hover is such a
+            // click, so close a tooltip that is still open once the pointer has gone.
             button.addEventListener('mouseleave', function() {
-                marked.forEach(element => element.classList.remove('response-type-button-selected'));
-                marked.clear();
+                setTimeout(function() {
+                    if (button.getAttribute('data-is-tooltip-opened') !== 'true' || button.matches(':hover')) {
+                        return;
+                    }
+                    // Press on the response the pointer moved to, which keeps that one's tooltip, or
+                    // else on the page itself, which is outside Torn's React tree, so no button sees it.
+                    pressOn(document.querySelector('div.crime-root.scamming-root button.response-type-button:hover') ?? document.body);
+                }, TOOLTIP_CHECK_DELAY_MS);
             });
         });
+    }
+
+    // A mouse press with no click: what a player's own press elsewhere does to an open tooltip.
+    function pressOn(target) {
+        // Aim at the middle of the part of the target that is on screen.
+        const rect = target.getBoundingClientRect();
+        const init = {bubbles: true, cancelable: true, composed: true, view: window, button: 0,
+                      clientX: (Math.max(rect.left, 0) + Math.min(rect.right, window.innerWidth)) / 2,
+                      clientY: (Math.max(rect.top, 0) + Math.min(rect.bottom, window.innerHeight)) / 2};
+        const pointer = {pointerId: 1, pointerType: 'mouse', isPrimary: true};
+        target.dispatchEvent(new PointerEvent('pointerdown', {...init, ...pointer, buttons: 1}));
+        target.dispatchEvent(new MouseEvent('mousedown', {...init, buttons: 1}));
+        target.dispatchEvent(new PointerEvent('pointerup', {...init, ...pointer, buttons: 0}));
+        target.dispatchEvent(new MouseEvent('mouseup', {...init, buttons: 0}));
+    }
+
+    // The commit button lives in the same crime row as the responses. The nearest ancestor that
+    // holds exactly one is that row; one holding several is the list of rows, so stop there.
+    function findCommitButton(button) {
+        for (let element = button.parentElement; element != null; element = element.parentElement) {
+            const commitButtons = element.querySelectorAll('div[class*=commitButtonSection___] button.commit-button');
+            if (commitButtons.length > 0) {
+                return commitButtons.length === 1 ? commitButtons[0] : null;
+            }
+        }
+        return null;
     }
  
     if (isMobileView){
