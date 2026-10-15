@@ -1773,9 +1773,10 @@
     }
 
     function itemMarketPrice(data, formula, itemId){
-        // Nothing listed means nothing to undercut: fail the row like an API error, leaving it as is.
+        // Nothing listed means nothing to undercut: fail the row like an API error, leaving it as
+        // is. The error is a Torn-shaped payload, the same as every other `{ error }` returned here.
         if (data.itemmarket.listings.length === 0){
-            return { error: { code: -1, error: "no item-market listings for item " + itemId } };
+            return { error: { error: { code: -1, error: "no item-market listings for item " + itemId } } };
         }
         if (data.itemmarket.listings[0].price == null){
             console.warn("[TornBazaarFiller] The API is temporarily disabled, please try again later");
