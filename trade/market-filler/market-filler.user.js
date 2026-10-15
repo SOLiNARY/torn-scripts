@@ -925,7 +925,8 @@
                                 { source: firstSource, formula: guessFormula, data: data });
         } catch (error) {
             console.error("[TornMarketFiller] Error fetching data:", error);
-            return { prices: 'Failed!', formula: priceDeltaRaw, category: null };
+            // The same shape as every other error, so the row shows "Failed!" rather than NaN.
+            return { prices: {"price": 'Failed!', "amount": 0, "status": 'error'}, formula: priceDeltaRaw, category: null };
         }
     }
 
@@ -1241,7 +1242,7 @@
         if (prices != null && typeof prices === 'object'){
             return prices.amount === 0 ? (prices.status ?? 'error') : 'ok';
         }
-        return 'error'; // fetch failure ('Failed!') or anything unexpected
+        return 'error'; // anything unexpected
     }
 
     function hideAllFillPopups() {
@@ -2349,6 +2350,8 @@
 
     function GetPricesBreakdown(prices){
         if (prices == null) return "No prices loaded";
+        // An error has no listings to show, only its message: "Failed!", "No listings!" and so on.
+        if (!Array.isArray(prices) && prices.amount === 0) return prices.price;
         if (prices[0] === undefined){
             prices = Array(prices);
         }
