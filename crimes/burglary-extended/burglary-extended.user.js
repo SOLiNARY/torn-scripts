@@ -31,13 +31,6 @@
     // updating across several versions still reports the whole gap.
     const CHANGELOG = [
         {
-            version: "0.7.3",
-            date: "2026-10-15",
-            changes: [
-                'Fixed: sorting by Risk no longer stops when a target has no safety rating.'
-            ]
-        },
-        {
             version: "0.7.2",
             date: "2026-09-03",
             changes: [

@@ -29,13 +29,6 @@
     // updating across several versions still reports the whole gap.
     const CHANGELOG = [
         {
-            version: "0.6.15",
-            date: "2026-10-15",
-            changes: [
-                'Fixed: the warning flash now lasts as long as it should, instead of always 3 seconds.'
-            ]
-        },
-        {
             version: "0.6.14",
             date: "2026-09-03",
             changes: [

@@ -28,13 +28,6 @@
     // updating across several versions still reports the whole gap.
     const CHANGELOG = [
         {
-            version: "0.3.7.pda",
-            date: "2026-10-15",
-            changes: [
-                'Fixed: Army spy reports on the jobs page parse again instead of failing.'
-            ]
-        },
-        {
             version: "0.3.6.pda",
             date: "2026-09-03",
             changes: [

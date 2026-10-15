@@ -29,13 +29,6 @@
     // updating across several versions still reports the whole gap.
     const CHANGELOG = [
         {
-            version: "0.6.2",
-            date: "2026-10-15",
-            changes: [
-                'Fixed: values no longer land on the wrong item when a reward has no picture.'
-            ]
-        },
-        {
             version: "0.6",
             date: "2026-09-03",
             changes: [

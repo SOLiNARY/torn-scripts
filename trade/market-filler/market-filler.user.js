@@ -89,16 +89,6 @@
     // what changed for them rather than what changed in the code.
     const CHANGELOG = [
         {
-            version: "1.1.4",
-            date: "2026-10-15",
-            changes: [
-                'Fixed: a space before the bracket, as in <code>-1 [0]</code>, no longer stops Fill from working.',
-                'Fill now says Failed! when prices could not be loaded, instead of showing Loading forever.',
-                'An item with no market listings now says No listings! instead of failing.',
-                'Fixed: <code>[median]</code> no longer freezes the page on an item with a huge stack listed.'
-            ]
-        },
-        {
             version: "1.1.0",
             date: "2026-09-21",
             changes: [

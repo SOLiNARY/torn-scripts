@@ -27,13 +27,6 @@
     // updating across several versions still reports the whole gap.
     const CHANGELOG = [
         {
-            version: "0.6.1",
-            date: "2026-10-15",
-            changes: [
-                'Fixed: fake walls listed with spaces after the commas are now recognised, instead of showing Join.'
-            ]
-        },
-        {
             version: "0.6",
             date: "2026-09-03",
             changes: [

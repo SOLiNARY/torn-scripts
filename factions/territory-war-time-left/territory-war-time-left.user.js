@@ -27,13 +27,6 @@
     // updating across several versions still reports the whole gap.
     const CHANGELOG = [
         {
-            version: "0.4.1",
-            date: "2026-10-15",
-            changes: [
-                'Fixed: the countdown no longer shows 60 in the seconds.'
-            ]
-        },
-        {
             version: "0.4",
             date: "2026-09-03",
             changes: [

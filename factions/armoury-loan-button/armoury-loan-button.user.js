@@ -29,13 +29,6 @@
     // updating across several versions still reports the whole gap.
     const CHANGELOG = [
         {
-            version: "0.6.8",
-            date: "2026-10-15",
-            changes: [
-                'Fixed: retrying a failed loan for someone else shows how many are free, instead of "undefined free".'
-            ]
-        },
-        {
             version: "0.6.5",
             date: "2026-09-10",
             changes: [

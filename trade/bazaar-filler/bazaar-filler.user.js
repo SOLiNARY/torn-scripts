@@ -91,16 +91,6 @@
     // what changed for them rather than what changed in the code.
     const CHANGELOG = [
         {
-            version: "1.11.4",
-            date: "2026-10-15",
-            changes: [
-                'Fixed: <code>-1[median]</code> now fills the middle item-market listing minus $1. It was quietly using the cheapest one.',
-                'Fixed: a space before the bracket, as in <code>-1 [0]</code>, no longer stops Fill from working.',
-                'Fixed: <code>[bazaar:median]</code> no longer freezes the page on an item with a huge stack listed.',
-                'An item with no item-market listings now flashes red and is left as it is, instead of breaking Fill.'
-            ]
-        },
-        {
             version: "1.11.0",
             date: "2026-09-21",
             changes: [

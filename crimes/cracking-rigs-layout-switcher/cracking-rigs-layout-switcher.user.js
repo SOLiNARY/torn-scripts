@@ -33,15 +33,6 @@
     // updating across several versions still reports the whole gap.
     const CHANGELOG = [
         {
-            version: "0.7.5",
-            date: "2026-10-15",
-            changes: [
-                'Fixed: layout buttons now switch on once the page has loaded, instead of staying greyed out.',
-                'Fixed: pressing Cancel on Save, Delete, Export or Import no longer causes an error.',
-                'Import now keeps a shared layout exactly as it was shared, apart from lowercasing its name.'
-            ]
-        },
-        {
             version: "0.7.4",
             date: "2026-09-03",
             changes: [
