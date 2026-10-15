@@ -236,15 +236,20 @@
             }
             button.dataset.sqBound = '1';
             let clickEvent = new Event("click", {bubbles: true});
-            // What the hover selected, so leaving can undo it whichever child the pointer entered on.
-            let hoverSelected = null;
+            // Everything this button marked as selected, by hover or by click, so leaving it can
+            // undo all of it whichever child element the pointer happened to be over.
+            const marked = new Set();
+            const markSelected = function(responseBtn) {
+                responseBtn.classList.add('response-type-button-selected');
+                marked.add(responseBtn);
+            };
             button.addEventListener('click', function(event) {
                 if (!event.isTrusted) {
                     return;
                 }
                 let responseBtn = event.target.parentNode.parentNode;
                 if (!responseBtn.classList.contains('response-type-button-selected')){
-                    responseBtn.classList.add('response-type-button-selected');
+                    markSelected(responseBtn);
                     responseBtn.dispatchEvent(clickEvent);
                     return;
                 }
@@ -256,13 +261,12 @@
                 if (responseBtn.classList.contains('response-type-button-selected') || responseBtn.getAttribute('aria-disabled') === 'true'){
                     return;
                 }
-                responseBtn.classList.add('response-type-button-selected');
-                hoverSelected = responseBtn;
+                markSelected(responseBtn);
                 responseBtn.dispatchEvent(clickEvent);
             });
             button.addEventListener('mouseleave', function() {
-                hoverSelected?.classList.remove('response-type-button-selected');
-                hoverSelected = null;
+                marked.forEach(element => element.classList.remove('response-type-button-selected'));
+                marked.clear();
             });
         });
     }
