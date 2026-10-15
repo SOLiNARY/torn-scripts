@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn SpyParse
 // @namespace    https://github.com/SOLiNARY
-// @version      0.3.6.pda
+// @version      0.3.7.pda
 // @description  Parse spy reports & save them in local storage After an update, a "What's new" popup lists what changed.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT License
@@ -21,12 +21,19 @@
     // shows one panel, not eight. The DOM is the channel because userscript sandboxes cannot see
     // each other's globals, and it needs no grants beyond what each script already asks for.
 
-    const SCRIPT_VERSION = "0.3.6.pda";  // keep in sync with @version above
+    const SCRIPT_VERSION = "0.3.7.pda";  // keep in sync with @version above
     const WHATS_NEW_NAME = "SpyParse";
     const WHATS_NEW_KEY = "silmaril-spy-parse-last-seen-version";
     // Newest release first. Every release above the version last seen is shown at once, so
     // updating across several versions still reports the whole gap.
     const CHANGELOG = [
+        {
+            version: "0.3.7.pda",
+            date: "2026-10-15",
+            changes: [
+                'Fixed: Army spy reports on the jobs page parse again instead of failing.'
+            ]
+        },
         {
             version: "0.3.6.pda",
             date: "2026-09-03",
@@ -230,7 +237,8 @@
         "Type: Law Firm": SpyJobs.LawFirm,
         "Type: Television Network": SpyJobs.TelevisionNetwork
     }
-    let playerJob = 20;
+    // Army spies report on jobs.php; on companies.php the company type still defaults to Law Firm.
+    let playerJob = location.pathname.startsWith("/jobs.php") ? SpyJobs.Army : SpyJobs.LawFirm;
     let spyReports = {};
  
     const viewPortWidthPx = window.innerWidth;
