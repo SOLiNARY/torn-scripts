@@ -96,7 +96,8 @@
             changes: [
                 'Fixed: <code>-1[median]</code> now fills the middle item-market listing minus $1. It was quietly using the cheapest one.',
                 'Fixed: a space before the bracket, as in <code>-1 [0]</code>, no longer stops Fill from working.',
-                'Fixed: <code>[bazaar:median]</code> no longer freezes the page on an item with a huge stack listed.'
+                'Fixed: <code>[bazaar:median]</code> no longer freezes the page on an item with a huge stack listed.',
+                'An item with no item-market listings now flashes red and is left as it is, instead of breaking Fill.'
             ]
         },
         {
@@ -1782,6 +1783,10 @@
     }
 
     function itemMarketPrice(data, formula, itemId){
+        // Nothing listed means nothing to undercut: fail the row like an API error, leaving it as is.
+        if (data.itemmarket.listings.length === 0){
+            return { error: { code: -1, error: "no item-market listings for item " + itemId } };
+        }
         if (data.itemmarket.listings[0].price == null){
             console.warn("[TornBazaarFiller] The API is temporarily disabled, please try again later");
         }
