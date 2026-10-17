@@ -34,8 +34,8 @@
             changes: [
             'New look: each loadout button shows its slot number next to its name, and the loadout you have on is green.',
             'A tick appears on the button once the switch goes through, and it turns red if it does not.',
-            'Press the green button to put that loadout on again; hovering it shows Reload.',
-            'The + button opens a proper settings window where you tick which loadouts get a button.'
+            'Press the green button to reload the page; hovering it shows Reload.',
+            'The + button opens a proper settings window where you tick which loadouts get a button and drag them into order.'
             ]
         },
         {
@@ -486,9 +486,9 @@ div.silmaril-ls-chips {
     color: #fff;
 }
 
-/* Pressing the loadout that is already on puts it on again, which re-equips anything
-   taken off since; the hover says so. The text swap is drawn in CSS so the label never
-   has to be rebuilt, and Torn's polls cannot leave it stuck on "Reload". */
+/* Pressing the loadout that is already on reloads the page; the hover says so. The text
+   swap is drawn in CSS so the label never has to be rebuilt, and Torn's polls cannot leave
+   it stuck on "Reload". */
 .silmaril-ls-chips .silmaril-ls-active:not(.disabled):not(.silmaril-ls-busy):hover .silmaril-ls-num,
 .silmaril-ls-chips .silmaril-ls-active:not(.disabled):not(.silmaril-ls-busy):hover .silmaril-ls-name {
     font-size: 0;
@@ -852,17 +852,44 @@ body:not(.dark-mode) .silmaril-ls-chips .silmaril-ls-active .silmaril-ls-num {
     color: #8a8a8a;
     font-size: 12px;
 }
+#${SETTINGS_HOST_ID} .sls-row {
+    display: flex;
+    align-items: center;
+    border-radius: 4px;
+}
+#${SETTINGS_HOST_ID} .sls-row:hover {
+    background: #2a2a2a;
+}
+#${SETTINGS_HOST_ID} .sls-row.sls-dragging {
+    background: #333;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, .6);
+    position: relative;
+    z-index: 1;
+}
+#${SETTINGS_HOST_ID} .sls-handle {
+    padding: 5px 8px 5px 4px;
+    color: #777;
+    font-size: 14px;
+    letter-spacing: -3px;
+    cursor: grab;
+    touch-action: none;
+    user-select: none;
+}
+#${SETTINGS_HOST_ID} .sls-handle:hover,
+#${SETTINGS_HOST_ID} .sls-dragging .sls-handle {
+    color: #ddd;
+}
+#${SETTINGS_HOST_ID} .sls-dragging .sls-handle {
+    cursor: grabbing;
+}
 #${SETTINGS_HOST_ID} label {
+    flex: 1;
     display: flex;
     align-items: center;
     gap: 9px;
     margin: 0;
-    padding: 5px 6px;
-    border-radius: 4px;
+    padding: 5px 6px 5px 0;
     cursor: pointer;
-}
-#${SETTINGS_HOST_ID} label:hover {
-    background: #2a2a2a;
 }
 #${SETTINGS_HOST_ID} input {
     margin: 0;
@@ -911,9 +938,9 @@ body:not(.dark-mode) .silmaril-ls-chips .silmaril-ls-active .silmaril-ls-num {
         (document.head ?? document.documentElement).appendChild(style);
     }
 
-    // Lists loadouts 1-9 with a box each and hands the ticked ones to onSave. Loadouts keep
-    // the order they already had on the bar, and newly ticked ones join at the end in number
-    // order, so someone who arranged theirs by hand does not lose that arrangement.
+    // Lists loadouts 1-9 with a box each, the ones already on the bar first and in the bar's
+    // order, and hands the ticked ones to onSave in the order the list ends up in. Each row
+    // has a handle to drag it up or down.
     function openSettings(onSave) {
         if (document.getElementById(SETTINGS_HOST_ID) != null) return;
         ensureSettingsStyle();
@@ -938,12 +965,23 @@ body:not(.dark-mode) .silmaril-ls-chips .silmaril-ls-active .silmaril-ls-num {
 
         const hint = document.createElement('p');
         hint.className = 'sls-hint';
-        hint.textContent = 'Tick the loadouts that should get a button.';
+        hint.textContent = 'Tick the loadouts that should get a button, and drag them into the order you want.';
 
-        panel.append(title, hint);
-        for (let i = 1; i <= 9; i++) {
-            const loadout = String(i);
-            const row = document.createElement('label');
+        const list = document.createElement('div');
+        list.className = 'sls-list';
+        panel.append(title, hint, list);
+        const allLoadouts = ['1', '2', '3', '4', '5', '6', '7', '8', '9'];
+        const ordered = selectedLoadoutsArray.filter((loadout) => allLoadouts.includes(loadout))
+            .concat(allLoadouts.filter((loadout) => !selectedLoadoutsArray.includes(loadout)));
+        for (const loadout of ordered) {
+            const row = document.createElement('div');
+            row.className = 'sls-row';
+            const handle = document.createElement('span');
+            handle.className = 'sls-handle';
+            handle.title = 'Drag to reorder';
+            handle.textContent = '\u22ee\u22ee';
+            handle.addEventListener('pointerdown', (event) => startDrag(event, row));
+            const label = document.createElement('label');
             const box = document.createElement('input');
             box.type = 'checkbox';
             box.value = loadout;
@@ -958,8 +996,42 @@ body:not(.dark-mode) .silmaril-ls-chips .silmaril-ls-active .silmaril-ls-num {
                 name.className = 'sls-unnamed';
                 name.textContent = `Loadout ${loadout}`;
             }
-            row.append(box, number, name);
-            panel.appendChild(row);
+            label.append(box, number, name);
+            row.append(handle, label);
+            list.appendChild(row);
+        }
+
+        // Pointer events rather than HTML drag and drop, which never fires for touch and so
+        // would leave the handles dead on a phone and in Torn PDA. They are followed on the
+        // document, not captured on the handle: moving the row in the list detaches the handle
+        // for an instant, and that silently ends a pointer capture after the first step.
+        function startDrag(event, row) {
+            event.preventDefault();
+            const pointerId = event.pointerId;
+            row.classList.add('sls-dragging');
+            const move = (moveEvent) => {
+                if (moveEvent.pointerId !== pointerId) return;
+                const siblings = [...list.children].filter((other) => other !== row);
+                const before = siblings.find((other) => {
+                    const rect = other.getBoundingClientRect();
+                    return moveEvent.clientY < rect.top + rect.height / 2;
+                });
+                if (before) {
+                    if (row.nextElementSibling !== before) list.insertBefore(row, before);
+                } else if (list.lastElementChild !== row) {
+                    list.appendChild(row);
+                }
+            };
+            const end = (endEvent) => {
+                if (endEvent.pointerId !== pointerId) return;
+                row.classList.remove('sls-dragging');
+                document.removeEventListener('pointermove', move);
+                document.removeEventListener('pointerup', end);
+                document.removeEventListener('pointercancel', end);
+            };
+            document.addEventListener('pointermove', move);
+            document.addEventListener('pointerup', end);
+            document.addEventListener('pointercancel', end);
         }
 
         const actions = document.createElement('div');
@@ -989,9 +1061,7 @@ body:not(.dark-mode) .silmaril-ls-chips .silmaril-ls-active .silmaril-ls-num {
         });
         document.addEventListener('keydown', onKey);
         save.addEventListener('click', () => {
-            const ticked = [...panel.querySelectorAll('input:checked')].map((box) => box.value);
-            const chosen = selectedLoadoutsArray.filter((loadout) => ticked.includes(loadout))
-                .concat(ticked.filter((loadout) => !selectedLoadoutsArray.includes(loadout)));
+            const chosen = [...list.querySelectorAll('input:checked')].map((box) => box.value);
             dismiss();
             onSave(chosen);
         });
@@ -1025,6 +1095,11 @@ body:not(.dark-mode) .silmaril-ls-chips .silmaril-ls-active .silmaril-ls-num {
     // which is a non-standard leftover that no isolated-world userscript engine has to provide.
     async function handleLoadoutClick(clickEvent) {
         const button = clickEvent.currentTarget;
+        // Reloading needs no token, so it works even before the buttons are enabled.
+        if (button.classList.contains('silmaril-ls-active')) {
+            location.reload();
+            return;
+        }
         if (button.classList.contains('disabled') || button.classList.contains('silmaril-ls-busy')) {
             return;
         }
