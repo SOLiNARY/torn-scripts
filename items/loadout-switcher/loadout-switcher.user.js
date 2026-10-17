@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Loadout Switcher
 // @namespace    https://github.com/SOLiNARY
-// @version      0.6.15
+// @version      0.7.0
 // @description  Adds customisable quick loadout change buttons on Items page. After an update, a "What's new" popup lists what changed.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT
@@ -22,12 +22,22 @@
     // shows one panel, not eight. The DOM is the channel because userscript sandboxes cannot see
     // each other's globals, and it needs no grants beyond what each script already asks for.
 
-    const SCRIPT_VERSION = "0.6.15";  // keep in sync with @version above
+    const SCRIPT_VERSION = "0.7.0";  // keep in sync with @version above
     const WHATS_NEW_NAME = "Loadout Switcher";
     const WHATS_NEW_KEY = "silmaril-loadout-switcher-last-seen-version";
     // Newest release first. Every release above the version last seen is shown at once, so
     // updating across several versions still reports the whole gap.
     const CHANGELOG = [
+        {
+            version: "0.7.0",
+            date: "2026-10-17",
+            changes: [
+            'New look: each loadout button shows its slot number next to its name, and the loadout you have on is green.',
+            'A tick appears on the button once the switch goes through, and it turns red if it does not.',
+            'Press the green button to put that loadout on again; hovering it shows Reload.',
+            'The + button opens a proper settings window where you tick which loadouts get a button.'
+            ]
+        },
         {
             version: "0.6.14",
             date: "2026-09-03",
@@ -373,7 +383,9 @@
 div.silmaril-torn-loadout-switcher-container {
     display: inline-flex;
     align-items: center;
-    margin-left: 5px;
+    margin-left: 8px;
+    font: 12px Arial, Helvetica, sans-serif;
+    vertical-align: middle;
 }
 
 div.silmaril-torn-loadout-switcher-container a img {
@@ -385,20 +397,158 @@ div.silmaril-torn-loadout-switcher-container a img {
     align-items: flex-start;
 }
 
-.wave-animation {
-  position: relative;
-  overflow: hidden;
+/* Once a button is lit as the loadout that is on, the name Torn prints before the buttons
+   only repeats it. That name is a bare text node, which no selector can reach, so the title's
+   own text shrinks to nothing and the container sets its size back. */
+div#loadoutsRoot .silmaril-torn-loadout-switcher-host.silmaril-ls-hide-name {
+    font-size: 0;
 }
 
-.wave {
-  pointer-events: none;
-  position: absolute;
-  width: 100%;
-  height: 33px;
-  background-color: transparent;
-  opacity: 0;
-  transform: translateX(-100%);
-  animation: waveAnimation 3s cubic-bezier(0, 0, 0, 1);
+div#loadoutsRoot .silmaril-ls-hide-name div.silmaril-torn-loadout-switcher-container {
+    margin-left: 0;
+}
+
+.silmaril-ls-btn {
+    appearance: none;
+    display: inline-flex;
+    align-items: center;
+    margin: 0;
+    border: 0;
+    font: inherit;
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+.silmaril-ls-btn.disabled {
+    opacity: .45;
+    cursor: default;
+}
+
+.silmaril-ls-busy::after {
+    content: "";
+    width: 8px;
+    height: 8px;
+    margin-left: 6px;
+    border: 2px solid currentColor;
+    border-right-color: transparent;
+    border-radius: 50%;
+    animation: silmaril-ls-spin .7s linear infinite;
+}
+
+.silmaril-ls-fail {
+    animation: silmaril-ls-shake .4s;
+}
+
+/* ---- Chips: slot number on the left, name on the right */
+div.silmaril-ls-chips {
+    gap: 5px;
+}
+
+.silmaril-ls-chips .silmaril-ls-btn {
+    height: 24px;
+    padding: 0 8px 0 0;
+    box-sizing: border-box;
+    overflow: hidden;
+    border: 1px solid #444;
+    border-radius: 4px;
+    background: #1f1f1f;
+    color: #ccc;
+}
+
+.silmaril-ls-chips .silmaril-ls-num {
+    align-self: stretch;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 22px;
+    margin-right: 7px;
+    background: #3b3b3b;
+    color: #999;
+    font-weight: bold;
+}
+
+.silmaril-ls-chips .silmaril-ls-num:last-child {
+    margin-right: -8px;
+}
+
+.silmaril-ls-chips .silmaril-ls-btn:not(.disabled):not(.silmaril-ls-active):not(.silmaril-ls-fail):hover {
+    border-color: #777;
+    color: #fff;
+}
+
+.silmaril-ls-chips .silmaril-ls-btn.silmaril-ls-active {
+    border-color: #85a83d;
+    color: #fff;
+}
+
+.silmaril-ls-chips .silmaril-ls-active .silmaril-ls-num {
+    background: #85a83d;
+    color: #fff;
+}
+
+/* Pressing the loadout that is already on puts it on again, which re-equips anything
+   taken off since; the hover says so. The text swap is drawn in CSS so the label never
+   has to be rebuilt, and Torn's polls cannot leave it stuck on "Reload". */
+.silmaril-ls-chips .silmaril-ls-active:not(.disabled):not(.silmaril-ls-busy):hover .silmaril-ls-num,
+.silmaril-ls-chips .silmaril-ls-active:not(.disabled):not(.silmaril-ls-busy):hover .silmaril-ls-name {
+    font-size: 0;
+}
+
+.silmaril-ls-chips .silmaril-ls-active:not(.disabled):not(.silmaril-ls-busy):hover .silmaril-ls-num::after {
+    content: "↻";
+    font-size: 14px;
+}
+
+.silmaril-ls-chips .silmaril-ls-active:not(.disabled):not(.silmaril-ls-busy):hover .silmaril-ls-name::after {
+    content: "Reload";
+    font-size: 12px;
+}
+
+.silmaril-ls-chips .silmaril-ls-ok::after {
+    content: "✓";
+    margin-left: 6px;
+    color: #a6d14a;
+    font-weight: bold;
+}
+
+.silmaril-ls-chips .silmaril-ls-btn.silmaril-ls-fail {
+    border-color: #d33;
+}
+
+.silmaril-ls-chips .silmaril-ls-fail .silmaril-ls-num {
+    background: #b33;
+    color: #fff;
+}
+
+.silmaril-ls-chips .silmaril-ls-gear {
+    padding: 0 8px;
+    border-style: dashed;
+    color: #888;
+}
+
+body:not(.dark-mode) .silmaril-ls-chips .silmaril-ls-btn {
+    border-color: #bbb;
+    background: #f4f4f4;
+    color: #333;
+}
+
+body:not(.dark-mode) .silmaril-ls-chips .silmaril-ls-num {
+    background: #ddd;
+    color: #666;
+}
+
+body:not(.dark-mode) .silmaril-ls-chips .silmaril-ls-btn:not(.disabled):not(.silmaril-ls-active):not(.silmaril-ls-fail):hover {
+    border-color: #888;
+    color: #000;
+}
+
+body:not(.dark-mode) .silmaril-ls-chips .silmaril-ls-btn.silmaril-ls-active {
+    border-color: #6f8f2c;
+}
+
+body:not(.dark-mode) .silmaril-ls-chips .silmaril-ls-active .silmaril-ls-num {
+    background: #6f8f2c;
+    color: #fff;
 }
 
 @media (max-width: 768px) {
@@ -433,16 +583,27 @@ div.silmaril-torn-loadout-switcher-container a img {
         margin-left: 0;
         margin-top: 4px;
     }
+
+    div#loadoutsRoot .silmaril-ls-hide-name div.silmaril-torn-loadout-switcher-container {
+        margin-top: 0;
+    }
 }
 
-@keyframes waveAnimation {
-  0% {
-    opacity: 1;
-    transform: translateX(-100%);
+@keyframes silmaril-ls-spin {
+  to {
+    transform: rotate(360deg);
   }
-  100% {
-    opacity: 0;
-    transform: translateX(100%);
+}
+
+@keyframes silmaril-ls-shake {
+  0%, 100% {
+    transform: translateX(0);
+  }
+  25%, 75% {
+    transform: translateX(-3px);
+  }
+  50% {
+    transform: translateX(3px);
   }
 }
 `;
@@ -498,19 +659,55 @@ div.silmaril-torn-loadout-switcher-container a img {
         });
 
         titleEl.classList.add(hostClass);
-        if (titleEl.querySelector(`div.${containerClass}`)) return;
+        if (!titleEl.querySelector(`div.${containerClass}`)) {
+            const buttonContainer = document.createElement('div');
+            buttonContainer.className = `${containerClass} silmaril-ls-chips`;
 
-        const buttonContainer = document.createElement('div');
-        buttonContainer.className = containerClass;
+            addLoadoutAndSettingButtons(buttonContainer);
+            addLogo(buttonContainer);
 
-        const waveDiv = document.createElement('div');
-        waveDiv.className = 'wave';
+            titleEl.appendChild(buttonContainer);
+        }
+        // Also on every poll, because Torn rewrites the name in the header when the loadout
+        // is changed from its own controls.
+        refreshActive(titleEl);
+    }
 
-        buttonContainer.appendChild(waveDiv);
-        addLoadoutAndSettingButtons(buttonContainer);
-        addLogo(buttonContainer);
+    // The loadout last switched to from these buttons, and the name Torn showed at that
+    // moment. Torn's header can keep the old name until its own next poll, so for as long as
+    // it does, the click - not the stale name - decides which button is lit. It also settles
+    // which button to light when two loadouts share a name.
+    let switchedTo = null;
+    let nameAtSwitch = null;
 
-        titleEl.appendChild(buttonContainer);
+    function headerName(titleEl) {
+        return [...titleEl.childNodes]
+            .filter((node) => node.nodeType === Node.TEXT_NODE)
+            .map((node) => node.textContent)
+            .join('')
+            .trim();
+    }
+
+    function activeLoadout(titleEl) {
+        const name = headerName(titleEl);
+        if (switchedTo !== null) {
+            if (name === nameAtSwitch || name === loadoutTitles[switchedTo]) return switchedTo;
+            switchedTo = null;
+        }
+        if (name === '') return null;
+        return selectedLoadoutsArray.find((loadout) => loadoutTitles[loadout] === name) ?? null;
+    }
+
+    function refreshActive(titleEl) {
+        const container = titleEl.querySelector(`div.${containerClass}`);
+        if (!container) return;
+        const active = activeLoadout(titleEl);
+        container.querySelectorAll('button[data-loadout-number]').forEach((button) => {
+            button.classList.toggle('silmaril-ls-active', button.getAttribute('data-loadout-number') === active);
+        });
+        // Hide Torn's own copy of the name only while a button stands in for it; a loadout
+        // that has no button here still needs its name shown.
+        titleEl.classList.toggle('silmaril-ls-hide-name', active !== null);
     }
 
     let attachScheduled = false;
@@ -565,23 +762,19 @@ div.silmaril-torn-loadout-switcher-container a img {
 
         const settings = document.createElement('button');
         settings.type = 'button';
-        settings.title = 'Settings';
-        settings.className = 'torn-btn';
-        settings.textContent = '⚙';
+        settings.title = 'Choose loadouts';
+        settings.className = 'silmaril-ls-btn silmaril-ls-gear';
+        settings.textContent = '+';
         settings.addEventListener('click', () => {
-            let userInput = prompt("Please, enter which loadouts from 1 to 9 you want to see, comma-separated (default: 1,2,3):", selectedLoadouts);
-            if (userInput !== null && userInput.length > 0) {
-                localStorage.setItem("silmaril-loadout-switcher-selected-loadouts", userInput);
-                selectedLoadouts = userInput;
-                selectedLoadoutsArray = parseSelectedLoadouts(selectedLoadouts);
+            openSettings((chosen) => {
+                selectedLoadouts = chosen.join(',');
+                localStorage.setItem("silmaril-loadout-switcher-selected-loadouts", selectedLoadouts);
+                selectedLoadoutsArray = chosen;
                 root.querySelectorAll("button, a").forEach((item) => item.remove());
                 addLoadoutAndSettingButtons(root);
                 addLogo(root);
-                flashWave(root, "green");
-            } else {
-                console.error("[TornLoadoutSwitcher] User cancelled input of selected loadouts.");
-                flashWave(root, "yellow", 3);
-            }
+                if (root.parentElement) refreshActive(root.parentElement);
+            });
         });
 
         root.appendChild(settings);
@@ -591,62 +784,304 @@ div.silmaril-torn-loadout-switcher-container a img {
         selectedLoadoutsArray.forEach((loadout) => {
             const button = document.createElement('button');
             button.type = 'button';
-            button.title = showTitles ? loadout : loadoutTitles[loadout] ?? '';
-            button.className = rfcv === null ? 'torn-btn disabled' : 'torn-btn';
-            button.textContent = showTitles ? (loadoutTitles[loadout] ?? loadout) : loadout;
+            button.className = rfcv === null ? 'silmaril-ls-btn disabled' : 'silmaril-ls-btn';
             button.setAttribute('data-loadout-number', loadout);
-            button.addEventListener('click', (clickEvent) => {
-                handleLoadoutClick(clickEvent, root);
-            });
+            setButtonLabel(button, loadout);
+            button.addEventListener('click', handleLoadoutClick);
 
             root.appendChild(button);
         })
     }
 
+    const SETTINGS_HOST_ID = 'silmaril-loadout-switcher-settings';
+
+    function ensureSettingsStyle() {
+        if (document.getElementById(SETTINGS_HOST_ID + '-style') != null) return;
+        const style = document.createElement('style');
+        style.id = SETTINGS_HOST_ID + '-style';
+        // Same panel as the "What's new" popup, so the two read as one family.
+        style.textContent = `
+#${SETTINGS_HOST_ID} {
+    position: fixed;
+    inset: 0;
+    z-index: 2147483000;
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    padding: 24px 12px;
+    box-sizing: border-box;
+    overflow: auto;
+    background: rgba(0, 0, 0, .6);
+    font-family: Arial, Helvetica, sans-serif;
+}
+#${SETTINGS_HOST_ID} .sls-panel {
+    width: 100%;
+    max-width: 340px;
+    box-sizing: border-box;
+    padding: 16px 18px;
+    border: 1px solid #666;
+    border-radius: 10px;
+    background: #1f1f1f;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, .6);
+    color: #e6e6e6;
+    font-size: 13px;
+    line-height: 1.5;
+    text-align: left;
+}
+#${SETTINGS_HOST_ID} .sls-title {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin: 0 0 4px;
+    color: #fff;
+    font-size: 15px;
+    font-weight: bold;
+}
+#${SETTINGS_HOST_ID} .sls-close {
+    padding: 0 2px;
+    color: #bbb;
+    font-size: 22px;
+    line-height: 1;
+    cursor: pointer;
+}
+#${SETTINGS_HOST_ID} .sls-close:hover {
+    color: #fff;
+}
+#${SETTINGS_HOST_ID} .sls-hint {
+    margin: 0 0 10px;
+    color: #8a8a8a;
+    font-size: 12px;
+}
+#${SETTINGS_HOST_ID} label {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    margin: 0;
+    padding: 5px 6px;
+    border-radius: 4px;
+    cursor: pointer;
+}
+#${SETTINGS_HOST_ID} label:hover {
+    background: #2a2a2a;
+}
+#${SETTINGS_HOST_ID} input {
+    margin: 0;
+    accent-color: #85a83d;
+}
+#${SETTINGS_HOST_ID} .sls-num {
+    min-width: 22px;
+    border-radius: 3px;
+    background: #3b3b3b;
+    color: #bbb;
+    font-size: 12px;
+    font-weight: bold;
+    text-align: center;
+}
+#${SETTINGS_HOST_ID} input:checked + .sls-num {
+    background: #85a83d;
+    color: #fff;
+}
+#${SETTINGS_HOST_ID} .sls-unnamed {
+    color: #777;
+}
+#${SETTINGS_HOST_ID} .sls-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 12px;
+}
+#${SETTINGS_HOST_ID} .sls-actions button {
+    padding: 7px 18px;
+    border: 1px solid #555;
+    border-radius: 5px;
+    background: transparent;
+    color: #ddd;
+    font: 13px Arial, Helvetica, sans-serif;
+    cursor: pointer;
+}
+#${SETTINGS_HOST_ID} .sls-actions .sls-save {
+    border-color: #2e7d32;
+    background: #2e7d32;
+    color: #fff;
+}
+#${SETTINGS_HOST_ID} .sls-actions .sls-save:hover {
+    background: #38963d;
+}
+`;
+        (document.head ?? document.documentElement).appendChild(style);
+    }
+
+    // Lists loadouts 1-9 with a box each and hands the ticked ones to onSave. Loadouts keep
+    // the order they already had on the bar, and newly ticked ones join at the end in number
+    // order, so someone who arranged theirs by hand does not lose that arrangement.
+    function openSettings(onSave) {
+        if (document.getElementById(SETTINGS_HOST_ID) != null) return;
+        ensureSettingsStyle();
+
+        const host = document.createElement('div');
+        host.id = SETTINGS_HOST_ID;
+        const panel = document.createElement('div');
+        panel.className = 'sls-panel';
+        panel.setAttribute('role', 'dialog');
+        panel.setAttribute('aria-modal', 'true');
+        panel.setAttribute('aria-label', 'Loadout Switcher settings');
+
+        const title = document.createElement('div');
+        title.className = 'sls-title';
+        title.textContent = 'Loadout buttons';
+        const close = document.createElement('span');
+        close.className = 'sls-close';
+        close.title = 'Close';
+        close.setAttribute('role', 'button');
+        close.textContent = '\u00d7';
+        title.appendChild(close);
+
+        const hint = document.createElement('p');
+        hint.className = 'sls-hint';
+        hint.textContent = 'Tick the loadouts that should get a button.';
+
+        panel.append(title, hint);
+        for (let i = 1; i <= 9; i++) {
+            const loadout = String(i);
+            const row = document.createElement('label');
+            const box = document.createElement('input');
+            box.type = 'checkbox';
+            box.value = loadout;
+            box.checked = selectedLoadoutsArray.includes(loadout);
+            const number = document.createElement('span');
+            number.className = 'sls-num';
+            number.textContent = loadout;
+            const name = document.createElement('span');
+            if (loadoutTitles[loadout]) {
+                name.textContent = loadoutTitles[loadout];
+            } else {
+                name.className = 'sls-unnamed';
+                name.textContent = `Loadout ${loadout}`;
+            }
+            row.append(box, number, name);
+            panel.appendChild(row);
+        }
+
+        const actions = document.createElement('div');
+        actions.className = 'sls-actions';
+        const cancel = document.createElement('button');
+        cancel.type = 'button';
+        cancel.textContent = 'Cancel';
+        const save = document.createElement('button');
+        save.type = 'button';
+        save.className = 'sls-save';
+        save.textContent = 'Save';
+        actions.append(cancel, save);
+        panel.appendChild(actions);
+        host.appendChild(panel);
+
+        const onKey = (event) => {
+            if (event.key === 'Escape') dismiss();
+        };
+        function dismiss() {
+            document.removeEventListener('keydown', onKey);
+            host.remove();
+        }
+        close.addEventListener('click', dismiss);
+        cancel.addEventListener('click', dismiss);
+        host.addEventListener('click', (event) => {
+            if (event.target === host) dismiss();
+        });
+        document.addEventListener('keydown', onKey);
+        save.addEventListener('click', () => {
+            const ticked = [...panel.querySelectorAll('input:checked')].map((box) => box.value);
+            const chosen = selectedLoadoutsArray.filter((loadout) => ticked.includes(loadout))
+                .concat(ticked.filter((loadout) => !selectedLoadoutsArray.includes(loadout)));
+            dismiss();
+            onSave(chosen);
+        });
+
+        document.body.appendChild(host);
+        save.focus();
+    }
+
+    function setButtonLabel(button, loadout) {
+        const title = loadoutTitles[loadout];
+        // The number is on the button already, so a tooltip only earns its place when the
+        // name is not.
+        if (!showTitles && title) {
+            button.title = title;
+        } else {
+            button.removeAttribute('title');
+        }
+        const number = document.createElement('span');
+        number.className = 'silmaril-ls-num';
+        number.textContent = loadout;
+        button.replaceChildren(number);
+        if (showTitles && title) {
+            const name = document.createElement('span');
+            name.className = 'silmaril-ls-name';
+            name.textContent = title;
+            button.appendChild(name);
+        }
+    }
+
     // Takes the event as an argument rather than reading the implicit `event` global,
     // which is a non-standard leftover that no isolated-world userscript engine has to provide.
-    async function handleLoadoutClick(clickEvent, root) {
+    async function handleLoadoutClick(clickEvent) {
         const button = clickEvent.currentTarget;
-        if (button.classList.contains('disabled')) {
+        if (button.classList.contains('disabled') || button.classList.contains('silmaril-ls-busy')) {
             return;
         }
         const loadout = button.getAttribute('data-loadout-number');
+        button.classList.remove('silmaril-ls-ok', 'silmaril-ls-fail');
+        button.classList.add('silmaril-ls-busy');
         // Re-read the cookie on every click: Torn rotates the token, and a stale one is
         // rejected silently (see sendSetLoadoutRequest).
         const token = refreshRfcv();
         if (!token) {
             console.error("[TornLoadoutSwitcher] No rfcv token available yet.");
-            flashWave(root, "red", 5);
+            showResult(button, loadout, false);
             return;
         }
         let url = setLoadoutUrl.replace("{loadoutId}", loadout).replace("{rfcv}", token);
-        await sendSetLoadoutRequest(url, root);
+        showResult(button, loadout, await sendSetLoadoutRequest(url));
     }
 
-    async function sendSetLoadoutRequest(url, root) {
+    async function sendSetLoadoutRequest(url) {
         try {
             const response = await fetch(url, {
                 method: 'GET',
             });
             if (!response.ok) {
                 console.error("[TornLoadoutSwitcher] Set Loadout request failed:", response);
-                flashWave(root, "red", 5);
-                return;
+                return false;
             }
             // Torn answers a rejected request - a stale rfcv token above all - with HTTP 200
-            // and the error inside the JSON body, so response.ok on its own flashes green for
-            // a loadout that never actually changed.
+            // and the error inside the JSON body, so response.ok on its own reports success
+            // for a loadout that never actually changed.
             const error = extractResponseError(await response.text());
             if (error) {
                 console.error("[TornLoadoutSwitcher] Set Loadout rejected by Torn:", error);
-                flashWave(root, "red", 5);
-                return;
+                return false;
             }
-            flashWave(root, "green");
+            return true;
         } catch (e) {
             console.error("[TornLoadoutSwitcher] Error setting loadout:", e);
-            flashWave(root, "red", 5);
+            return false;
         }
+    }
+
+    function showResult(button, loadout, succeeded) {
+        button.classList.remove('silmaril-ls-busy');
+        button.classList.add(succeeded ? 'silmaril-ls-ok' : 'silmaril-ls-fail');
+        clearTimeout(button.silmarilResultTimer);
+        button.silmarilResultTimer = setTimeout(() => {
+            button.classList.remove('silmaril-ls-ok', 'silmaril-ls-fail');
+        }, succeeded ? 2500 : 4000);
+        if (!succeeded) return;
+        // Torn may have re-rendered the header while the request was out, leaving this button
+        // detached, so the live title is looked up again rather than taken from the button.
+        const titleEl = findTitleElement();
+        if (!titleEl) return;
+        switchedTo = loadout;
+        nameAtSwitch = headerName(titleEl);
+        refreshActive(titleEl);
     }
 
     // Returns Torn's error when the response body reports a failure, null otherwise. Bodies
@@ -666,17 +1101,6 @@ div.silmaril-torn-loadout-switcher-container a img {
         return null;
     }
 
-    function flashWave(root, color, durationSeconds) {
-        const wave = root.querySelector("div.wave");
-        if (!wave) return;
-        wave.style.backgroundColor = color;
-        wave.style.animation = 'none';
-        wave.offsetHeight;
-        wave.style.animation = null;
-        // After the reset, because clearing the animation shorthand also clears its duration.
-        wave.style.animationDuration = durationSeconds ? `${durationSeconds}s` : '';
-    }
-
     function sleep(ms) {
         return new Promise(resolve => setTimeout(resolve, ms));
     }
@@ -692,12 +1116,10 @@ div.silmaril-torn-loadout-switcher-container a img {
         if (!showTitles) return;
         document.querySelectorAll('div.silmaril-torn-loadout-switcher-container button[data-loadout-number]').forEach(btn => {
             const loadout = btn.getAttribute('data-loadout-number');
-            const title = loadoutTitles[loadout];
-            if (title) {
-                btn.textContent = title;
-                btn.title = loadout;
-            }
+            if (loadoutTitles[loadout]) setButtonLabel(btn, loadout);
         });
+        const titleEl = findTitleElement();
+        if (titleEl) refreshActive(titleEl);
     }
 
     async function fetchTitlesManually() {
