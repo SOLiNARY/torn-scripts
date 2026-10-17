@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Crimes Rewards Value
 // @namespace    https://github.com/SOLiNARY
-// @version      0.6.2
+// @version      0.6.3
 // @description  Shows the market value of all crime rewards. After an update, a "What's new" popup lists what changed.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT License
@@ -22,7 +22,7 @@
     // shows one panel, not eight. The DOM is the channel because userscript sandboxes cannot see
     // each other's globals, and it needs no grants beyond what each script already asks for.
 
-    const SCRIPT_VERSION = "0.6.2";  // keep in sync with @version above
+    const SCRIPT_VERSION = "0.6.3";  // keep in sync with @version above
     const WHATS_NEW_NAME = "Crimes Rewards Value";
     const WHATS_NEW_KEY = "silmaril-rewards-value-last-seen-version";
     // Newest release first. Every release above the version last seen is shown at once, so
@@ -230,6 +230,16 @@
 div.silmaril-crimes-rewards-value {
     text-align: center;
     font-size: xx-small;
+    white-space: nowrap;
+}
+ 
+/* Torn lays its item cell out as a grid that stacks every child on the tile, so a value
+   appended to the cell is drawn over the picture. A column puts it underneath instead. */
+[class*=itemCell___].silmaril-crimes-rewards-cell {
+  display: flex !important;
+  flex-direction: column;
+  align-items: center;
+  height: auto !important;
 }
  
 span#silmaril-crimes-rewards-value-total {
@@ -396,7 +406,7 @@ span#silmaril-crimes-rewards-value-total {
                         }
                         let rarityClassName = `rarity-${getRarity(totalItemPrice)}`;
  
-                        reward.classList.add(rarityClassName);
+                        reward.classList.add(rarityClassName, 'silmaril-crimes-rewards-cell');
                         reward.appendChild(itemMarketValueBlock);
                     });
                     addToTotal(totalValue);
