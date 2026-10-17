@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Crimes Rewards Value
 // @namespace    https://github.com/SOLiNARY
-// @version      0.6.3
+// @version      0.6.4
 // @description  Shows the market value of all crime rewards. After an update, a "What's new" popup lists what changed.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT License
@@ -22,7 +22,7 @@
     // shows one panel, not eight. The DOM is the channel because userscript sandboxes cannot see
     // each other's globals, and it needs no grants beyond what each script already asks for.
 
-    const SCRIPT_VERSION = "0.6.3";  // keep in sync with @version above
+    const SCRIPT_VERSION = "0.6.4";  // keep in sync with @version above
     const WHATS_NEW_NAME = "Crimes Rewards Value";
     const WHATS_NEW_KEY = "silmaril-rewards-value-last-seen-version";
     // Newest release first. Every release above the version last seen is shown at once, so
@@ -227,19 +227,26 @@
     const rarityScores = { "Uncommon": 850, "Rare": 8_500, "Epic": 85_000, "Legendary": 850_000 };
  
     const styles = `
-div.silmaril-crimes-rewards-value {
-    text-align: center;
-    font-size: xx-small;
-    white-space: nowrap;
+/* Torn's reward row has no room under the tile, so the value is a pill hung on the cell's
+   bottom edge. Absolute, so it neither grows the cell nor joins Torn's stacked layout. */
+[class*=itemCell___].silmaril-crimes-rewards-cell {
+  padding: 0;
 }
  
-/* Torn lays its item cell out as a grid that stacks every child on the tile, so a value
-   appended to the cell is drawn over the picture. A column puts it underneath instead. */
-[class*=itemCell___].silmaril-crimes-rewards-cell {
-  display: flex !important;
-  flex-direction: column;
-  align-items: center;
-  height: auto !important;
+div.silmaril-crimes-rewards-value {
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  transform: translate(-50%, 50%);
+  z-index: 1;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: var(--silmaril-rarity-color, #95a5a6);
+  color: #111;
+  font-size: 10px;
+  font-weight: bold;
+  line-height: 12px;
+  white-space: nowrap;
 }
  
 span#silmaril-crimes-rewards-value-total {
@@ -255,24 +262,28 @@ span#silmaril-crimes-rewards-value-total {
  
 /* UNCOMMON - Green */
 .rarity-uncommon {
+  --silmaril-rarity-color: #2ecc71;
   border: 2px solid #2ecc71 !important;
   box-shadow: 0 0 10px #2ecc71 !important;
 }
  
 /* RARE - Blue */
 .rarity-rare {
+  --silmaril-rarity-color: #3498db;
   border: 2px solid #3498db !important;
   box-shadow: 0 0 12px #3498db !important;
 }
  
 /* EPIC - Purple */
 .rarity-epic {
+  --silmaril-rarity-color: #9b59b6;
   border: 2px solid #9b59b6 !important;
   box-shadow: 0 0 14px #9b59b6 !important;
 }
  
 /* LEGENDARY - Orange with Shine */
 .rarity-legendary {
+  --silmaril-rarity-color: #f39c12;
   border: 2px solid #f39c12 !important;
   box-shadow: 0 0 18px #f39c12, 0 0 30px rgba(243, 156, 18, 0.6) !important;
 }
@@ -398,7 +409,9 @@ span#silmaril-crimes-rewards-value-total {
                         if (itemQuantity > 1 && itemMarketValue >= 0) {
                             totalItemPrice = itemQuantity * itemMarketValue;
                             totalValue += totalItemPrice;
-                            itemMarketValueBlock.textContent = `$${totalItemPrice.toLocaleString()} ($${itemMarketValue.toLocaleString()})`;
+                            // Only the total fits in the pill; the price of one sits in its tooltip.
+                            itemMarketValueBlock.textContent = `$${totalItemPrice.toLocaleString()}`;
+                            itemMarketValueBlock.title = `${itemQuantity} x $${itemMarketValue.toLocaleString()}`;
                         } else {
                             totalItemPrice = itemMarketValue;
                             totalValue += totalItemPrice;
