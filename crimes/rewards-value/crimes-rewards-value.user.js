@@ -29,13 +29,6 @@
     // updating across several versions still reports the whole gap.
     const CHANGELOG = [
         {
-            version: "0.6.3",
-            date: "2026-10-17",
-            changes: [
-            'Fixed: item values sit under each reward again instead of covering the item picture.'
-            ]
-        },
-        {
             version: "0.6",
             date: "2026-09-03",
             changes: [
