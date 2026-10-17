@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Loadout Switcher
 // @namespace    https://github.com/SOLiNARY
-// @version      0.7.0
+// @version      0.7.1
 // @description  Adds customisable quick loadout change buttons on Items page. After an update, a "What's new" popup lists what changed.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT
@@ -22,7 +22,7 @@
     // shows one panel, not eight. The DOM is the channel because userscript sandboxes cannot see
     // each other's globals, and it needs no grants beyond what each script already asks for.
 
-    const SCRIPT_VERSION = "0.7.0";  // keep in sync with @version above
+    const SCRIPT_VERSION = "0.7.1";  // keep in sync with @version above
     const WHATS_NEW_NAME = "Loadout Switcher";
     const WHATS_NEW_KEY = "silmaril-loadout-switcher-last-seen-version";
     // Newest release first. Every release above the version last seen is shown at once, so
@@ -576,16 +576,41 @@ body:not(.dark-mode) .silmaril-ls-chips .silmaril-ls-active .silmaril-ls-num {
         white-space: normal;
     }
 
+    /* Every line of buttons stretches edge to edge, so a line that wraps ends flush with the
+       one above it instead of stopping short. + is docked in a slim column down the
+       right-hand side, so it never wraps onto a line of its own. */
     div#loadoutsRoot div.silmaril-torn-loadout-switcher-container {
+        position: relative;
         display: flex;
         flex-wrap: wrap;
         gap: 4px;
         margin-left: 0;
         margin-top: 4px;
+        padding-right: 28px;
     }
 
     div#loadoutsRoot .silmaril-ls-hide-name div.silmaril-torn-loadout-switcher-container {
         margin-top: 0;
+    }
+
+    div#loadoutsRoot .silmaril-ls-chips .silmaril-ls-btn[data-loadout-number] {
+        flex: 1 1 auto;
+    }
+
+    div#loadoutsRoot .silmaril-ls-chips .silmaril-ls-name {
+        flex: 1;
+        text-align: center;
+    }
+
+    div#loadoutsRoot .silmaril-ls-chips .silmaril-ls-gear {
+        position: absolute;
+        top: 0;
+        right: 0;
+        bottom: 0;
+        width: 24px;
+        height: auto;
+        padding: 0;
+        justify-content: center;
     }
 }
 
