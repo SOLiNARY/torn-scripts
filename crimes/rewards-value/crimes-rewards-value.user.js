@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Crimes Rewards Value
 // @namespace    https://github.com/SOLiNARY
-// @version      0.6.4
+// @version      0.6.5
 // @description  Shows the market value of all crime rewards. After an update, a "What's new" popup lists what changed.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT License
@@ -22,12 +22,22 @@
     // shows one panel, not eight. The DOM is the channel because userscript sandboxes cannot see
     // each other's globals, and it needs no grants beyond what each script already asks for.
 
-    const SCRIPT_VERSION = "0.6.4";  // keep in sync with @version above
+    const SCRIPT_VERSION = "0.6.5";  // keep in sync with @version above
     const WHATS_NEW_NAME = "Crimes Rewards Value";
     const WHATS_NEW_KEY = "silmaril-rewards-value-last-seen-version";
     // Newest release first. Every release above the version last seen is shown at once, so
-    // updating across several versions still reports the whole gap.
+    // updating across several versions still reports the whole gap. A release marked
+    // `silent: true` is left out of that and never opens the popup by itself; it is listed
+    // only when the popup is opened from the menu. Leaving the flag off means false.
     const CHANGELOG = [
+        {
+            version: "0.6.5",
+            date: "2026-10-20",
+            silent: true,
+            changes: [
+            'Minor updates now arrive quietly: they are listed here, but no longer open this popup on their own.'
+            ]
+        },
         {
             version: "0.6",
             date: "2026-09-03",
@@ -83,6 +93,9 @@
         let unseen = lastSeen == null
             ? CHANGELOG
             : CHANGELOG.filter(function(release){ return compareVersions(release.version, lastSeen) > 0; });
+        // Silent releases wait for the menu: they never open the popup, and stay out of it when
+        // another release does.
+        unseen = unseen.filter(function(release){ return !release.silent; });
         if (unseen.length === 0){
             rememberWhatsNewSeen();
             return;

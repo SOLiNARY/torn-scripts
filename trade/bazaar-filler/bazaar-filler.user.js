@@ -86,10 +86,20 @@
 
     const lastSeenVersionKey = "silmaril-torn-bazaar-filler-last-seen-version";
     // Newest release first. Everything a user could have skipped over is listed, so updating
-    // across several versions still shows the whole gap in one popup.
+    // across several versions still shows the whole gap in one popup. A release marked
+    // `silent: true` is left out of that and never opens the popup by itself; it is listed
+    // only when the popup is opened from the menu. Leaving the flag off means false.
     // Write every line for a player, not a developer: one short sentence, plain words,
     // what changed for them rather than what changed in the code.
     const CHANGELOG = [
+        {
+            version: "1.11.5",
+            date: "2026-10-20",
+            silent: true,
+            changes: [
+                'Minor updates now arrive quietly: they are listed here, but no longer open this popup on their own.'
+            ]
+        },
         {
             version: "1.11.0",
             date: "2026-09-21",
@@ -2061,6 +2071,9 @@
         let unseen = lastSeen == null
             ? CHANGELOG
             : CHANGELOG.filter(function(release){ return compareVersions(release.version, lastSeen) > 0; });
+        // Silent releases wait for the menu: they never open the popup, and stay out of it when
+        // another release does.
+        unseen = unseen.filter(function(release){ return !release.silent; });
         if (unseen.length === 0){
             rememberChangelogSeen();
             return;
