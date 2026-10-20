@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Bazaar Filler
 // @namespace    https://github.com/SOLiNARY
-// @version      1.11.4
+// @version      1.11.5
 // @description  Adds a Fill button to every item on your bazaar's Add and Manage pages: one click sets the price and quantity. Price from the item market (cheapest minus $1 by default), market value or live bazaars via weav3r.dev, with your own formula and min/max ranges. Quantity modes, per-category settings, favourites with Fill All, and a bubble that warns when your price is far below the competition. Open settings with the cog on the Fill All bar or by holding Fill for 3s.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT License
@@ -20,7 +20,7 @@
     'use strict';
 
     // Keep in sync with @version above — it keys the "What's new" popup.
-    const SCRIPT_VERSION = "1.11.4";
+    const SCRIPT_VERSION = "1.11.5";
 
     const marketUrl = "https://api.torn.com/v2/market?id={itemId}&selections=itemMarket&key={apiKey}&comment=BazaarFiller";
     const itemUrl = "https://api.torn.com/torn/{itemId}?selections=items&key={apiKey}&comment=BazaarFiller";
@@ -86,10 +86,20 @@
 
     const lastSeenVersionKey = "silmaril-torn-bazaar-filler-last-seen-version";
     // Newest release first. Everything a user could have skipped over is listed, so updating
-    // across several versions still shows the whole gap in one popup.
+    // across several versions still shows the whole gap in one popup. A release marked
+    // `silent: true` is left out of that and never opens the popup by itself; it is listed
+    // only when the popup is opened from the menu. Leaving the flag off means false.
     // Write every line for a player, not a developer: one short sentence, plain words,
     // what changed for them rather than what changed in the code.
     const CHANGELOG = [
+        {
+            version: "1.11.5",
+            date: "2026-10-20",
+            silent: true,
+            changes: [
+                'Minor updates now arrive quietly: they are listed here, but no longer open this popup on their own.'
+            ]
+        },
         {
             version: "1.11.0",
             date: "2026-09-21",
@@ -2054,6 +2064,9 @@
         let unseen = lastSeen == null
             ? CHANGELOG
             : CHANGELOG.filter(function(release){ return compareVersions(release.version, lastSeen) > 0; });
+        // Silent releases wait for the menu: they never open the popup, and stay out of it when
+        // another release does.
+        unseen = unseen.filter(function(release){ return !release.silent; });
         if (unseen.length === 0){
             rememberChangelogSeen();
             return;

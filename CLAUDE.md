@@ -18,6 +18,11 @@ no changelog entry: the popup then stays silent and only records the new version
 are read by players, not developers — one short sentence each, plain words, what changed for them
 rather than what changed in the code.
 
+An entry worth listing but not worth interrupting a player for gets `silent: true`. The "What's
+new" menu still lists it, but it never opens the popup on update, and it stays out of a popup that
+another release opens. Leaving the flag off means `false`: the popup behaves as it always has.
+Torn PDA has no menu, so a PDA player never sees a silent entry at all.
+
 ## Branches and pull requests
 
 **Pull requests here are squash-merged.** The branch's own commits never become ancestors of
