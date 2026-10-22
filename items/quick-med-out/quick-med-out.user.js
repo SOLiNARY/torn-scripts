@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Quick Med Out
 // @namespace    https://github.com/SOLiNARY
-// @version      1.0.0
+// @version      1.1.0
 // @description  On the Items page, shows your hospital time and medical cooldown, works out which meds get you out of hospital for the least cooldown (faction armoury first), and uses the next one in one click. After an update, a "What's new" popup lists what changed.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT
@@ -20,7 +20,7 @@
     // shows one panel, not eight. The DOM is the channel because userscript sandboxes cannot see
     // each other's globals, and it needs no grants beyond what each script already asks for.
 
-    const SCRIPT_VERSION = "1.0.0";  // keep in sync with @version above
+    const SCRIPT_VERSION = "1.1.0";  // keep in sync with @version above
     const WHATS_NEW_NAME = "Quick Med Out";
     const WHATS_NEW_KEY = "silmaril-quick-med-out-last-seen-version";
     // Newest release first. Every release above the version last seen is shown at once, so
@@ -29,12 +29,19 @@
     // only when the popup is opened from the menu. Leaving the flag off means false.
     const CHANGELOG = [
         {
+            version: "1.1.0",
+            date: "2026-10-22",
+            changes: [
+            'Each med in the plan shows how much hospital time it takes off and how much cooldown it adds.',
+            'When sitting out a minute or so of hospital would save cooldown, that cheaper plan is offered too. How long you are willing to wait is a setting.',
+            'A tap on Use is no longer lost when the timers tick at the same moment.'
+            ]
+        },
+        {
             version: "1.0.0",
             date: "2026-10-22",
             changes: [
             'New: when you are in hospital, a panel on the Items page shows your hospital time and medical cooldown, and the meds that get you out for the least cooldown.',
-            'Each med in the plan shows how much hospital time it takes off and how much cooldown it adds.',
-            'When sitting out a minute or so of hospital would save cooldown, that cheaper plan is offered too. How long you are willing to wait is a setting.',
             'One click uses the next med, taken from your faction armoury first and from your own items after.',
             'Pin the panel to keep it open out of hospital, and drag it anywhere on the screen. Both are remembered.',
             'After each med it checks the time and cooldown you really got, and offers to fix your settings when they are off.'
