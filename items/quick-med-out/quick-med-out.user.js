@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Quick Med Out
 // @namespace    https://github.com/SOLiNARY
-// @version      1.1.0
+// @version      1.1.1
 // @description  On the Items page, shows your hospital time and medical cooldown, works out which meds get you out of hospital for the least cooldown (faction armoury first), and uses the next one in one click. After an update, a "What's new" popup lists what changed.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT
@@ -20,7 +20,7 @@
     // shows one panel, not eight. The DOM is the channel because userscript sandboxes cannot see
     // each other's globals, and it needs no grants beyond what each script already asks for.
 
-    const SCRIPT_VERSION = "1.1.0";  // keep in sync with @version above
+    const SCRIPT_VERSION = "1.1.1";  // keep in sync with @version above
     const WHATS_NEW_NAME = "Quick Med Out";
     const WHATS_NEW_KEY = "silmaril-quick-med-out-last-seen-version";
     // Newest release first. Every release above the version last seen is shown at once, so
@@ -28,6 +28,14 @@
     // `silent: true` is left out of that and never opens the popup by itself; it is listed
     // only when the popup is opened from the menu. Leaving the flag off means false.
     const CHANGELOG = [
+        {
+            version: "1.1.1",
+            date: "2026-10-22",
+            changes: [
+            'Out of hospital the panel is now hidden completely unless it is pinned.',
+            'To pin it outside hospital, open it with Show panel in your script manager\'s menu.'
+            ]
+        },
         {
             version: "1.1.0",
             date: "2026-10-22",
@@ -58,9 +66,11 @@
     try {
         GM_registerMenuCommand("What's new", function(){ showWhatsNew(CHANGELOG); });
         GM_registerMenuCommand('Settings', function(){ openSettings(); });
+        GM_registerMenuCommand('Show panel', function(){ showPanel(); });
     } catch (error) {
         // No menu host (an ungranted script, or Torn PDA). The popup still appears on update,
-        // and the panel's own gear button opens the settings.
+        // the panel's own gear button opens the settings, and the panel can be pinned while in
+        // hospital to keep it on screen.
     }
 
     maybeShowWhatsNew();
@@ -521,8 +531,9 @@
         }
         state.wasInHospital = now;
         // A new stay opens the panel again even if it was hidden during the last one, and gives
-        // the armoury another chance.
+        // the armoury another chance. Leaving hospital hides it again unless it is pinned.
         state.hiddenThisStay = false;
+        state.openedByUser = false;
         if (now) {
             state.armouryRefused = {};
             refreshStock();
@@ -1059,6 +1070,11 @@
             } else if (action === 'pin') {
                 ui.pinned = !ui.pinned;
                 saveJson(UI_KEY, ui);
+                // Unpinning out of hospital leaves the panel up until it is closed, rather than
+                // making it vanish from under the finger.
+                if (!ui.pinned) {
+                    state.openedByUser = true;
+                }
                 applyVisibility();
             } else if (action === 'use') {
                 useNext('next');
@@ -1077,6 +1093,13 @@
 
     function panelOpen() {
         return ui.pinned || state.openedByUser || (inHospital() && !state.hiddenThisStay);
+    }
+
+    // The way in out of hospital, so the panel can be pinned before the next hit.
+    function showPanel() {
+        state.openedByUser = true;
+        state.hiddenThisStay = false;
+        applyVisibility();
     }
 
     function togglePanel() {
@@ -1102,6 +1125,8 @@
         }
         const open = panelOpen();
         root.classList.toggle('qmo-collapsed', !open);
+        // Shrunk to a bar only during a hospital stay; out of hospital an unpinned panel is gone.
+        root.classList.toggle('qmo-hidden', !open && !inHospital());
         const toggle = root.querySelector('.qmo-toggle');
         toggle.innerHTML = open ? ICONS.collapse : ICONS.expand;
         toggle.title = open ? 'Hide' : 'Show';
@@ -1593,6 +1618,7 @@
   font-family:Arial,Helvetica,sans-serif;font-size:13px;line-height:1.4;text-align:left;-webkit-tap-highlight-color:transparent}
 #silmaril-qmo *{box-sizing:border-box}
 #silmaril-qmo.qmo-collapsed{width:auto}
+#silmaril-qmo.qmo-hidden{display:none}
 #silmaril-qmo.qmo-in-hospital{border-color:#8e2b2b}
 #silmaril-qmo .qmo-head{display:flex;align-items:center;gap:6px;padding:4px 4px 4px 10px;border-bottom:1px solid #333;min-height:38px}
 #silmaril-qmo.qmo-collapsed .qmo-head{border-bottom:0}
