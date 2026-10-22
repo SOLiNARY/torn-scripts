@@ -33,6 +33,8 @@
             date: "2026-10-22",
             changes: [
             'New: when you are in hospital, a panel on the Items page shows your hospital time and medical cooldown, and the meds that get you out for the least cooldown.',
+            'Each med in the plan shows how much hospital time it takes off and how much cooldown it adds.',
+            'When sitting out a minute or so of hospital would save cooldown, that cheaper plan is offered too. How long you are willing to wait is a setting.',
             'One click uses the next med, taken from your faction armoury first and from your own items after.',
             'Pin the panel to keep it open out of hospital, and drag it anywhere on the screen. Both are remembered.',
             'After each med it checks the time and cooldown you really got, and offers to fix your settings when they are off.'
@@ -278,6 +280,8 @@
         effectivenessSource: 'api',
         cooldownCut: 0,
         cooldownCutAuto: true,
+        // Hospital time worth sitting through, in minutes, when that saves cooldown.
+        waitMinutes: 1,
         knownCap: BASE_COOLDOWN_CAP,
         capFromSidebar: false,
         perksReadAt: 0
@@ -305,6 +309,7 @@
         armouryRefused: {},
         busy: false,
         nextStep: null,
+        waitStep: null,
         message: null,
         calibration: null,
         reserve: null,
@@ -877,8 +882,10 @@
 
     // ---- Using a med -----------------------------------------------------------------------
 
-    async function useNext() {
-        const step = state.nextStep;
+    // `which` is 'next' for the plan that gets you out, 'wait' for the cheaper one that leaves a
+    // little hospital time.
+    async function useNext(which) {
+        const step = which === 'wait' ? state.waitStep : state.nextStep;
         if (state.busy || !step) {
             return;
         }
@@ -1047,7 +1054,9 @@
                 saveJson(UI_KEY, ui);
                 applyVisibility();
             } else if (action === 'use') {
-                useNext();
+                useNext('next');
+            } else if (action === 'use-wait') {
+                useNext('wait');
             } else if (action === 'apply-calibration') {
                 applyCalibration();
             } else if (action === 'dismiss-calibration') {
@@ -1186,11 +1195,31 @@
         cooldownBox.querySelector('.qmo-bar').classList.toggle('qmo-full', cooldown >= cap);
         cooldownBox.querySelector('.qmo-bar i').style.width = Math.min(100, cooldown / cap * 100).toFixed(1) + '%';
 
+        // The plan is only redrawn when it changes. Its running clocks are filled in below, so a
+        // button is never swapped out from under a click just because a second went by.
+        const planBox = root.querySelector('.qmo-plan');
         const planHtml = buildPlanHtml(hospital, cooldown, cap);
         if (planHtml !== state.planHtml) {
             state.planHtml = planHtml;
-            root.querySelector('.qmo-plan').innerHTML = planHtml;
+            planBox.innerHTML = planHtml;
         }
+        planBox.querySelectorAll('.qmo-live').forEach(function(span){
+            const value = Number(span.getAttribute('data-value')) || 0;
+            const kind = span.getAttribute('data-live');
+            let text = '';
+            if (kind === 'cooldown-after') {
+                text = formatClock(cooldown + value);
+            } else if (kind === 'wait') {
+                text = formatClock(hospital - value);
+            } else if (kind === 'stays') {
+                text = formatAmount(hospital - value);
+            } else if (kind === 'unlock') {
+                text = formatAmount(cooldown - cap);
+            }
+            if (span.textContent !== text) {
+                span.textContent = text;
+            }
+        });
 
         const message = root.querySelector('.qmo-msg');
         message.className = 'qmo-msg' + (state.message ? ' qmo-' + state.message.kind : '');
@@ -1221,10 +1250,12 @@
     function buildPlanHtml(hospital, cooldown, cap) {
         const budget = cap - cooldown;
         const parts = [];
+        const unlock = 'Medical cooldown is at its cap. Meds unlock again in ' + live('unlock', 0) + '.';
         state.nextStep = null;
+        state.waitStep = null;
         if (hospital <= 0) {
             if (budget <= 0) {
-                parts.push(line('Medical cooldown is at its cap. Meds unlock again in ' + formatAmount(cooldown - cap) + '.'));
+                parts.push(line(unlock, true));
             } else if (state.reserve === 0) {
                 parts.push(line('No meds you can use right now.'));
             } else if (state.reserve != null) {
@@ -1244,7 +1275,7 @@
             return parts.join('');
         }
         if (budget <= 0) {
-            parts.push(note('Medical cooldown is at its cap. Meds unlock again in ' + formatAmount(cooldown - cap) + '.'));
+            parts.push(note(unlock, true));
             return parts.join('');
         }
         const groups = buildGroups();
@@ -1264,48 +1295,99 @@
         if (!result.full) {
             const capBound = !planMedOut(groups.map(function(group){ return Object.assign({}, group, { total: Infinity }); }), hospital, budget).full;
             parts.push(note('Not enough ' + (capBound ? 'cooldown room' : 'meds') + ' to get fully out. These take ' +
-                formatAmount(plan.cleared) + ' off and ' + formatAmount(hospital - plan.cleared) + ' stays.'));
+                escapeHtml(formatAmount(plan.cleared)) + ' off and ' + live('stays', plan.cleared) + ' stays.', true));
         }
-        parts.push('<div class="qmo-chips">' + groups.map(function(group, index){
+        const steps = planSteps(groups, plan);
+        parts.push(planChips(groups, plan, steps[0]));
+        parts.push(line((result.full ? 'Out' : 'Partly out') + ': <b class="qmo-h">−' + escapeHtml(formatAmount(plan.cleared)) +
+            '</b> hospital for <b>+' + escapeHtml(formatAmount(plan.cooldown)) + '</b> cooldown → ' +
+            live('cooldown-after', plan.cooldown) + ' / ' + escapeHtml(formatClock(cap)), true));
+        state.nextStep = stepFor(groups, steps);
+        if (state.nextStep) {
+            parts.push(useButton(state.nextStep, 'use', steps.length, ''));
+        }
+        if (result.full) {
+            parts.push(buildWaitHtml(groups, hospital, budget, result.full));
+        }
+        return parts.join('');
+    }
+
+    // A cheaper way out that leaves a little hospital time to sit through. Only offered when it
+    // really saves cooldown; the most a player is willing to wait is a setting. With less time
+    // left than that, the cheapest way out is no med at all.
+    function buildWaitHtml(groups, hospital, budget, full) {
+        const waitSeconds = clamp(Number(settings.waitMinutes) || 0, 0, 60) * 60;
+        if (waitSeconds <= 0) {
+            return '';
+        }
+        const plan = planMedOut(groups, Math.max(0, hospital - waitSeconds), budget).full;
+        if (!plan || plan.cleared >= hospital || plan.cooldown >= full.cooldown - 1) {
+            return '';
+        }
+        const saved = '<b>' + escapeHtml(formatAmount(full.cooldown - plan.cooldown)) + '</b>';
+        if (plan.clicks === 0) {
+            return '<div class="qmo-alt"><p class="qmo-alt-t">Or wait <b>' + live('wait', 0) + '</b> and save ' + saved +
+                ' cooldown: no meds needed.</p></div>';
+        }
+        const steps = planSteps(groups, plan);
+        state.waitStep = stepFor(groups, steps);
+        return '<div class="qmo-alt">' +
+                   '<p class="qmo-alt-t">Or wait <b>' + live('wait', plan.cleared) + '</b> and save ' + saved + ' cooldown:</p>' +
+                   planChips(groups, plan, -1) +
+                   (state.waitStep ? useButton(state.waitStep, 'use-wait', steps.length, 'then wait ' + live('wait', plan.cleared) + ' · ') : '') +
+               '</div>';
+    }
+
+    // Each chip carries what its meds take off and add, so the plan explains itself. The one
+    // the next click uses is outlined.
+    function planChips(groups, plan, nextIndex) {
+        return '<div class="qmo-chips">' + groups.map(function(group, index){
             const count = plan.counts[index];
             if (count === 0) {
                 return '';
             }
-            const source = count <= group.faction ? 'faction' : (group.faction === 0 ? 'yours' : 'faction + yours');
             const picked = pickSource(group);
             const label = group.key === 'blood' && picked ? itemName(picked.id) : group.label;
-            return '<span class="qmo-chip"><img src="/images/items/' + (picked ? picked.id : group.ids[0]) + '/small.png" alt="">' +
-                '<b>' + count + '×</b> ' + escapeHtml(label) + ' <span class="qmo-src">' + source + '</span></span>';
-        }).join('') + '</div>');
-        parts.push(line((result.full ? 'Out' : 'Partly out') + ' for <b>+' + escapeHtml(formatAmount(plan.cooldown)) + '</b> cooldown → ' +
-            escapeHtml(formatClock(cooldown + plan.cooldown)) + ' / ' + escapeHtml(formatClock(cap)), true));
+            return '<span class="qmo-chip' + (index === nextIndex ? ' qmo-next' : '') + '">' +
+                '<img src="/images/items/' + (picked ? picked.id : group.ids[0]) + '/small.png" alt="">' +
+                '<b>' + count + '×</b> ' + escapeHtml(label) +
+                ' <span class="qmo-h">−' + escapeHtml(formatAmount(count * group.hospital)) + '</span>' +
+                ' <span class="qmo-c">+' + escapeHtml(formatAmount(count * group.cooldown)) + '</span></span>';
+        }).join('') + '</div>';
+    }
 
-        const steps = planSteps(groups, plan);
+    function stepFor(groups, steps) {
         const group = groups[steps[0]];
-        const source = pickSource(group);
-        if (source) {
-            state.nextStep = { group: group, source: source };
-            const left = source.armoury ? factionQty(source.id) : ownQty(source.id);
-            parts.push('<button type="button" class="qmo-use' + (state.busy ? ' qmo-busy' : '') + '" data-qmo="use"' + (state.busy ? ' disabled' : '') + '>' +
-                '<img src="/images/items/' + source.id + '/small.png" alt="">' +
-                '<span>Use ' + escapeHtml(itemName(source.id)) +
-                (steps.length > 1 ? ' <small>1 of ' + steps.length + '</small>' : '') + '</span>' +
-                '<small class="qmo-use-src">' + (source.armoury ? 'faction' : 'yours') + ' · ' + left.toLocaleString('en-US') + ' left</small>' +
-            '</button>');
-        }
-        return parts.join('');
+        const source = group ? pickSource(group) : null;
+        return source ? { group: group, source: source } : null;
+    }
+
+    function useButton(step, action, stepCount, prefix) {
+        const left = step.source.armoury ? factionQty(step.source.id) : ownQty(step.source.id);
+        return '<button type="button" class="qmo-use' + (action === 'use-wait' ? ' qmo-use-alt' : '') + (state.busy ? ' qmo-busy' : '') +
+                '" data-qmo="' + action + '"' + (state.busy ? ' disabled' : '') + '>' +
+            '<img src="/images/items/' + step.source.id + '/small.png" alt="">' +
+            '<span>Use ' + escapeHtml(itemName(step.source.id)) +
+            (stepCount > 1 ? ' <small>1 of ' + stepCount + '</small>' : '') + '</span>' +
+            '<small class="qmo-use-src">' + prefix + (step.source.armoury ? 'faction' : 'yours') + ' · ' + left.toLocaleString('en-US') + ' left</small>' +
+        '</button>';
     }
 
     function hasAnyBags() {
         return Object.keys(BLOOD_BAGS).some(function(id){ return factionQty(id) > 0 || ownQty(id) > 0; });
     }
 
+    // A clock that keeps running between redraws: render() fills it in every second.
+    function live(kind, value) {
+        return '<span class="qmo-live" data-live="' + kind + '" data-value="' + Math.round(value) + '"></span>';
+    }
+
     function line(text, trusted) {
         return '<p class="qmo-line">' + (trusted ? text : escapeHtml(text)) + '</p>';
     }
 
-    function note(text) {
-        return '<p class="qmo-note">' + escapeHtml(text) + '</p>';
+    function note(text, trusted) {
+        return '<p class="qmo-note">' + (trusted ? text : escapeHtml(text)) + '</p>';
     }
 
     // ---- Settings --------------------------------------------------------------------------
@@ -1344,6 +1426,9 @@
                     '<div class="qmo-field"><span class="qmo-field-name">Medical cooldown cut (%)</span>' +
                         '<label class="qmo-check"><input type="checkbox" class="qmo-f-cutauto"> Take it from the book you are reading</label>' +
                         '<input type="number" class="qmo-f-cut" min="0" max="90" step="5" inputmode="numeric"></div>' +
+                    '<label class="qmo-field"><span class="qmo-field-name">Wait in hospital to save cooldown (minutes)</span>' +
+                        '<input type="number" class="qmo-f-wait" min="0" max="60" step="0.5" inputmode="decimal">' +
+                        '<small>Also offers a plan that leaves up to this much hospital time to wait out, when it costs less cooldown. 0 turns it off.</small></label>' +
                     '<div class="qmo-field"><span class="qmo-field-name">Torn API key (optional)</span>' +
                         '<div class="qmo-row"><input type="password" class="qmo-f-key" placeholder="16-character key" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">' +
                         '<button type="button" class="qmo-small qmo-f-read">Read perks</button></div>' +
@@ -1360,6 +1445,7 @@
             find('.qmo-f-cutauto').checked = !!settings.cooldownCutAuto;
             find('.qmo-f-cut').value = String(settings.cooldownCutAuto ? state.bookCut : cooldownCut());
             find('.qmo-f-cut').disabled = !!settings.cooldownCutAuto;
+            find('.qmo-f-wait').value = String(clamp(Number(settings.waitMinutes) || 0, 0, 60));
             find('.qmo-f-key').value = hasApiKey() ? apiKey : '';
             const describeSource = function(){
                 find('.qmo-f-eff-note').textContent = effectivenessSource === 'api' && settings.perksReadAt
@@ -1406,6 +1492,7 @@
                 if (!settings.cooldownCutAuto) {
                     settings.cooldownCut = clamp(parseInt(find('.qmo-f-cut').value, 10) || 0, 0, 90);
                 }
+                settings.waitMinutes = clamp(parseFloat(find('.qmo-f-wait').value) || 0, 0, 60);
                 if (readCap != null) {
                     settings.perksReadAt = Date.now();
                     if (!settings.capFromSidebar) {
@@ -1534,6 +1621,7 @@
 #silmaril-qmo .qmo-plan:empty{display:none}
 #silmaril-qmo .qmo-line{margin:0 0 6px;color:#ccc}
 #silmaril-qmo .qmo-line b{color:#fff}
+#silmaril-qmo .qmo-line .qmo-h{color:#ff8a80}
 #silmaril-qmo .qmo-note,#silmaril-qmo .qmo-warn{margin:0 0 8px;padding:6px 8px;border-radius:6px;font-size:12px;
   background:#3a2f12;border:1px solid #6d5a1d;color:#ffe08a}
 #silmaril-qmo .qmo-warn p{margin:0 0 6px}
@@ -1543,7 +1631,13 @@
 #silmaril-qmo .qmo-chip{display:inline-flex;align-items:center;gap:5px;max-width:100%;padding:2px 9px 2px 4px;border-radius:14px;
   background:#2a2a2a;border:1px solid #3a3a3a;font-size:12px;white-space:nowrap}
 #silmaril-qmo .qmo-chip img{height:19px;width:auto}
-#silmaril-qmo .qmo-src{color:#888;font-size:11px}
+#silmaril-qmo .qmo-chip.qmo-next{border-color:#43a047}
+#silmaril-qmo .qmo-h{color:#ff8a80}
+#silmaril-qmo .qmo-c{color:#ffe08a}
+#silmaril-qmo .qmo-alt{margin-top:8px;padding:6px 8px;border:1px dashed #5a5a5a;border-radius:8px}
+#silmaril-qmo .qmo-alt-t{margin:0 0 6px;font-size:12px;color:#bbb}
+#silmaril-qmo .qmo-alt-t b{color:#9ccc65}
+#silmaril-qmo .qmo-alt .qmo-alt-t:last-child{margin-bottom:0}
 #silmaril-qmo .qmo-use{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:4px 8px;width:100%;min-height:44px;
   margin:4px 0 0;padding:6px 10px;border:1px solid #2e7d32;border-radius:8px;background:#2e7d32;color:#fff;
   font:bold 14px Arial,Helvetica,sans-serif;cursor:pointer;text-align:center;touch-action:manipulation}
@@ -1551,6 +1645,8 @@
 #silmaril-qmo .qmo-use img{height:22px;width:auto}
 #silmaril-qmo .qmo-use small{font-weight:normal;opacity:.85;font-size:11px}
 #silmaril-qmo .qmo-use .qmo-use-src{flex-basis:100%}
+#silmaril-qmo .qmo-use.qmo-use-alt{min-height:40px;border-color:#555;background:#333;color:#eee;font-size:13px}
+#silmaril-qmo .qmo-use.qmo-use-alt:hover{background:#3d3d3d}
 #silmaril-qmo .qmo-use.qmo-busy{opacity:.6;cursor:progress}
 #silmaril-qmo .qmo-msg{margin-top:8px;font-size:12px;color:#bbb;overflow-wrap:anywhere}
 #silmaril-qmo .qmo-msg:empty,#silmaril-qmo .qmo-cal:empty{display:none}
