@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         one-click-attack
 // @namespace    https://github.com/SOLiNARY
-// @version      0.2.1
+// @version      1.0
 // @description  Configurable attack shortcuts and a one-button battle workflow with weapon priorities, finishing choices, and tab closing.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT
@@ -25,7 +25,7 @@
     // shows one panel, not eight. The DOM is the channel because userscript sandboxes cannot see
     // each other's globals, and it needs no grants beyond what each script already asks for.
 
-    const SCRIPT_VERSION = "0.2.1";  // keep in sync with @version above
+    const SCRIPT_VERSION = "1.0";  // keep in sync with @version above
     const WHATS_NEW_NAME = "one-click-attack";
     const WHATS_NEW_KEY = "silmaril-attack-shortcuts-last-seen-version";
     // Newest release first. Every release above the version last seen is shown at once, so
@@ -34,37 +34,14 @@
     // only when the popup is opened from the menu. Leaving the flag off means false.
     const CHANGELOG = [
         {
-            version: "0.2.1",
+            version: "1.0",
             date: "2026-10-26",
             silent: true,
             changes: [
-                'Renamed to one-click-attack, with your saved shortcuts and workflow preserved.'
-            ]
-        },
-        {
-            version: "0.2.0",
-            date: "2026-10-26",
-            silent: true,
-            changes: [
-                'Use Space or the on-page button for your next battle action, from starting the fight to closing the result.',
-                'Build your sequence in One button: reorder weapons, choose Fist or Kick, set reload behavior and pick how to finish.'
-            ]
-        },
-        {
-            version: "0.1.1",
-            date: "2026-10-26",
-            silent: true,
-            changes: [
-                'Press S to start an attack or J to join one when its button appears; both keys can be changed in Shortcuts.'
-            ]
-        },
-        {
-            version: "0.1.0",
-            date: "2026-10-26",
-            silent: true,
-            changes: [
-                'Use 1-6 for weapons, Punch and Kick, 7-9 for Leave, Mug and Hospitalize, and 0 to close the tab.',
-                'Open Shortcuts to change or clear any binding and save your own keys.'
+                'Use S/J to start or join, 1-6 for attacks, 7-9 for Leave, Mug and Hospitalize, and 0 to close the tab.',
+                'Press Space or the on-page button to perform the next action for the current battle stage.',
+                'Set temporary weapon use, reorder weapons, choose Fist or Kick, and choose reload, finishing and tab-closing behavior.',
+                'Customize bindings and save your sequence in Shortcuts; typing is ignored and held keys never repeat actions.'
             ]
         }
     ];
