@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn SpyParse
 // @namespace    https://github.com/SOLiNARY
-// @version      0.3.8.pda
+// @version      0.3.9.pda
 // @description  Parse spy reports & save them in local storage After an update, a "What's new" popup lists what changed.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT License
@@ -21,7 +21,7 @@
     // shows one panel, not eight. The DOM is the channel because userscript sandboxes cannot see
     // each other's globals, and it needs no grants beyond what each script already asks for.
 
-    const SCRIPT_VERSION = "0.3.8.pda";  // keep in sync with @version above
+    const SCRIPT_VERSION = "0.3.9.pda";  // keep in sync with @version above
     const WHATS_NEW_NAME = "SpyParse";
     const WHATS_NEW_KEY = "silmaril-spy-parse-last-seen-version";
     // Newest release first. Every release above the version last seen is shown at once, so
@@ -494,9 +494,17 @@ Total: ${x.TotalPrettified}
         return new SpyReport(id, name, level, strength, defense, speed, dexterity, total, new Date());
     }
  
+    function escapeHtml(text) {
+        return String(text).replace(/[&<>"']/g, function(character){
+            return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character];
+        });
+    }
+
     function AddSpyProfile(spyProfile) {
         console.log('add spy profile begin');
-        const profileTemplate = (x) => `<td data-name>${x.Name}</td><td style="${isMobileView ? "display: none;" : ''}" data-level=${x.Level}>${x.Level}</td><td data-strength=${x.Strength}>${x.StrengthPrettified}</td><td data-defense=${x.Defense}>${x.DefensePrettified}</td><td data-speed=${x.Speed}>${x.SpeedPrettified}</td><td data-dexterity=${x.Dexterity}>${x.DexterityPrettified}</td><td data-total=${x.Total}>${x.TotalPrettified}</td><td style="${isMobileView ? "display: none;" : ''}" data-updated=${x.UpdatedTimeStamp}>${x.UpdatedDate}</td>`;
+        // The name is read off the page, so it is escaped like any other remote text; the other
+        // cells are numbers and dates the script computed itself.
+        const profileTemplate = (x) => `<td data-name>${escapeHtml(x.Name)}</td><td style="${isMobileView ? "display: none;" : ''}" data-level="${x.Level}">${x.Level}</td><td data-strength="${x.Strength}">${x.StrengthPrettified}</td><td data-defense="${x.Defense}">${x.DefensePrettified}</td><td data-speed="${x.Speed}">${x.SpeedPrettified}</td><td data-dexterity="${x.Dexterity}">${x.DexterityPrettified}</td><td data-total="${x.Total}">${x.TotalPrettified}</td><td style="${isMobileView ? "display: none;" : ''}" data-updated="${x.UpdatedTimeStamp}">${x.UpdatedDate}</td>`;
  
         let spyTableBody = document.querySelector('#spy-parse-tbl tbody');
         let userRow = spyTableBody.querySelector(`tr[data-id="${spyProfile.Id}"]`);

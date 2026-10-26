@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Market Filler
 // @namespace    https://github.com/SOLiNARY
-// @version      1.1.5
+// @version      1.1.6
 // @description  Adds a Fill button to every row when you list on the Item Market: one click sets the price and quantity. Price from listings (cheapest minus $1 by default), market value or live bazaars via weav3r.dev, with your own formula and min/max ranges. A popup shows the 5 cheapest listings; click one to undercut it. Quantity modes, per-category settings, favourites with Fill All. Open settings with the cog on the Fill All bar or by holding Fill for 2s.
 // @author       Silmaril [2665762]
 // @license      MIT License
@@ -19,7 +19,7 @@
     'use strict';
 
     // Keep in sync with @version above — it keys the "What's new" popup.
-    const SCRIPT_VERSION = "1.1.5";
+    const SCRIPT_VERSION = "1.1.6";
 
     const itemUrl = "https://api.torn.com/torn/{itemId}?selections=items&key={apiKey}&comment=MarketFiller";
     const marketUrl = "https://api.torn.com/v2/market/{itemId}?selections=itemMarket&key={apiKey}&comment=MarketFiller";
@@ -683,16 +683,26 @@
     // The sponsored slot goes first — a paid placement must never set your price — then listings
     // far under the average (outliers, not competition) and ones the crawler has not re-confirmed
     // lately, unless dropping the stale ones would leave nothing at all.
+    // weav3r is a third party, so its fields are coerced to numbers before they reach the page:
+    // a listing whose price or quantity is not a finite number is dropped rather than rendered.
     function normaliseBazaarListings(data){
-        let floor = data.bazaar_average == null ? 0 : data.bazaar_average * BAZAAR_SANITY_FLOOR_RATIO;
-        let usable = (data.listings ?? []).filter(function(listing){
-            return listing.sponsored !== 1 && listing.price >= floor;
+        let average = Number(data.bazaar_average);
+        let floor = Number.isFinite(average) ? average * BAZAAR_SANITY_FLOOR_RATIO : 0;
+        let usable = (data.listings ?? []).map(function(listing){
+            return {
+                price: Number(listing.price),
+                amount: Number(listing.quantity ?? 1),
+                sponsored: listing.sponsored,
+                lastChecked: Number(listing.last_checked ?? 0)
+            };
+        }).filter(function(listing){
+            return listing.sponsored !== 1 && Number.isFinite(listing.price) && Number.isFinite(listing.amount) && listing.price >= floor;
         });
         let fresh = usable.filter(function(listing){
-            return (Date.now() - (listing.last_checked ?? 0) * 1000) <= WEAV3R_STALE_LISTING_MS;
+            return (Date.now() - listing.lastChecked * 1000) <= WEAV3R_STALE_LISTING_MS;
         });
         return (fresh.length > 0 ? fresh : usable).map(function(listing){
-            return { price: listing.price, amount: listing.quantity ?? 1 };
+            return { price: listing.price, amount: listing.amount };
         });
     }
 
@@ -759,7 +769,8 @@
         }
         if (source === SOURCE_BAZAAR){
             if (bazaarSelector(formula).kind === 'avg'){
-                return data.bazaar_average == null ? null : {"price": data.bazaar_average, "amount": 1};
+                let average = Number(data.bazaar_average);
+                return data.bazaar_average == null || !Number.isFinite(average) ? null : {"price": average, "amount": 1};
             }
             let listings = normaliseBazaarListings(data);
             return listings.length > 0 ? listings : null;
@@ -2364,14 +2375,19 @@
     function GetPricesBreakdown(prices){
         if (prices == null) return "No prices loaded";
         // An error has no listings to show, only its message: "Failed!", "No listings!" and so on.
-        if (!Array.isArray(prices) && prices.amount === 0) return prices.price;
+        // The message can be Torn's or weav3r's own text, so it is escaped like any remote string.
+        if (!Array.isArray(prices) && prices.amount === 0) return escapeHtml(prices.price);
         if (prices[0] === undefined){
             prices = Array(prices);
         }
         const sb = new StringBuilder();
         for (let i = 0; i < Math.min(prices.length, 5); i++){
-            if(typeof prices[i] !== "object" || prices[i].amount === undefined || prices[i].price === undefined) continue;
-            sb.append(`<span class="silmaril-torn-market-filler-popup-price" data-price=${prices[i].price}>${prices[i].amount} x ${formatNumberWithCommas(prices[i].price)} (${formatNumberWithCommas(Math.round(prices[i].price * marketTaxFactor))})</span>`);
+            if(prices[i] == null || typeof prices[i] !== "object" || prices[i].amount === undefined || prices[i].price === undefined) continue;
+            // Listings come from Torn or weav3r responses: only finite numbers are put in the markup.
+            const price = Number(prices[i].price);
+            const amount = Number(prices[i].amount);
+            if (!Number.isFinite(price) || !Number.isFinite(amount)) continue;
+            sb.append(`<span class="silmaril-torn-market-filler-popup-price" data-price="${price}">${amount} x ${formatNumberWithCommas(price)} (${formatNumberWithCommas(Math.round(price * marketTaxFactor))})</span>`);
             if (i < Math.min(prices.length, 5)-1){
                 sb.append('<br>');
             }
@@ -2405,6 +2421,12 @@
 
     function formatNumberWithCommas(number) {
         return new Intl.NumberFormat('en-US').format(number);
+    }
+
+    function escapeHtml(text) {
+        return String(text).replace(/[&<>"']/g, function(character){
+            return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character];
+        });
     }
 
     function checkApiKey(checkExisting = true) {

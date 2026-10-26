@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Bazaar Filler
 // @namespace    https://github.com/SOLiNARY
-// @version      1.11.5
+// @version      1.11.6
 // @description  Adds a Fill button to every item on your bazaar's Add and Manage pages: one click sets the price and quantity. Price from the item market (cheapest minus $1 by default), market value or live bazaars via weav3r.dev, with your own formula and min/max ranges. Quantity modes, per-category settings, favourites with Fill All, and a bubble that warns when your price is far below the competition. Open settings with the cog on the Fill All bar or by holding Fill for 3s.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT License
@@ -20,7 +20,7 @@
     'use strict';
 
     // Keep in sync with @version above — it keys the "What's new" popup.
-    const SCRIPT_VERSION = "1.11.5";
+    const SCRIPT_VERSION = "1.11.6";
 
     const marketUrl = "https://api.torn.com/v2/market?id={itemId}&selections=itemMarket&key={apiKey}&comment=BazaarFiller";
     const itemUrl = "https://api.torn.com/torn/{itemId}?selections=items&key={apiKey}&comment=BazaarFiller";
@@ -1727,18 +1727,28 @@
     // Normalise weav3r listings to the {price, amount} shape the rest of the script speaks.
     // The sponsored slot is dropped first — a paid placement must never set your price — and so
     // are listings the crawler has not re-confirmed lately, unless that would leave nothing.
+    // weav3r is a third party, so its fields are coerced to numbers before they are used:
+    // a listing whose price or quantity is not a finite number is dropped rather than priced.
     function normaliseBazaarListings(data){
         // A listing this far under the average is an outlier, not competition. Dropping it (rather
         // than refusing the item) means the next genuine listing sets the price.
-        let floor = data.bazaar_average == null ? 0 : data.bazaar_average * BAZAAR_SANITY_FLOOR_RATIO;
-        let usable = (data.listings ?? []).filter(function(listing){
-            return listing.sponsored !== 1 && listing.price >= floor;
+        let average = Number(data.bazaar_average);
+        let floor = Number.isFinite(average) ? average * BAZAAR_SANITY_FLOOR_RATIO : 0;
+        let usable = (data.listings ?? []).map(function(listing){
+            return {
+                price: Number(listing.price),
+                amount: Number(listing.quantity ?? 1),
+                sponsored: listing.sponsored,
+                lastChecked: Number(listing.last_checked ?? 0)
+            };
+        }).filter(function(listing){
+            return listing.sponsored !== 1 && Number.isFinite(listing.price) && Number.isFinite(listing.amount) && listing.price >= floor;
         });
         let fresh = usable.filter(function(listing){
-            return (Date.now() - (listing.last_checked ?? 0) * 1000) <= WEAV3R_STALE_LISTING_MS;
+            return (Date.now() - listing.lastChecked * 1000) <= WEAV3R_STALE_LISTING_MS;
         });
         return (fresh.length > 0 ? fresh : usable).map(function(listing){
-            return { price: listing.price, amount: listing.quantity ?? 1 };
+            return { price: listing.price, amount: listing.amount };
         });
     }
 
@@ -1749,7 +1759,8 @@
         let listings = normaliseBazaarListings(data);
         let basis = null;
         if (selector.kind === 'avg'){
-            basis = data.bazaar_average ?? null;
+            let average = Number(data.bazaar_average);
+            basis = data.bazaar_average == null || !Number.isFinite(average) ? null : average;
         } else if (selector.kind === 'median'){
             basis = listings.length > 0 ? getMedianPrice(listings) : null;
         } else if (listings.length > 0){
