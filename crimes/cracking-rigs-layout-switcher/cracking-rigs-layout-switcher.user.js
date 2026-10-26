@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Rigs Layout Switcher
 // @namespace    https://github.com/SOLiNARY
-// @version      0.7.6
+// @version      0.7.7
 // @description  Adds "Save current rig layout" & "Empty rig layout" quick actions to a Cracking crime. After an update, a "What's new" popup lists what changed.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT License
@@ -26,7 +26,7 @@
     // shows one panel, not eight. The DOM is the channel because userscript sandboxes cannot see
     // each other's globals, and it needs no grants beyond what each script already asks for.
 
-    const SCRIPT_VERSION = "0.7.6";  // keep in sync with @version above
+    const SCRIPT_VERSION = "0.7.7";  // keep in sync with @version above
     const WHATS_NEW_NAME = "Rigs Layout Switcher";
     const WHATS_NEW_KEY = "silmaril-cracking-rigs-layout-switcher-last-seen-version";
     // Newest release first. Every release above the version last seen is shown at once, so
@@ -323,7 +323,7 @@
         if (!rfcvUpdatedThisSession){
             let rfcvIdx = fetchUrl.indexOf(rfcvArg);
             if (rfcvIdx >= 0){
-                rfcv = fetchUrl.substr(rfcvIdx + rfcvArg.length);
+                rfcv = fetchUrl.substr(rfcvIdx + rfcvArg.length).split('&')[0];
                 localStorage.setItem("silmaril-rigs-layout-switcher-rfcv", rfcv);
                 document.querySelectorAll("div.silmaril-rigs-layout-switcher-templates button:not(.non-deletable)").forEach((button) => button.classList.remove("disabled"));
                 rfcvUpdatedThisSession = true;
@@ -354,9 +354,20 @@
     }
  
     const setLayoutUrl = "/page.php?sid=crimesData&step=prepare&rfcv={rfcv}";
-    const resetTemplate = `{"step":"resetRig","chassisID":{rig}}`;
-    const layoutTemplate = `{"step":"{step}","chassisID":{rig},"ID":{component},"coords":[{shortComponent}{longComponent}]}`;
-    const coordinatesTemplate = `{"x":{xCoordinate},"y":{yCoordinate}}`;
+
+    // The request body is built from numbers only, so a cell that arrived through an import or
+    // an old save can only ever contribute coordinates and ids, never change the body's shape.
+    function buildLayoutRequest(step, rig, item) {
+        const request = { step: step, chassisID: Number(rig) };
+        if (item != null) {
+            request.ID = Number(item.item);
+            request.coords = [{ x: Number(item.x), y: Number(item.y) }];
+            if (item.x2 != null) {
+                request.coords.push({ x: Number(item.x2), y: Number(item.y2) });
+            }
+        }
+        return JSON.stringify(request);
+    }
     const add = 'add';
     const remove = 'remove';
     const componentIds = {
@@ -535,7 +546,7 @@
         empty.className = 'torn-btn non-deletable';
         empty.textContent = 'Empty';
         empty.setAttribute('data-action', 'remove');
-        empty.addEventListener('click', () => {handleLoadoutClick(root)});
+        empty.addEventListener('click', (event) => {handleLoadoutClick(event, root)});
         root.appendChild(empty);
  
         addLayoutButtons(root);
@@ -778,12 +789,47 @@
             button.className = rfcv === null ? 'torn-btn disabled' : 'torn-btn';
             button.textContent = layout;
             button.setAttribute('data-action', 'add');
-            button.addEventListener('click', () => {handleLoadoutClick(root, layout)});
+            button.addEventListener('click', (event) => {handleLoadoutClick(event, root, layout)});
  
             root.appendChild(button);
         })
     }
  
+    function toGridIndex(value) {
+        const index = Number(value);
+        return Number.isInteger(index) && index >= 0 && index < 5 ? index : null;
+    }
+
+    // A shared layout is pasted or linked in from outside, so it is untrusted: only cells made of
+    // grid coordinates and a component id are kept, and a layout holding anything else is skipped.
+    function sanitiseLayout(layout) {
+        if (!Array.isArray(layout)) {
+            return null;
+        }
+        const cells = [];
+        for (const cell of layout) {
+            if (cell == null || typeof cell !== 'object') {
+                return null;
+            }
+            const x = toGridIndex(cell.x);
+            const y = toGridIndex(cell.y);
+            const item = Number(cell.item);
+            if (x === null || y === null || !Number.isInteger(item) || item < 0) {
+                return null;
+            }
+            const clean = new ComponentInfo(x, y, item);
+            if (cell.x2 != null || cell.y2 != null) {
+                clean.x2 = toGridIndex(cell.x2);
+                clean.y2 = toGridIndex(cell.y2);
+                if (clean.x2 === null || clean.y2 === null) {
+                    return null;
+                }
+            }
+            cells.push(clean);
+        }
+        return cells;
+    }
+
     function importLayout(allLayoutsToImport) {
         IS_DEBUG ? console.log('allLayoutsToImport', allLayoutsToImport) : null;
         const allLayoutNamesToImport = Object.keys(allLayoutsToImport);
@@ -791,19 +837,24 @@
         rigLayoutsArray = rigLayouts.split(',');
  
         allLayoutNamesToImport.forEach((sharedName) => {
-            // Only the name is lowercased, to match how Save names layouts; the layout itself is
-            // stored exactly as it was shared.
+            // Only the name is lowercased, to match how Save names layouts; the cells are kept as
+            // shared once they pass validation.
             const layoutName = sharedName.toLowerCase();
             if (layoutName == ''){
                 return;
             }
             IS_DEBUG ? console.log('layoutName', layoutName) : null;
             IS_DEBUG ? console.log('layout', allLayoutsToImport[sharedName]) : null;
+            const layout = sanitiseLayout(allLayoutsToImport[sharedName]);
+            if (layout === null) {
+                console.error(`[TornRigsLayoutSwitcher] Skipping layout "${layoutName}": it is not a list of rig cells.`);
+                return;
+            }
             try {
                 if (!rigLayoutsArray.includes(layoutName)) {
                     rigLayoutsArray.push(layoutName);
                 }
-                localStorage.setItem(`silmaril-rigs-layout-switcher-layout-${layoutName}`, JSON.stringify(allLayoutsToImport[sharedName], customReplacer));
+                localStorage.setItem(`silmaril-rigs-layout-switcher-layout-${layoutName}`, JSON.stringify(layout, customReplacer));
                 IS_DEBUG ? console.log('layougetLayout', localStorage.getItem(`silmaril-rigs-layout-switcher-layout-${layoutName}`)) : null;
             } catch (e) {
                 console.error("[TornRigsLayoutSwitcher] Error while importing Layout", e);
@@ -815,7 +866,7 @@
         localStorage.setItem("silmaril-rigs-layout-switcher-layouts", rigLayouts);
     }
  
-    async function handleLoadoutClick(root, layoutName = null){
+    async function handleLoadoutClick(event, root, layoutName = null){
         let action = event.target.getAttribute('data-action');
         if (event.target.classList.contains('disabled')){
             return;
@@ -910,20 +961,12 @@
         }
         const urlWithRfcv = setLayoutUrl.replace("{rfcv}", rfcv);
         if (action == 'resetRig') {
-            const layoutUrl = resetTemplate.replace("{rig}", rig);
+            const layoutUrl = buildLayoutRequest('resetRig', rig, null);
             const url = urlWithRfcv.replace("{layout}", layoutUrl);
             requestsQueue.push([url, layoutUrl]);
         } else {
             items.forEach((item) => {
-                const coordinates = coordinatesTemplate.replace("{xCoordinate}", item.x).replace("{yCoordinate}", item.y);
-                let layoutUrl2 = layoutTemplate.replace("{step}", item.action === null ? action : item.action).replace("{rig}", rig).replace("{component}", item.item).replace("{shortComponent}", coordinates);
-                let layoutUrl;
-                if (item.x2 != null) {
-                    const coordinatesLong = coordinatesTemplate.replace("{xCoordinate}", item.x2).replace("{yCoordinate}", item.y2);
-                    layoutUrl = layoutUrl2.replace("{longComponent}", `,${coordinatesLong}`);
-                } else {
-                    layoutUrl = layoutUrl2.replace("{longComponent}", "");
-                }
+                const layoutUrl = buildLayoutRequest(item.action === null ? action : item.action, rig, item);
                 const url = urlWithRfcv.replace("{layout}", layoutUrl);
                 requestsQueue.push([url, layoutUrl]);
             });

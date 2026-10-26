@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Crimes Rewards Value
 // @namespace    https://github.com/SOLiNARY
-// @version      0.6.5
+// @version      0.6.6
 // @description  Shows the market value of all crime rewards. After an update, a "What's new" popup lists what changed.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT License
@@ -22,7 +22,7 @@
     // shows one panel, not eight. The DOM is the channel because userscript sandboxes cannot see
     // each other's globals, and it needs no grants beyond what each script already asks for.
 
-    const SCRIPT_VERSION = "0.6.5";  // keep in sync with @version above
+    const SCRIPT_VERSION = "0.6.6";  // keep in sync with @version above
     const WHATS_NEW_NAME = "Crimes Rewards Value";
     const WHATS_NEW_KEY = "silmaril-rewards-value-last-seen-version";
     // Newest release first. Every release above the version last seen is shown at once, so
@@ -348,10 +348,16 @@ span#silmaril-crimes-rewards-value-total {
         fetch(requestUrl)
             .then(response => response.json())
             .then(data => {
-            if (data.error != null && data.error.code === 2){
-                apiKey = null;
-                localStorage.setItem("silmaril-crimes-rewards-value-apikey", null);
-                console.error("[TornCrimesRewardsValue] Incorrect Api Key:", data);
+            if (data.error != null){
+                if (data.error.code === 2){
+                    apiKey = null;
+                    localStorage.removeItem("silmaril-crimes-rewards-value-apikey");
+                    console.error("[TornCrimesRewardsValue] Incorrect Api Key:", data);
+                } else {
+                    // A rate limit or an API outage leaves the day unmarked, so the next page
+                    // load tries again instead of waiting until tomorrow.
+                    console.error("[TornCrimesRewardsValue] Error fetching market values:", data.error);
+                }
                 return;
             }
             putData(data.items);
