@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         One Click Attack
 // @namespace    https://github.com/SOLiNARY
-// @version      1.0.1
-// @description  Configurable attack shortcuts and a one-button battle workflow with weapon priorities, finishing choices, and tab closing.
+// @version      1.1.0
+// @description  Configurable attack shortcuts and a one-button battle workflow with weapon priorities, finishing choices, tab closing, and a movable floating button for phones.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT
 // @match        https://www.torn.com/page.php*
@@ -25,7 +25,7 @@
     // shows one panel, not eight. The DOM is the channel because userscript sandboxes cannot see
     // each other's globals, and it needs no grants beyond what each script already asks for.
 
-    const SCRIPT_VERSION = "1.0.1";  // keep in sync with @version above
+    const SCRIPT_VERSION = "1.1.0";  // keep in sync with @version above
     const WHATS_NEW_NAME = "One Click Attack";
     const WHATS_NEW_KEY = "silmaril-attack-shortcuts-last-seen-version";
     // Newest release first. Every release above the version last seen is shown at once, so
@@ -33,6 +33,14 @@
     // `silent: true` is left out of that and never opens the popup by itself; it is listed
     // only when the popup is opened from the menu. Leaving the flag off means false.
     const CHANGELOG = [
+        {
+            version: "1.1.0",
+            date: "2026-10-26",
+            changes: [
+                'On phones and tablets a round button floats at the right edge: tap it to perform the next battle action.',
+                'Drag the button anywhere from Settings with Move button, or turn it on for desktop too.'
+            ]
+        },
         {
             version: "1.0.1",
             date: "2026-10-26",
@@ -242,6 +250,20 @@
 
     const STORAGE_KEY = 'silmaril-attack-shortcuts-settings';
     const FIGHT_STATE_KEY = 'silmaril-attack-shortcuts-fight';
+    // Kept apart from the settings so dragging the button never saves or discards a settings draft.
+    const FLOAT_POSITION_KEY = 'silmaril-attack-shortcuts-float-position';
+    const FLOAT_MODES = ['off', 'touch', 'always'];
+    const FLOAT_SIZE = 62;
+    const FLOAT_MARGIN = 12;
+    // The position is a share of the free space, so it survives rotation and resizing on-screen.
+    const FLOAT_DEFAULT_POSITION = { x: 1, y: 0.5 };
+    const FLOAT_FACES = {
+        start: ['\u25B6\uFE0E', 'Start'], join: ['\u25B6\uFE0E', 'Join'],
+        primary: ['\u2316', 'Primary'], secondary: ['\u2316', 'Second'],
+        melee: ['\u2694\uFE0E', 'Melee'], temporary: ['\u2694\uFE0E', 'Temp'],
+        punch: ['\u2694\uFE0E', 'Fist'], kick: ['\u2694\uFE0E', 'Kick'],
+        leave: ['\u21E5', 'Leave'], mug: ['$', 'Mug'], hospitalize: ['\u271A', 'Hosp'], closeTab: ['\u2715', 'Close']
+    };
     const ACTIONS = [
         { id: 'workflow', label: 'One-button workflow', code: 'Space' },
         { id: 'start', label: 'Start attack', code: 'KeyS', control: true },
@@ -270,6 +292,8 @@
     let settingsDialog = null;
     let previousFocus = null;
     let toastTimer;
+    let floatPosition = readFloatPosition();
+    let placing = null;
     let fightState = { pageKey: '', temporaryUsed: false, pending: null, stage: 'unknown' };
     let observedAttackRoot = null;
     let attackObserver = null;
@@ -319,6 +343,7 @@
     function defaults() {
         return {
             enabled: true,
+            floating: 'touch',
             workflow: workflowDefaults(),
             bindings: Object.fromEntries(ACTIONS.map(action => [action.id, {
                 code: action.code, ctrl: false, alt: false, shift: false, meta: false
@@ -346,6 +371,7 @@
             const saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
             if (!saved || typeof saved !== 'object') return result;
             if (typeof saved.enabled === 'boolean') result.enabled = saved.enabled;
+            if (FLOAT_MODES.includes(saved.floating)) result.floating = saved.floating;
             result.workflow = normalizeWorkflow(saved.workflow);
             const configured = new Set();
             for (const action of ACTIONS) {
@@ -374,6 +400,25 @@
             // Missing, blocked, or invalid storage leaves the defaults usable.
         }
         return result;
+    }
+
+    function readFloatPosition() {
+        try {
+            const saved = JSON.parse(localStorage.getItem(FLOAT_POSITION_KEY));
+            const valid = value => typeof value === 'number' && value >= 0 && value <= 1;
+            if (valid(saved?.x) && valid(saved?.y)) return { x: saved.x, y: saved.y };
+        } catch (error) {
+            // Missing or damaged storage puts the button back at centre-right.
+        }
+        return { ...FLOAT_DEFAULT_POSITION };
+    }
+
+    function saveFloatPosition() {
+        try {
+            localStorage.setItem(FLOAT_POSITION_KEY, JSON.stringify(floatPosition));
+        } catch (error) {
+            notify('Could not save the button position. Allow site storage and try again.');
+        }
     }
 
     function formatBinding(binding) {
@@ -710,10 +755,12 @@
                 shortcutOverlays.delete(id);
             }
         }
-        const canHighlight = settings.enabled && settings.workflow.enabled && !settingsDialog?.open &&
+        const canHighlight = settings.enabled && settings.workflow.enabled && !settingsDialog?.open && !placing &&
             !blockingDialogOpen() && !editingElement(document.activeElement);
+        const launcher = ['tas-float', 'tas-workflow'].map(id => document.getElementById(id))
+            .find(element => element && !element.hidden);
         const nextTarget = canHighlight && (nextAction?.kind === 'click' ? nextAction.target :
-            nextAction?.kind === 'close' ? document.getElementById('tas-workflow') : null);
+            nextAction?.kind === 'close' ? launcher : null);
         const nextRect = overlayRect(nextTarget);
         if (nextRect && isAvailable(nextTarget)) {
             targets.add(nextTarget);
@@ -774,7 +821,7 @@
             connect();
             if (records.some(record => {
                 const target = record.target instanceof Element ? record.target : record.target.parentElement;
-                return !target?.closest('#attack-root, #tas-battle-overlays, #tas-settings, #tas-workflow, #tas-toast');
+                return !target?.closest('#attack-root, #tas-battle-overlays, #tas-settings, #tas-workflow, #tas-float, #tas-place, #tas-toast');
             })) scheduleWorkflowRefresh();
         }).observe(document.body, { childList: true, subtree: true, attributes: true,
             attributeFilter: ['class', 'style', 'hidden', 'open', 'aria-modal'] });
@@ -826,6 +873,10 @@
 
     function onKeyDown(event) {
         if (new URLSearchParams(location.search).get('sid') !== 'attack') return;
+        if (placing) {
+            handlePlacingKey(event);
+            return;
+        }
         if (settingsDialog?.open) {
             handleSettingsKey(event);
             return;
@@ -874,7 +925,7 @@
             launcher.setAttribute('aria-haspopup', 'dialog');
             launcher.textContent = settings.enabled ? 'Settings' : 'Settings (off)';
             launcher.title = 'Configure One Click Attack';
-            launcher.addEventListener('click', openSettings);
+            launcher.addEventListener('click', () => openSettings());
         }
         const heading = document.querySelector('#attack-root [class*="titleContainer___"]');
         if (heading) {
@@ -902,19 +953,35 @@
         refreshWorkflowButton();
     }
 
+    function floatingWanted() {
+        if (placing) return true;
+        if (!settings.enabled || !settings.workflow.enabled) return false;
+        return settings.floating === 'always' ||
+            (settings.floating === 'touch' && matchMedia('(pointer: coarse)').matches);
+    }
+
     function refreshWorkflowButton() {
         const button = document.getElementById('tas-workflow');
+        const float = document.getElementById('tas-float');
         if (!button) {
             refreshBattleOverlays();
             return;
         }
-        const hidden = !settings.enabled || !settings.workflow.enabled;
+        // The floating button stands in for the card, so only one of them shows at a time.
+        const floating = Boolean(float) && floatingWanted();
+        const hidden = !settings.enabled || !settings.workflow.enabled || floating;
         if (button.hidden !== hidden) button.hidden = hidden;
-        if (button.hidden) {
+        if (float && float.hidden !== !floating) float.hidden = !floating;
+        if (button.hidden && !floating) {
             refreshBattleOverlays();
             return;
         }
         const action = nextWorkflowAction();
+        if (floating) refreshFloatButton(float, action);
+        if (button.hidden) {
+            refreshBattleOverlays(action);
+            return;
+        }
         const key = formatBinding(settings.bindings.workflow);
         const label = button.querySelector('.tas-workflow-label');
         const detail = button.querySelector('.tas-workflow-detail');
@@ -929,6 +996,158 @@
         const ariaLabel = 'One-button workflow: ' + action.label + '. ' + action.detail;
         if (button.getAttribute('aria-label') !== ariaLabel) button.setAttribute('aria-label', ariaLabel);
         refreshBattleOverlays(action);
+    }
+
+    function floatFace(action) {
+        if (action.kind === 'wait') return ['', 'Wait'];
+        if (action.kind === 'stop') {
+            const word = /manually/.test(action.label) ? 'Manual' : action.label === 'Workflow complete' ? 'Done' :
+                action.label === 'Workflow off' ? 'Off' : 'None';
+            return ['\u2013', word];
+        }
+        if (action.kind === 'close') return FLOAT_FACES.closeTab;
+        if (/^Reload\b/.test(action.label)) return ['\u27F3', 'Reload'];
+        return FLOAT_FACES[action.id] || ['\u2022', action.label];
+    }
+
+    function ensureFloatButton() {
+        if (document.getElementById('tas-float')) return;
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.id = 'tas-float';
+        button.hidden = true;
+        button.innerHTML = '<span class="tas-float-icon" aria-hidden="true"></span><span class="tas-float-word"></span>';
+        button.addEventListener('click', () => {
+            if (!placing) performWorkflowAction();
+        });
+        button.addEventListener('keydown', event => {
+            if (event.repeat && ['Enter', ' '].includes(event.key)) consume(event);
+        });
+        button.addEventListener('pointerdown', event => {
+            if (!placing || event.button > 0) return;
+            event.preventDefault();
+            const rect = button.getBoundingClientRect();
+            placing.drag = { id: event.pointerId, dx: event.clientX - rect.left, dy: event.clientY - rect.top };
+            try {
+                button.setPointerCapture(event.pointerId);
+            } catch (error) {
+                // Without capture the drag still follows moves over the button itself.
+            }
+        });
+        button.addEventListener('pointermove', event => {
+            const drag = placing?.drag;
+            if (!drag || drag.id !== event.pointerId) return;
+            event.preventDefault();
+            moveFloatTo(event.clientX - drag.dx, event.clientY - drag.dy);
+        });
+        const endDrag = event => {
+            if (placing?.drag?.id === event.pointerId) placing.drag = null;
+        };
+        button.addEventListener('pointerup', endDrag);
+        button.addEventListener('pointercancel', endDrag);
+        document.body.appendChild(button);
+    }
+
+    function floatSpace() {
+        const width = document.documentElement.clientWidth || innerWidth;
+        const height = document.documentElement.clientHeight || innerHeight;
+        return { width: Math.max(0, width - FLOAT_SIZE - FLOAT_MARGIN * 2),
+            height: Math.max(0, height - FLOAT_SIZE - FLOAT_MARGIN * 2) };
+    }
+
+    function positionFloat(button) {
+        const space = floatSpace();
+        const left = Math.round(FLOAT_MARGIN + floatPosition.x * space.width) + 'px';
+        const top = Math.round(FLOAT_MARGIN + floatPosition.y * space.height) + 'px';
+        if (button.style.left !== left) button.style.left = left;
+        if (button.style.top !== top) button.style.top = top;
+    }
+
+    function moveFloatTo(left, top) {
+        const space = floatSpace();
+        const share = (offset, size) => size ? Math.min(1, Math.max(0, (offset - FLOAT_MARGIN) / size)) : 1;
+        floatPosition = { x: share(left, space.width), y: share(top, space.height) };
+        const button = document.getElementById('tas-float');
+        if (button) positionFloat(button);
+    }
+
+    function refreshFloatButton(button, action) {
+        const [icon, word] = floatFace(action);
+        const iconElement = button.querySelector('.tas-float-icon');
+        const wordElement = button.querySelector('.tas-float-word');
+        if (iconElement.textContent !== icon) iconElement.textContent = icon;
+        if (wordElement.textContent !== word) wordElement.textContent = word;
+        button.classList.toggle('tas-float-wait', action.kind === 'wait');
+        button.classList.toggle('tas-float-placing', Boolean(placing));
+        // While placing, a waiting button must still take the pointer so it can be dragged.
+        const disabled = !placing && (action.kind === 'wait' || action.kind === 'stop');
+        if (button.disabled !== disabled) button.disabled = disabled;
+        const detail = placing ? 'Drag to move. Arrow keys move it too.' : action.detail;
+        if (button.title !== detail) button.title = detail;
+        const ariaLabel = placing ? 'One-button workflow button. ' + detail :
+            'One-button workflow: ' + action.label + '. ' + action.detail;
+        if (button.getAttribute('aria-label') !== ariaLabel) button.setAttribute('aria-label', ariaLabel);
+        positionFloat(button);
+    }
+
+    function startPlacing() {
+        draft.enabled = settingsDialog.querySelector('[name="enabled"]').checked;
+        // Closing the dialog clears the draft, so placing keeps it to reopen settings unchanged.
+        placing = { previous: { ...floatPosition }, draft, drag: null };
+        settingsDialog.close();
+        const overlay = document.createElement('div');
+        overlay.id = 'tas-place';
+        overlay.innerHTML = '<div class="tas-place-bar" role="toolbar" aria-label="Move the floating button">' +
+            '<span>Drag the button where you want it.</span>' +
+            '<button type="button" data-place="cancel">Cancel</button>' +
+            '<button type="button" data-place="reset">Reset</button>' +
+            '<button type="button" data-place="done" class="tas-place-done">Done</button></div>';
+        overlay.querySelector('[data-place="cancel"]').addEventListener('click', () => finishPlacing(false));
+        overlay.querySelector('[data-place="done"]').addEventListener('click', () => finishPlacing(true));
+        overlay.querySelector('[data-place="reset"]').addEventListener('click', () => {
+            floatPosition = { ...FLOAT_DEFAULT_POSITION };
+            refreshWorkflowButton();
+        });
+        document.body.appendChild(overlay);
+        refreshWorkflowButton();
+        document.getElementById('tas-float')?.focus();
+    }
+
+    function finishPlacing(save) {
+        if (!placing) return;
+        const restore = placing.draft;
+        if (save) saveFloatPosition();
+        else floatPosition = placing.previous;
+        placing = null;
+        document.getElementById('tas-place')?.remove();
+        refreshWorkflowButton();
+        openSettings(restore);
+        if (save) settingsMessage('Button position saved.');
+    }
+
+    function handlePlacingKey(event) {
+        if (event.key === 'Escape') {
+            consume(event);
+            finishPlacing(false);
+            return;
+        }
+        const moves = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
+        if (!moves[event.key]) return;
+        consume(event);
+        const step = event.shiftKey ? 0.1 : 0.02;
+        const clamp = value => Math.min(1, Math.max(0, value));
+        floatPosition = { x: clamp(floatPosition.x + moves[event.key][0] * step),
+            y: clamp(floatPosition.y + moves[event.key][1] * step) };
+        refreshWorkflowButton();
+    }
+
+    function renderFloatSettings() {
+        settingsDialog.querySelectorAll('[name="floating"]').forEach(input => {
+            input.checked = input.value === draft.floating;
+            input.parentElement.classList.toggle('tas-seg-on', input.checked);
+        });
+        const centred = floatPosition.x === FLOAT_DEFAULT_POSITION.x && floatPosition.y === FLOAT_DEFAULT_POSITION.y;
+        settingsDialog.querySelector('.tas-float-where').textContent = 'Position: ' + (centred ? 'centre right' : 'your spot');
     }
 
     function settingsMessage(message) {
@@ -1032,6 +1251,18 @@
                         <button type="button" data-clear="workflow" aria-label="Clear workflow shortcut">Clear</button>
                     </div></div>
                     <p class="tas-help tas-key-help">Click the binding and press a key. Escape cancels; Backspace or Delete clears it.</p>
+                    <div class="tas-float-settings"><span id="tas-float-title">Floating button</span>
+                        <div class="tas-seg" role="radiogroup" aria-labelledby="tas-float-title">
+                            <label><input type="radio" name="floating" value="off">Off</label>
+                            <label><input type="radio" name="floating" value="touch">Touch screens</label>
+                            <label><input type="radio" name="floating" value="always">Everywhere</label>
+                        </div>
+                        <div class="tas-float-pos"><span class="tas-float-where"></span>
+                            <button type="button" data-command="place">Move button</button>
+                            <button type="button" data-command="place-reset">Reset</button></div>
+                        <p class="tas-help">A round button that performs the next action when tapped. Touch screens: phones and tablets.
+                            Everywhere: on desktop too, in place of the card at the bottom right.</p>
+                    </div>
                     <ol class="tas-stages">
                         <li><span class="tas-stage-number">1</span><label class="tas-stage-body">Enter the fight
                             <select data-workflow="before" aria-label="Before battle"><option value="auto">Start or join when shown</option><option value="start">Start only</option><option value="join">Join only</option><option value="manual">Choose manually</option></select></label></li>
@@ -1168,6 +1399,19 @@
                 settingsDialog.querySelector('[data-tab="' + name + '"]').focus();
             });
         });
+        settingsDialog.querySelectorAll('[name="floating"]').forEach(input => input.addEventListener('change', () => {
+            draft.floating = input.value;
+            renderFloatSettings();
+            settingsMessage('Press Save to apply.');
+        }));
+        settingsDialog.querySelector('[data-command="place"]').addEventListener('click', startPlacing);
+        settingsDialog.querySelector('[data-command="place-reset"]').addEventListener('click', () => {
+            floatPosition = { ...FLOAT_DEFAULT_POSITION };
+            saveFloatPosition();
+            renderFloatSettings();
+            refreshWorkflowButton();
+            settingsMessage('Button moved back to centre right.');
+        });
         settingsDialog.querySelectorAll('[data-command="close"]').forEach(button =>
             button.addEventListener('click', () => settingsDialog.close()));
         settingsDialog.querySelector('[data-command="reset"]').addEventListener('click', () => {
@@ -1176,6 +1420,7 @@
             settingsDialog.querySelector('[name="enabled"]').checked = draft.enabled;
             renderBindings();
             renderWorkflowSettings();
+            renderFloatSettings();
             settingsMessage('Defaults restored. Press Save to apply.');
         });
         settingsDialog.querySelector('form').addEventListener('submit', event => {
@@ -1204,16 +1449,18 @@
         document.body.appendChild(settingsDialog);
     }
 
-    function openSettings() {
-        if (settingsDialog?.open) return;
+    function openSettings(restore) {
+        if (settingsDialog?.open || placing) return;
         if (!settingsDialog) buildSettings();
         previousFocus = document.activeElement;
-        draft = JSON.parse(JSON.stringify(settings));
+        // A menu command passes its own argument, so only a real draft is restored.
+        draft = restore?.bindings ? restore : JSON.parse(JSON.stringify(settings));
         recording = null;
         settingsDialog.querySelector('[name="enabled"]').checked = draft.enabled;
         settingsMessage('');
         renderBindings();
         renderWorkflowSettings();
+        renderFloatSettings();
         selectSettingsTab(settingsDialog.dataset.tab || 'workflow');
         settingsDialog.showModal();
         refreshWorkflowButton();
@@ -1222,7 +1469,7 @@
     function initialize() {
         const style = document.createElement('style');
         style.textContent = `
-            #tas-launcher, #tas-settings, #tas-toast, #tas-workflow { font-family: Arial, Helvetica, sans-serif; font-size: 13px; }
+            #tas-launcher, #tas-settings, #tas-toast, #tas-workflow, #tas-place { font-family: Arial, Helvetica, sans-serif; font-size: 13px; }
             #tas-battle-overlays { position: fixed; top: 0; left: 0; width: 0; height: 0;
                 z-index: 99999; pointer-events: none; }
             #tas-battle-overlays .tas-shortcut-badge { position: absolute; transform: translateX(-100%);
@@ -1255,6 +1502,35 @@
             #tas-workflow .tas-workflow-detail { font-size: 11px; line-height: 1.35; color: #e0e6d8; }
             #tas-workflow:disabled .tas-workflow-detail { color: #bbb; }
             #tas-workflow[hidden] { display: none; }
+            #tas-float { position: fixed; z-index: 100000; width: ${FLOAT_SIZE}px; height: ${FLOAT_SIZE}px;
+                box-sizing: border-box; margin: 0; padding: 0; border-radius: 50%; display: flex; flex-direction: column;
+                align-items: center; justify-content: center; gap: 3px; color: #fff;
+                background: radial-gradient(circle at 35% 30%, #6c9a3a, #3d5a1f); border: 2px solid #9cc25e;
+                box-shadow: 0 3px 10px #000a, 0 0 0 4px #b5d56a33; font: bold 11px/1.1 Arial, Helvetica, sans-serif;
+                cursor: pointer; touch-action: manipulation; user-select: none; -webkit-user-select: none;
+                -webkit-tap-highlight-color: transparent; }
+            #tas-float[hidden] { display: none; }
+            #tas-float .tas-float-icon { display: block; height: 20px; font-size: 20px; line-height: 20px; }
+            #tas-float .tas-float-word { max-width: ${FLOAT_SIZE - 10}px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+            #tas-float:active:not(:disabled) { transform: scale(.94); }
+            #tas-float:disabled { color: #bbb; background: #333; border-color: #666; box-shadow: 0 3px 10px #000a; cursor: default; }
+            #tas-float.tas-float-wait .tas-float-icon { width: 16px; height: 16px; margin: 2px 0; box-sizing: border-box;
+                border: 3px solid #999; border-right-color: transparent; border-radius: 50%; animation: tas-spin .9s linear infinite; }
+            #tas-float.tas-float-placing { z-index: 100002; cursor: grab; touch-action: none;
+                outline: 2px dashed #b5d56a; outline-offset: 4px; }
+            #tas-float:focus-visible { outline: 2px solid #b5d56a; outline-offset: 3px; }
+            @keyframes tas-spin { to { transform: rotate(360deg); } }
+            #tas-place { position: fixed; inset: 0; z-index: 100001; background-color: #0005;
+                background-image: linear-gradient(#b5d56a22 1px, transparent 1px), linear-gradient(90deg, #b5d56a22 1px, transparent 1px);
+                background-size: 32px 32px; font-size: 13px; }
+            #tas-place .tas-place-bar { position: absolute; left: 50%; top: 12px; transform: translateX(-50%);
+                width: min(440px, calc(100vw - 24px)); box-sizing: border-box; display: flex; align-items: center; gap: 6px;
+                padding: 8px; color: #eee; background: #202020; border: 1px solid #666; border-radius: 8px; box-shadow: 0 4px 14px #000a; }
+            #tas-place .tas-place-bar span { flex: 1; min-width: 0; line-height: 1.35; }
+            #tas-place button { font: inherit; color: #eee; background: #363636; border: 1px solid #666; border-radius: 5px;
+                padding: 7px 10px; line-height: 1.2; cursor: pointer; min-height: 36px; }
+            #tas-place button:hover { background: #454545; }
+            #tas-place .tas-place-done, #tas-place .tas-place-done:hover { background: #446125; border-color: #789a4d; }
             #tas-settings { color-scheme: dark; width: min(560px, calc(100vw - 24px)); max-height: calc(100vh - 32px);
                 box-sizing: border-box; padding: 20px; border: 1px solid #666; border-radius: 10px;
                 background: #202020; color: #eee; box-shadow: 0 10px 40px #0009; overflow-y: auto; }
@@ -1293,6 +1569,18 @@
             #tas-settings .tas-keybar > div { display: flex; gap: 6px; }
             #tas-settings .tas-keybar [data-bind] { min-width: 90px; }
             #tas-settings .tas-key-help { margin-top: 8px; }
+            #tas-settings .tas-float-settings { display: grid; gap: 8px; margin-top: 4px; padding-bottom: 4px;
+                border-bottom: 1px solid #484848; }
+            #tas-settings .tas-float-settings .tas-help { margin: 0 0 8px; }
+            #tas-settings .tas-seg { display: flex; border: 1px solid #666; border-radius: 6px; overflow: hidden; }
+            #tas-settings .tas-seg label { flex: 1; position: relative; display: flex; align-items: center; justify-content: center;
+                padding: 7px 4px; text-align: center; background: #363636; cursor: pointer; }
+            #tas-settings .tas-seg label + label { border-left: 1px solid #666; }
+            #tas-settings .tas-seg input { position: absolute; inset: 0; margin: 0; opacity: 0; pointer-events: none; }
+            #tas-settings .tas-seg label.tas-seg-on { background: #446125; color: #fff; }
+            #tas-settings .tas-seg label:focus-within { outline: 2px solid #b5d56a; outline-offset: -2px; }
+            #tas-settings .tas-float-pos { display: flex; align-items: center; gap: 6px; }
+            #tas-settings .tas-float-where { flex: 1; min-width: 0; }
             #tas-settings .tas-stages { list-style: none; padding: 0; margin: 18px 0 0; }
             #tas-settings .tas-stages > li { display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 12px;
                 padding-bottom: 15px; position: relative; }
@@ -1344,15 +1632,18 @@
                 #tas-settings .tas-priority-name { display: flex; align-items: center; }
                 #tas-settings .tas-priority-moves { flex-direction: column; }
                 #tas-settings .tas-priority-moves button { width: 44px; }
-                #tas-settings .tas-switch-line, #tas-settings .tas-enabled { min-height: 44px; }
+                #tas-settings .tas-switch-line, #tas-settings .tas-enabled, #tas-settings .tas-seg label { min-height: 44px; }
+                #tas-place button { min-height: 44px; }
             }
             @media (prefers-reduced-motion: reduce) {
                 #tas-settings input[type="checkbox"]::before { transition: none; }
                 #tas-battle-overlays .tas-next-action { animation: none; }
+                #tas-float.tas-float-wait .tas-float-icon { animation: none; }
             }
         `;
         (document.head || document.documentElement).appendChild(style);
         updateLauncher();
+        ensureFloatButton();
         ensureWorkflowLauncher();
         observeAttackPage();
         document.addEventListener('keydown', onKeyDown, true);
@@ -1362,9 +1653,13 @@
                 resetWorkflowPending();
                 updateLauncher();
             }
+            if (event.key === FLOAT_POSITION_KEY && !placing) {
+                floatPosition = readFloatPosition();
+                refreshWorkflowButton();
+            }
         });
         try {
-            GM_registerMenuCommand('One Click Attack settings', openSettings);
+            GM_registerMenuCommand('One Click Attack settings', () => openSettings());
         } catch (error) {
             // The on-page button is available in hosts without a userscript menu.
         }
