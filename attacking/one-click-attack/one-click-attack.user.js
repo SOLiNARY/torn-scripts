@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         one-click-attack
+// @name         One Click Attack
 // @namespace    https://github.com/SOLiNARY
-// @version      1.0
+// @version      1.0.1
 // @description  Configurable attack shortcuts and a one-button battle workflow with weapon priorities, finishing choices, and tab closing.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT
@@ -25,14 +25,25 @@
     // shows one panel, not eight. The DOM is the channel because userscript sandboxes cannot see
     // each other's globals, and it needs no grants beyond what each script already asks for.
 
-    const SCRIPT_VERSION = "1.0";  // keep in sync with @version above
-    const WHATS_NEW_NAME = "one-click-attack";
+    const SCRIPT_VERSION = "1.0.1";  // keep in sync with @version above
+    const WHATS_NEW_NAME = "One Click Attack";
     const WHATS_NEW_KEY = "silmaril-attack-shortcuts-last-seen-version";
     // Newest release first. Every release above the version last seen is shown at once, so
     // updating across several versions still reports the whole gap. A release marked
     // `silent: true` is left out of that and never opens the popup by itself; it is listed
     // only when the popup is opened from the menu. Leaving the flag off means false.
     const CHANGELOG = [
+        {
+            version: "1.0.1",
+            date: "2026-10-26",
+            silent: true,
+            changes: [
+                'Settings now sit beside the Attacking heading, clear of the bottom chat bar.',
+                'Use switches for temporary weapons, reloading, Kick instead of Fist, and closing after the result.',
+                'One Click Attack shows your shortcut keys in the corners of your weapons and battle buttons.',
+                'A pulsing frame marks the weapon or button used by your next workflow action.'
+            ]
+        },
         {
             version: "1.0",
             date: "2026-10-26",
@@ -263,6 +274,11 @@
     let observedAttackRoot = null;
     let attackObserver = null;
     let refreshScheduled = false;
+    let battleOverlayLayer = null;
+    let nextActionOverlay = null;
+    let overlayResizeObserver = null;
+    const shortcutOverlays = new Map();
+    const overlayTargets = new Set();
     const battleClickCandidates = new WeakMap();
 
     function workflowDefaults() {
@@ -630,8 +646,107 @@
         refreshScheduled = true;
         requestAnimationFrame(() => {
             refreshScheduled = false;
+            placeSettingsLauncher();
             refreshWorkflowButton();
         });
+    }
+
+    function ensureBattleOverlayLayer() {
+        if (battleOverlayLayer?.isConnected) return battleOverlayLayer;
+        battleOverlayLayer = document.createElement('div');
+        battleOverlayLayer.id = 'tas-battle-overlays';
+        battleOverlayLayer.setAttribute('aria-hidden', 'true');
+        document.body.appendChild(battleOverlayLayer);
+        return battleOverlayLayer;
+    }
+
+    function overlayRect(target) {
+        if (!isVisible(target)) return null;
+        const rect = target.getBoundingClientRect();
+        if (!rect.width || !rect.height || rect.bottom <= 0 || rect.right <= 0 ||
+            rect.top >= innerHeight || rect.left >= innerWidth) return null;
+        return rect;
+    }
+
+    function refreshBattleOverlays(nextAction = null) {
+        const root = document.getElementById('attack-root');
+        const targets = new Set();
+        const active = new Set();
+        const controls = root && settings.enabled ? actionControls(root) : new Map();
+        if (root && settings.enabled && !settingsDialog?.open) {
+            for (const action of ACTIONS) {
+                if (!action.weapon && !action.control) continue;
+                const binding = settings.bindings[action.id];
+                if (!binding) continue;
+                const target = action.weapon ? weaponSlot(action.id, root) : controls.get(action.id);
+                const rect = overlayRect(target);
+                if (!rect) continue;
+                targets.add(target);
+                active.add(action.id);
+                let badge = shortcutOverlays.get(action.id);
+                if (!badge) {
+                    badge = document.createElement('span');
+                    badge.className = 'tas-shortcut-badge';
+                    badge.dataset.action = action.id;
+                    shortcutOverlays.set(action.id, badge);
+                }
+                const layer = ensureBattleOverlayLayer();
+                if (badge.parentElement !== layer) layer.appendChild(badge);
+                const label = formatBinding(binding).replace(/ \+ /g, '+');
+                if (badge.textContent !== label) badge.textContent = label;
+                badge.classList.toggle('tas-shortcut-unavailable', !isAvailable(target));
+                // A body-owned layer leaves React's weapon/button children and labels intact.
+                // Keep the key within the control's top-right corner without changing its layout.
+                const left = Math.min(innerWidth - 4, rect.right - 4);
+                const top = Math.max(4, rect.top + 4);
+                badge.style.left = left + 'px';
+                badge.style.top = top + 'px';
+                badge.style.maxWidth = Math.max(18, Math.min(rect.width - 8, innerWidth - 8)) + 'px';
+            }
+        }
+        for (const [id, badge] of shortcutOverlays) {
+            if (!active.has(id)) {
+                badge.remove();
+                shortcutOverlays.delete(id);
+            }
+        }
+        const canHighlight = settings.enabled && settings.workflow.enabled && !settingsDialog?.open &&
+            !blockingDialogOpen() && !editingElement(document.activeElement);
+        const nextTarget = canHighlight && (nextAction?.kind === 'click' ? nextAction.target :
+            nextAction?.kind === 'close' ? document.getElementById('tas-workflow') : null);
+        const nextRect = overlayRect(nextTarget);
+        if (nextRect && isAvailable(nextTarget)) {
+            targets.add(nextTarget);
+            if (!nextActionOverlay) {
+                nextActionOverlay = document.createElement('span');
+                nextActionOverlay.className = 'tas-next-action';
+            }
+            const layer = ensureBattleOverlayLayer();
+            if (nextActionOverlay.parentElement !== layer) layer.appendChild(nextActionOverlay);
+            nextActionOverlay.dataset.action = nextAction.id || 'closeTab';
+            nextActionOverlay.style.left = (nextRect.left - 2) + 'px';
+            nextActionOverlay.style.top = (nextRect.top - 2) + 'px';
+            nextActionOverlay.style.width = (nextRect.width + 4) + 'px';
+            nextActionOverlay.style.height = (nextRect.height + 4) + 'px';
+        } else if (nextActionOverlay) {
+            nextActionOverlay.remove();
+            nextActionOverlay = null;
+        }
+        if (typeof ResizeObserver === 'function') {
+            if (!overlayResizeObserver) overlayResizeObserver = new ResizeObserver(scheduleWorkflowRefresh);
+            for (const target of overlayTargets) {
+                if (!targets.has(target)) {
+                    overlayResizeObserver.unobserve(target);
+                    overlayTargets.delete(target);
+                }
+            }
+            for (const target of targets) {
+                if (!overlayTargets.has(target)) {
+                    overlayResizeObserver.observe(target);
+                    overlayTargets.add(target);
+                }
+            }
+        }
     }
 
     function observeAttackPage() {
@@ -655,9 +770,21 @@
         };
         connect();
         // React can mount or replace the root after the userscript starts. Ignore our own UI updates.
-        new MutationObserver(connect).observe(document.body, { childList: true, subtree: true });
+        new MutationObserver(records => {
+            connect();
+            if (records.some(record => {
+                const target = record.target instanceof Element ? record.target : record.target.parentElement;
+                return !target?.closest('#attack-root, #tas-battle-overlays, #tas-settings, #tas-workflow, #tas-toast');
+            })) scheduleWorkflowRefresh();
+        }).observe(document.body, { childList: true, subtree: true, attributes: true,
+            attributeFilter: ['class', 'style', 'hidden', 'open', 'aria-modal'] });
         document.addEventListener('click', trackBattleClick, true);
         document.addEventListener('click', confirmBattleClick);
+        window.addEventListener('resize', scheduleWorkflowRefresh, { passive: true });
+        document.addEventListener('scroll', scheduleWorkflowRefresh, { passive: true, capture: true });
+        document.addEventListener('load', scheduleWorkflowRefresh, true);
+        document.addEventListener('focusin', scheduleWorkflowRefresh);
+        document.addEventListener('focusout', scheduleWorkflowRefresh);
     }
 
     function notify(message) {
@@ -683,10 +810,13 @@
         setTimeout(() => notify('Tab still open? Use Ctrl+W (Cmd+W on Mac).'), 900);
     }
 
+    function editingElement(node) {
+        return node instanceof Element && (node.isContentEditable ||
+            node.closest('input, textarea, select, [role="textbox"], [contenteditable]:not([contenteditable="false"])'));
+    }
+
     function isEditing(event) {
-        const nodes = [...event.composedPath(), document.activeElement];
-        return nodes.some(node => node instanceof Element &&
-            (node.isContentEditable || node.closest('input, textarea, select, [role="textbox"], [contenteditable]:not([contenteditable="false"])')));
+        return [...event.composedPath(), document.activeElement].some(editingElement);
     }
 
     function consume(event) {
@@ -725,12 +855,36 @@
     }
 
     function updateLauncher() {
+        placeSettingsLauncher();
         const launcher = document.getElementById('tas-launcher');
         if (launcher) {
-            launcher.textContent = settings.enabled ? 'Shortcuts' : 'Shortcuts (off)';
-            launcher.title = 'Configure attack keyboard shortcuts';
+            const label = settings.enabled ? 'Settings' : 'Settings (off)';
+            if (launcher.textContent !== label) launcher.textContent = label;
+            if (launcher.title !== 'Configure One Click Attack') launcher.title = 'Configure One Click Attack';
         }
         refreshWorkflowButton();
+    }
+
+    function placeSettingsLauncher() {
+        let launcher = document.getElementById('tas-launcher');
+        if (!launcher) {
+            launcher = document.createElement('button');
+            launcher.type = 'button';
+            launcher.id = 'tas-launcher';
+            launcher.setAttribute('aria-haspopup', 'dialog');
+            launcher.textContent = settings.enabled ? 'Settings' : 'Settings (off)';
+            launcher.title = 'Configure One Click Attack';
+            launcher.addEventListener('click', openSettings);
+        }
+        const heading = document.querySelector('#attack-root [class*="titleContainer___"]');
+        if (heading) {
+            if (!heading.classList.contains('tas-launcher-heading')) heading.classList.add('tas-launcher-heading');
+            if (!launcher.classList.contains('tas-header-launcher')) launcher.classList.add('tas-header-launcher');
+            if (launcher.parentElement !== heading) heading.appendChild(launcher);
+        } else {
+            if (launcher.classList.contains('tas-header-launcher')) launcher.classList.remove('tas-header-launcher');
+            if (launcher.parentElement !== document.body) document.body.appendChild(launcher);
+        }
     }
 
     function ensureWorkflowLauncher() {
@@ -750,10 +904,16 @@
 
     function refreshWorkflowButton() {
         const button = document.getElementById('tas-workflow');
-        if (!button) return;
+        if (!button) {
+            refreshBattleOverlays();
+            return;
+        }
         const hidden = !settings.enabled || !settings.workflow.enabled;
         if (button.hidden !== hidden) button.hidden = hidden;
-        if (button.hidden) return;
+        if (button.hidden) {
+            refreshBattleOverlays();
+            return;
+        }
         const action = nextWorkflowAction();
         const key = formatBinding(settings.bindings.workflow);
         const label = button.querySelector('.tas-workflow-label');
@@ -768,6 +928,7 @@
         if (button.title !== action.detail) button.title = action.detail;
         const ariaLabel = 'One-button workflow: ' + action.label + '. ' + action.detail;
         if (button.getAttribute('aria-label') !== ariaLabel) button.setAttribute('aria-label', ariaLabel);
+        refreshBattleOverlays(action);
     }
 
     function settingsMessage(message) {
@@ -800,7 +961,7 @@
     function renderWorkflowSettings() {
         settingsDialog.querySelectorAll('[data-workflow]').forEach(input => {
             const value = draft.workflow[input.dataset.workflow];
-            if (input.type === 'checkbox') input.checked = value;
+            if (input.type === 'checkbox') input.checked = input.dataset.on ? value === input.dataset.on : value === true;
             else input.value = value;
         });
         const list = settingsDialog.querySelector('.tas-priority');
@@ -857,15 +1018,15 @@
         settingsDialog.setAttribute('aria-labelledby', 'tas-title');
         settingsDialog.innerHTML = `
             <form method="dialog">
-                <div class="tas-heading"><h2 id="tas-title">one-click-attack</h2>
+                <div class="tas-heading"><h2 id="tas-title">One Click Attack</h2>
                     <button type="button" data-command="close" aria-label="Close settings">×</button></div>
-                <label class="tas-enabled"><input type="checkbox" name="enabled"> Enable keyboard shortcuts</label>
+                <label class="tas-enabled"><input type="checkbox" role="switch" name="enabled"> Enable keyboard shortcuts</label>
                 <div class="tas-tabs" role="tablist" aria-label="Shortcut settings">
                     <button type="button" id="tas-tab-workflow" role="tab" data-tab="workflow" aria-controls="tas-panel-workflow" aria-selected="true">One button</button>
                     <button type="button" id="tas-tab-bindings" role="tab" data-tab="bindings" aria-controls="tas-panel-bindings" aria-selected="false" tabindex="-1">Bindings</button>
                 </div>
                 <section id="tas-panel-workflow" role="tabpanel" data-panel="workflow" aria-labelledby="tas-tab-workflow">
-                    <label class="tas-enabled tas-workflow-enabled"><input type="checkbox" data-workflow="enabled"> Enable one-button workflow</label>
+                    <label class="tas-enabled tas-workflow-enabled"><input type="checkbox" role="switch" data-workflow="enabled"> Enable one-button workflow</label>
                     <div class="tas-keybar"><span>One button, every stage</span><div>
                         <button type="button" data-bind="workflow" aria-label="Change workflow shortcut"></button>
                         <button type="button" data-clear="workflow" aria-label="Clear workflow shortcut">Clear</button>
@@ -874,17 +1035,17 @@
                     <ol class="tas-stages">
                         <li><span class="tas-stage-number">1</span><label class="tas-stage-body">Enter the fight
                             <select data-workflow="before" aria-label="Before battle"><option value="auto">Start or join when shown</option><option value="start">Start only</option><option value="join">Join only</option><option value="manual">Choose manually</option></select></label></li>
-                        <li><span class="tas-stage-number">2</span><label class="tas-stage-body">Opening move
-                            <select data-workflow="temporary" aria-label="Opening move"><option value="once">Temporary weapon, once if available</option><option value="skip">Skip temporary weapon</option></select></label></li>
+                        <li><span class="tas-stage-number">2</span><div class="tas-stage-body"><span>Opening move</span>
+                            <label class="tas-switch-line"><input type="checkbox" role="switch" data-workflow="temporary" data-on="once" data-off="skip"><span>Use temporary weapon<small>Once if available. Off: skip it.</small></span></label></div></li>
                         <li><span class="tas-stage-number">3</span><div class="tas-stage-body"><span>During battle</span>
                             <p class="tas-priority-help">Each press uses the first available enabled entry.</p>
                             <ol class="tas-priority" aria-label="Weapon priority"></ol>
-                            <label class="tas-ammo">Empty firearm<select data-workflow="emptyFirearm"><option value="reload">Reload before falling back</option><option value="skip">Skip to next priority</option></select></label>
+                            <label class="tas-ammo tas-switch-line"><input type="checkbox" role="switch" data-workflow="emptyFirearm" data-on="reload" data-off="skip"><span>Reload empty firearms<small>Off: skip to the next priority.</small></span></label>
                         </div></li>
                         <li><span class="tas-stage-number">4</span><label class="tas-stage-body">When you win
                             <select data-workflow="finish" aria-label="Finish action"><option value="leave">Leave</option><option value="mug">Mug</option><option value="hospitalize">Hospitalize</option><option value="manual">Choose manually</option></select></label></li>
-                        <li><span class="tas-stage-number">5</span><label class="tas-stage-body">After a confirmed result
-                            <select data-workflow="after" aria-label="After the result"><option value="close">Close tab on next press</option><option value="stay">Keep tab open</option></select></label></li>
+                        <li><span class="tas-stage-number">5</span><div class="tas-stage-body"><span>After a confirmed result</span>
+                            <label class="tas-switch-line"><input type="checkbox" role="switch" data-workflow="after" data-on="close" data-off="stay"><span>Close tab on the next press<small>Off: keep the tab open.</small></span></label></div></li>
                     </ol>
                     <p class="tas-help">One press performs one action. The workflow waits for each battle response.
                         Closing becomes available only after a confirmed result.</p>
@@ -942,6 +1103,7 @@
             row.dataset.category = category;
             const checkbox = document.createElement('input');
             checkbox.type = 'checkbox';
+            checkbox.setAttribute('role', 'switch');
             checkbox.id = 'tas-priority-' + category;
             checkbox.dataset.priorityEnabled = category;
             checkbox.setAttribute('aria-label', 'Enable ' + name);
@@ -955,11 +1117,11 @@
             body.className = 'tas-priority-body';
             body.appendChild(label);
             if (category === 'unarmed') {
-                const select = document.createElement('select');
-                select.dataset.workflow = 'unarmed';
-                select.setAttribute('aria-label', 'Hand-to-hand attack');
-                select.innerHTML = '<option value="punch">Fist (Punch)</option><option value="kick">Kick</option>';
-                body.appendChild(select);
+                const choice = document.createElement('label');
+                choice.className = 'tas-switch-line tas-hand-choice';
+                choice.innerHTML = '<input type="checkbox" role="switch" data-workflow="unarmed" data-on="kick" data-off="punch">' +
+                    '<span>Kick instead of Fist<small>Off: Fist (Punch)</small></span>';
+                body.appendChild(choice);
             }
             const moves = document.createElement('div');
             moves.className = 'tas-priority-moves';
@@ -990,7 +1152,9 @@
             settingsDialog.querySelector('.tas-priority').appendChild(row);
         }
         settingsDialog.querySelectorAll('[data-workflow]').forEach(input => input.addEventListener('change', () => {
-            draft.workflow[input.dataset.workflow] = input.type === 'checkbox' ? input.checked : input.value;
+            draft.workflow[input.dataset.workflow] = input.type === 'checkbox'
+                ? input.dataset.on ? (input.checked ? input.dataset.on : input.dataset.off) : input.checked
+                : input.value;
             settingsMessage('Press Save to apply your sequence.');
         }));
         settingsDialog.querySelectorAll('[data-tab]').forEach(button => {
@@ -1029,7 +1193,7 @@
             resetWorkflowPending();
             updateLauncher();
             settingsDialog.close();
-            notify('one-click-attack settings saved.');
+            notify('One Click Attack settings saved.');
         });
         settingsDialog.addEventListener('close', () => {
             recording = null;
@@ -1052,15 +1216,33 @@
         renderWorkflowSettings();
         selectSettingsTab(settingsDialog.dataset.tab || 'workflow');
         settingsDialog.showModal();
+        refreshWorkflowButton();
     }
 
     function initialize() {
         const style = document.createElement('style');
         style.textContent = `
             #tas-launcher, #tas-settings, #tas-toast, #tas-workflow { font-family: Arial, Helvetica, sans-serif; font-size: 13px; }
-            #tas-launcher { position: fixed; right: 16px; bottom: 16px; z-index: 100000;
+            #tas-battle-overlays { position: fixed; top: 0; left: 0; width: 0; height: 0;
+                z-index: 99999; pointer-events: none; }
+            #tas-battle-overlays .tas-shortcut-badge { position: absolute; transform: translateX(-100%);
+                box-sizing: border-box; width: max-content; white-space: normal; overflow-wrap: anywhere;
+                border: 1px solid #aaa; border-radius: 3px; padding: 1px 4px;
+                background: #202020ed; color: #fff; font: 11px/1.2 Arial, Helvetica, sans-serif;
+                box-shadow: 0 1px 3px #0008; pointer-events: none; }
+            #tas-battle-overlays .tas-shortcut-unavailable { opacity: .55; }
+            #tas-battle-overlays .tas-next-action { position: absolute; box-sizing: border-box;
+                border: 2px solid #b5d56a; border-radius: 5px; pointer-events: none;
+                animation: tas-next-pulse 1.6s ease-in-out infinite; }
+            @keyframes tas-next-pulse {
+                0%, 100% { opacity: 1; box-shadow: 0 0 0 0 #b5d56a66; }
+                50% { opacity: .6; box-shadow: 0 0 0 5px #b5d56a00; }
+            }
+            #tas-launcher { position: fixed; right: 16px; top: 16px; z-index: 100000;
                 border: 1px solid #666; border-radius: 6px; background: #282828; color: #eee;
                 padding: 9px 14px; cursor: pointer; box-shadow: 0 2px 8px #0008; }
+            #attack-root .tas-launcher-heading { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+            #tas-launcher.tas-header-launcher { position: static; flex: 0 0 auto; margin: 0; }
             #tas-workflow { display: flex; position: fixed; right: 16px; bottom: 62px; z-index: 100000;
                 align-items: center; gap: 10px; width: 300px; max-width: calc(100vw - 32px); box-sizing: border-box;
                 padding: 11px 12px; text-align: left; color: #fff; background: #446125; border: 1px solid #789a4d;
@@ -1092,7 +1274,18 @@
             #tas-workflow:focus-visible { outline: 2px solid #b5d56a; outline-offset: 2px; }
             #tas-settings .tas-heading button { font-size: 22px; padding: 0 8px; }
             #tas-settings .tas-enabled { display: flex; align-items: center; gap: 8px; margin: 0; }
-            #tas-settings input[type="checkbox"] { margin: 0; width: 16px; height: 16px; appearance: auto; accent-color: #789a4d; }
+            #tas-settings input[type="checkbox"] { position: relative; flex: 0 0 auto; margin: 0; padding: 0;
+                width: 36px; height: 20px; appearance: none; border: 1px solid #777; border-radius: 20px;
+                background: #505050; cursor: pointer; vertical-align: middle; }
+            #tas-settings input[type="checkbox"]::before { content: ''; position: absolute; left: 2px; top: 2px;
+                width: 14px; height: 14px; border-radius: 50%; background: #eee; transition: transform .15s; }
+            #tas-settings input[type="checkbox"]:checked { background: #52722d; border-color: #789a4d; }
+            #tas-settings input[type="checkbox"]:checked::before { transform: translateX(16px); }
+            #tas-settings input[type="checkbox"]:focus-visible { outline: 2px solid #b5d56a; outline-offset: 3px; }
+            #tas-settings .tas-switch-line { display: flex; align-items: center; gap: 10px; min-width: 0; }
+            #tas-settings .tas-switch-line > span { min-width: 0; }
+            #tas-settings .tas-switch-line small { display: block; color: #bbb; font-size: 12px; line-height: 1.5; }
+            #tas-settings .tas-hand-choice { margin-top: 3px; font-size: 12px; gap: 7px; }
             #tas-settings .tas-tabs { display: flex; gap: 6px; margin: 16px 0; padding-bottom: 12px; border-bottom: 1px solid #484848; }
             #tas-settings .tas-tabs button[aria-selected="true"] { background: #446125; border-color: #789a4d; }
             #tas-settings .tas-workflow-enabled { margin-bottom: 14px; }
@@ -1110,7 +1303,7 @@
             #tas-settings .tas-stage-body { display: grid; gap: 5px; min-width: 0; line-height: 1.5; }
             #tas-settings .tas-priority-help { font-size: 12px; color: #bbb; margin: 0 0 3px; }
             #tas-settings .tas-priority { list-style: none; margin: 0; padding: 0 10px; border-radius: 5px; background: #303030; }
-            #tas-settings .tas-priority-row { display: grid; grid-template-columns: 16px 14px minmax(0, 1fr) auto;
+            #tas-settings .tas-priority-row { display: grid; grid-template-columns: 36px 14px minmax(0, 1fr) auto;
                 gap: 8px; align-items: center; padding: 8px 0; }
             #tas-settings .tas-priority-row + .tas-priority-row { border-top: 1px solid #515151; }
             #tas-settings .tas-rank { font-size: 12px; color: #bbb; text-align: center; }
@@ -1119,7 +1312,7 @@
             #tas-settings .tas-priority-off .tas-priority-name { color: #999; }
             #tas-settings .tas-priority-moves { display: flex; gap: 4px; }
             #tas-settings .tas-priority-moves button { width: 29px; padding: 5px 0; }
-            #tas-settings .tas-ammo { display: grid; gap: 5px; margin-top: 5px; }
+            #tas-settings .tas-ammo { margin-top: 8px; }
             #tas-settings .tas-help { font-size: 12px; line-height: 1.5; color: #bbb; margin: 12px 0; }
             #tas-settings .tas-row { display: grid; grid-template-columns: minmax(85px, 1fr) minmax(100px, 1.3fr) auto;
                 gap: 8px; align-items: center; padding: 4px 0; }
@@ -1137,28 +1330,28 @@
                 #tas-settings { padding: 15px 12px; }
                 #tas-settings .tas-stages > li { gap: 8px; }
                 #tas-settings .tas-priority { padding: 0 7px; }
-                #tas-settings .tas-priority-row { grid-template-columns: 16px minmax(0, 1fr) auto; gap: 7px; }
+                #tas-settings .tas-priority-row { grid-template-columns: 36px minmax(0, 1fr) auto; gap: 7px; }
                 #tas-settings .tas-rank { display: none; }
                 #tas-settings select { font-size: 16px; }
                 #tas-settings .tas-keybar { flex-wrap: wrap; }
                 #tas-settings .tas-row { grid-template-columns: minmax(70px, 1fr) minmax(80px, 1.2fr) auto; gap: 6px; }
                 #tas-settings .tas-footer { flex-wrap: wrap; }
                 #tas-settings .tas-footer > span { min-width: 0; }
+                #tas-settings .tas-hand-choice { flex-wrap: wrap; }
             }
             @media (pointer: coarse) {
                 #tas-settings button, #tas-settings select, #tas-settings .tas-priority-name { min-height: 44px; }
                 #tas-settings .tas-priority-name { display: flex; align-items: center; }
                 #tas-settings .tas-priority-moves { flex-direction: column; }
                 #tas-settings .tas-priority-moves button { width: 44px; }
+                #tas-settings .tas-switch-line, #tas-settings .tas-enabled { min-height: 44px; }
+            }
+            @media (prefers-reduced-motion: reduce) {
+                #tas-settings input[type="checkbox"]::before { transition: none; }
+                #tas-battle-overlays .tas-next-action { animation: none; }
             }
         `;
         (document.head || document.documentElement).appendChild(style);
-        const launcher = document.createElement('button');
-        launcher.type = 'button';
-        launcher.id = 'tas-launcher';
-        launcher.setAttribute('aria-haspopup', 'dialog');
-        launcher.addEventListener('click', openSettings);
-        document.body.appendChild(launcher);
         updateLauncher();
         ensureWorkflowLauncher();
         observeAttackPage();
@@ -1171,7 +1364,7 @@
             }
         });
         try {
-            GM_registerMenuCommand('one-click-attack settings', openSettings);
+            GM_registerMenuCommand('One Click Attack settings', openSettings);
         } catch (error) {
             // The on-page button is available in hosts without a userscript menu.
         }
