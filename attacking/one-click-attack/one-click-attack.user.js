@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         Torn Attack Shortcuts
+// @name         one-click-attack
 // @namespace    https://github.com/SOLiNARY
-// @version      0.2.0
+// @version      0.2.1
 // @description  Configurable attack shortcuts and a one-button battle workflow with weapon priorities, finishing choices, and tab closing.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT
@@ -25,14 +25,22 @@
     // shows one panel, not eight. The DOM is the channel because userscript sandboxes cannot see
     // each other's globals, and it needs no grants beyond what each script already asks for.
 
-    const SCRIPT_VERSION = "0.2.0";  // keep in sync with @version above
-    const WHATS_NEW_NAME = "Attack Shortcuts";
+    const SCRIPT_VERSION = "0.2.1";  // keep in sync with @version above
+    const WHATS_NEW_NAME = "one-click-attack";
     const WHATS_NEW_KEY = "silmaril-attack-shortcuts-last-seen-version";
     // Newest release first. Every release above the version last seen is shown at once, so
     // updating across several versions still reports the whole gap. A release marked
     // `silent: true` is left out of that and never opens the popup by itself; it is listed
     // only when the popup is opened from the menu. Leaving the flag off means false.
     const CHANGELOG = [
+        {
+            version: "0.2.1",
+            date: "2026-10-26",
+            silent: true,
+            changes: [
+                'Renamed to one-click-attack, with your saved shortcuts and workflow preserved.'
+            ]
+        },
         {
             version: "0.2.0",
             date: "2026-10-26",
@@ -872,7 +880,7 @@
         settingsDialog.setAttribute('aria-labelledby', 'tas-title');
         settingsDialog.innerHTML = `
             <form method="dialog">
-                <div class="tas-heading"><h2 id="tas-title">Attack shortcuts</h2>
+                <div class="tas-heading"><h2 id="tas-title">one-click-attack</h2>
                     <button type="button" data-command="close" aria-label="Close settings">×</button></div>
                 <label class="tas-enabled"><input type="checkbox" name="enabled"> Enable keyboard shortcuts</label>
                 <div class="tas-tabs" role="tablist" aria-label="Shortcut settings">
@@ -1044,7 +1052,7 @@
             resetWorkflowPending();
             updateLauncher();
             settingsDialog.close();
-            notify('Attack shortcuts saved.');
+            notify('one-click-attack settings saved.');
         });
         settingsDialog.addEventListener('close', () => {
             recording = null;
@@ -1186,7 +1194,7 @@
             }
         });
         try {
-            GM_registerMenuCommand('Attack shortcut settings', openSettings);
+            GM_registerMenuCommand('one-click-attack settings', openSettings);
         } catch (error) {
             // The on-page button is available in hosts without a userscript menu.
         }
