@@ -9,7 +9,7 @@
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=torn.com
 // @grant        GM_registerMenuCommand
 // @grant        unsafeWindow
-// @run-at       document-end
+// @run-at       document-start
 // ==/UserScript==
 
 (function () {
@@ -36,7 +36,8 @@
             'The panel now follows Torn\'s scripting rules: it no longer asks Torn\'s pages for anything in the background.',
             'Add a Torn API key in settings to keep it up to date on its own. A Limited key also counts your faction armoury meds.',
             'Without a key, press Read again (the round arrow) to update the times, and open the Medical tab of your items so it can count your meds.',
-            'Your key stays in this browser and is only sent to the Torn API.'
+            'Your key stays in this browser and is only sent to the Torn API.',
+            'The message after using a med now shows your new cooldown and says you are out of hospital only once.'
             ]
         },
         {
@@ -621,7 +622,8 @@
         if (now) {
             state.armouryRefused = {};
             refreshStock();
-        } else if (state.message && state.message.kind === 'ok') {
+        } else if (state.message && state.message.kind === 'ok' && !/out of (?:the )?hospital/i.test(state.message.text)) {
+            // Torn's own reply to a med usually says so already.
             state.message = { kind: 'ok', text: state.message.text + ' You are out of hospital.' };
         }
         applyVisibility();
@@ -1225,6 +1227,11 @@
                 checkCalibration(before, used);
             } else {
                 predictUse(used);
+            }
+            // Torn's reply comes through with the new cooldown blank ("a medical cooldown of ."),
+            // so the panel's own figure goes in the gap.
+            if (state.message && state.message.kind === 'ok') {
+                state.message.text = state.message.text.replace(/(medical cooldown of)\s*(?=[.!]|$)/i, '$1 ' + formatAmount(cooldownLeft()));
             }
         } else {
             // A refusal that names the armoury means this item cannot come from there; the next
@@ -2055,8 +2062,23 @@
         (document.head ?? document.documentElement).appendChild(style);
     }
 
-    // Last, so every constant above exists before the panel is drawn.
+    // The panel needs the whole page: the sidebar it watches and the banner it reads.
+    function whenPageReady(run) {
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', run, { once: true });
+        } else {
+            run();
+        }
+    }
+
+    // Last, so every constant above exists before the panel is drawn. Torn asks for the sidebar
+    // while the page is still loading, so the page is watched from document-start; a sidebar
+    // read by then makes the banner fallback unnecessary.
     watchPageTraffic();
-    readBannerFallback();
-    whenBodyReady(start);
+    whenPageReady(function(){
+        if (!state.statusLoaded) {
+            readBannerFallback();
+        }
+        start();
+    });
 })();
