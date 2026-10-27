@@ -38,7 +38,8 @@
             date: "2026-10-27",
             changes: [
                 'Phones and tablets no longer show your shortcut keys in the corners of weapons and battle buttons.',
-                'Bring them back, or hide them on desktop too, with Key hints in the Bindings settings.'
+                'Bring them back, or hide them on desktop too, with Key hints in the Bindings settings.',
+                'After you act, the pulsing frame stays on what you pressed and turns grey until your next action is ready.'
             ]
         },
         {
@@ -310,6 +311,8 @@
     let refreshScheduled = false;
     let battleOverlayLayer = null;
     let nextActionOverlay = null;
+    // The action the frame belongs to: the decided one, or while waiting the one just pressed.
+    let framedAction = null;
     let overlayResizeObserver = null;
     const shortcutOverlays = new Map();
     const overlayTargets = new Set();
@@ -771,10 +774,25 @@
             !blockingDialogOpen() && !editingElement(document.activeElement);
         const launcher = ['tas-float', 'tas-workflow'].map(id => document.getElementById(id))
             .find(element => element && !element.hidden);
-        const nextTarget = canHighlight && (nextAction?.kind === 'click' ? nextAction.target :
-            nextAction?.kind === 'close' ? launcher : null);
+        const waiting = nextAction?.kind === 'wait';
+        // After a press the frame stays on what was pressed, in grey, until the next action is
+        // decided. A stop, or a new fight, clears it.
+        if (nextAction?.kind === 'click' || nextAction?.kind === 'close') {
+            framedAction = { pageKey: fightState.pageKey, id: nextAction.id || 'closeTab' };
+        } else if (waiting && fightState.pending) {
+            framedAction = { pageKey: fightState.pageKey, id: fightState.pending.id };
+        } else if (!waiting || framedAction?.pageKey !== fightState.pageKey) {
+            framedAction = null;
+        }
+        let nextTarget = null;
+        if (canHighlight && framedAction) {
+            const id = framedAction.id;
+            nextTarget = !waiting ? (nextAction.kind === 'click' ? nextAction.target : launcher) :
+                id === 'closeTab' ? launcher : weaponSlot(id, root) || controls.get(id);
+        }
         const nextRect = overlayRect(nextTarget);
-        if (nextRect && isAvailable(nextTarget)) {
+        // A pressed control is busy or disabled while Torn responds, so it only has to stay in view.
+        if (nextRect && (waiting || isAvailable(nextTarget))) {
             targets.add(nextTarget);
             if (!nextActionOverlay) {
                 nextActionOverlay = document.createElement('span');
@@ -782,7 +800,8 @@
             }
             const layer = ensureBattleOverlayLayer();
             if (nextActionOverlay.parentElement !== layer) layer.appendChild(nextActionOverlay);
-            nextActionOverlay.dataset.action = nextAction.id || 'closeTab';
+            nextActionOverlay.dataset.action = framedAction.id;
+            nextActionOverlay.classList.toggle('tas-next-waiting', waiting);
             nextActionOverlay.style.left = (nextRect.left - 2) + 'px';
             nextActionOverlay.style.top = (nextRect.top - 2) + 'px';
             nextActionOverlay.style.width = (nextRect.width + 4) + 'px';
@@ -1516,6 +1535,12 @@
             @keyframes tas-next-pulse {
                 0%, 100% { opacity: 1; box-shadow: 0 0 0 0 #b5d56a66; }
                 50% { opacity: .6; box-shadow: 0 0 0 5px #b5d56a00; }
+            }
+            #tas-battle-overlays .tas-next-action.tas-next-waiting { border-color: #9a9a9a;
+                animation-name: tas-waiting-pulse; }
+            @keyframes tas-waiting-pulse {
+                0%, 100% { opacity: 1; box-shadow: 0 0 0 0 #9a9a9a66; }
+                50% { opacity: .6; box-shadow: 0 0 0 5px #9a9a9a00; }
             }
             #tas-launcher { position: fixed; right: 16px; top: 16px; z-index: 100000;
                 border: 1px solid #666; border-radius: 6px; background: #282828; color: #eee;
