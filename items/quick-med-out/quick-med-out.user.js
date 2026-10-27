@@ -1,13 +1,14 @@
 // ==UserScript==
 // @name         Torn Quick Med Out
 // @namespace    https://github.com/SOLiNARY
-// @version      1.1.1
-// @description  On the Items page, shows your hospital time and medical cooldown, works out which meds get you out of hospital for the least cooldown (faction armoury first), and uses the next one in one click. After an update, a "What's new" popup lists what changed.
+// @version      1.2.0
+// @description  On the Items page, shows your hospital time and medical cooldown, works out which meds get you out of hospital for the least cooldown (faction armoury first), and uses the next one in one click. An optional API key keeps it up to date on its own. After an update, a "What's new" popup lists what changed.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT
 // @match        https://www.torn.com/item.php*
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=torn.com
 // @grant        GM_registerMenuCommand
+// @grant        unsafeWindow
 // @run-at       document-end
 // ==/UserScript==
 
@@ -20,7 +21,7 @@
     // shows one panel, not eight. The DOM is the channel because userscript sandboxes cannot see
     // each other's globals, and it needs no grants beyond what each script already asks for.
 
-    const SCRIPT_VERSION = "1.1.1";  // keep in sync with @version above
+    const SCRIPT_VERSION = "1.2.0";  // keep in sync with @version above
     const WHATS_NEW_NAME = "Quick Med Out";
     const WHATS_NEW_KEY = "silmaril-quick-med-out-last-seen-version";
     // Newest release first. Every release above the version last seen is shown at once, so
@@ -28,6 +29,16 @@
     // `silent: true` is left out of that and never opens the popup by itself; it is listed
     // only when the popup is opened from the menu. Leaving the flag off means false.
     const CHANGELOG = [
+        {
+            version: "1.2.0",
+            date: "2026-10-27",
+            changes: [
+            'The panel now follows Torn\'s scripting rules: it no longer asks Torn\'s pages for anything in the background.',
+            'Add a Torn API key in settings to keep it up to date on its own. A Limited key also counts your faction armoury meds.',
+            'Without a key, press Read again (the round arrow) to update the times, and open the Medical tab of your items so it can count your meds.',
+            'Your key stays in this browser and is only sent to the Torn API.'
+            ]
+        },
         {
             version: "1.1.1",
             date: "2026-10-22",
@@ -250,8 +261,15 @@
     const ROOT_ID = 'silmaril-qmo';
     const STYLE_ID = 'silmaril-qmo-style';
     const MODAL_ID = 'silmaril-qmo-settings';
+    const USES_KEY = 'silmaril-quick-med-out-uses';
 
+    // Torn's scripting rules allow a request to Torn's own pages only when the player asked for
+    // it, so the panel sends one per press and no more: Use, and Read again without a key.
+    // Everything it keeps up to date on its own comes from the API, or from answers Torn's page
+    // fetched itself.
     const SIDEBAR_URL = '/sidebarAjaxAction.php?q=getSidebarData';
+    const API_URL = 'https://api.torn.com/v2';
+    const API_COMMENT = 'QuickMedOut';
     const PERKS_URLS = [
         'https://api.torn.com/v2/user/perks?key={key}&comment=QuickMedOut',
         'https://api.torn.com/user/?selections=perks&key={key}&comment=QuickMedOut'
@@ -260,9 +278,14 @@
     // from the sidebar whenever a medical cooldown is running, and is remembered after that.
     const BASE_COOLDOWN_CAP = 6 * 3600;
     // The sidebar is watched for new status icons, so a hit lands in the panel straight away;
-    // the poll is only the fallback for when Torn's sidebar misses an update.
-    const POLL_MS = { hospital: 20000, idle: 60000, hidden: 180000 };
-    const PERKS_REFRESH_MS = 12 * 3600 * 1000;
+    // the poll is only the fallback for when Torn's sidebar misses an update. Nothing is polled
+    // while the page is in the background.
+    const POLL_MS = { hospital: 30000, idle: 60000 };
+    // Perks barely change, so they ride along with the status read only now and then.
+    const PERKS_REFRESH_MS = 10 * 60 * 1000;
+    // Torn's API keeps an inventory for up to 15 minutes, so a med used since is remembered a
+    // little longer than that and taken off any older count.
+    const USE_MEMORY_SECONDS = 20 * 60;
 
     // Base effects, as Torn's own item descriptions give them (checked 2026-10-22). Medical
     // item effectiveness scales the hospital time removed; only a cooldown cut changes the
@@ -301,9 +324,15 @@
         waitMinutes: 1,
         knownCap: BASE_COOLDOWN_CAP,
         capFromSidebar: false,
-        perksReadAt: 0
+        perksReadAt: 0,
+        // When Torn last refused an armoury med for want of permission.
+        armouryDeniedAt: 0
     };
     const DEFAULT_UI = { right: 10, top: 90, pinned: false };
+    // The API says what is on the armoury shelf but not whether you may take from it. A refusal
+    // for want of permission is remembered this long, so it costs one click rather than one per
+    // med and page.
+    const ARMOURY_DENIAL_MS = 12 * 3600 * 1000;
 
     const settings = loadJson(SETTINGS_KEY, DEFAULT_SETTINGS);
     const ui = loadJson(UI_KEY, DEFAULT_UI);
@@ -318,9 +347,18 @@
         bookCut: 0,
         earlyDischarge: false,
         radiation: false,
-        sidebarLoaded: false,
+        // Whether hospital and cooldown have been read at all, from the API or the sidebar.
+        statusLoaded: false,
+        statusBusy: null,
+        statusReadAt: 0,
+        perksReadAt: 0,
         sidebarBusy: null,
+        // Set when Torn turns the key down, so it is not sent again for the rest of the page.
+        keyProblem: null,
         stock: { faction: null, own: null },
+        // When each count was taken, in server time, so an older one never replaces it.
+        stockAt: { faction: 0, own: 0 },
+        stockError: null,
         factionStatus: 'loading',
         stockBusy: null,
         armouryRefused: {},
@@ -341,15 +379,14 @@
         ensureStyle();
         buildPanel();
         render();
-        refreshSidebar().then(function(){ return refreshStock(); });
+        refreshStatus().then(function(){ return refreshStock(); });
         setInterval(tick, 1000);
         watchSidebar();
         schedulePoll();
-        maybeRefreshPerks();
         window.addEventListener('resize', applyPosition);
         document.addEventListener('visibilitychange', function(){
             if (!document.hidden) {
-                refreshSidebar();
+                refreshStatus();
             }
             schedulePoll();
         });
@@ -386,6 +423,39 @@
     // Anywhere else an un-substituted placeholder is not a key.
     function hasApiKey() {
         return typeof apiKey === 'string' && apiKey.indexOf('PDA-APIKEY') === -1 && apiKey.length === 16;
+    }
+
+    function keyUsable() {
+        return hasApiKey() && !state.keyProblem;
+    }
+
+    function forgetApiKey() {
+        try {
+            localStorage.removeItem(API_KEY_KEY);
+        } catch (error) {
+            // Nothing stored means nothing to forget.
+        }
+        apiKey = '';
+    }
+
+    // Meds used through the panel, kept across reloads, so a count the API cached before them
+    // can be put right.
+    function readUses() {
+        try {
+            const uses = JSON.parse(localStorage.getItem(USES_KEY) || '[]');
+            return Array.isArray(uses) ? uses : [];
+        } catch (error) {
+            return [];
+        }
+    }
+
+    let recentUses = readUses();
+
+    function recordUse(pool, id) {
+        const now = serverNow();
+        recentUses = recentUses.filter(function(use){ return use && now - use.at < USE_MEMORY_SECONDS; });
+        recentUses.push({ pool: pool, id: id, at: now });
+        saveJson(USES_KEY, recentUses);
     }
 
     // ---- Time ------------------------------------------------------------------------------
@@ -471,7 +541,9 @@
     }
 
     // The sidebar feed carries exact expiry times for the hospital stay and the medical
-    // cooldown, the cooldown cap with faction upgrades, and the book being read.
+    // cooldown, the cooldown cap with faction upgrades, and the book being read. The panel only
+    // asks for it when the player presses Read again without a key; otherwise it is read as
+    // Torn's own page fetches it.
     function refreshSidebar() {
         if (state.sidebarBusy) {
             return state.sidebarBusy;
@@ -507,8 +579,7 @@
             saveJson(SETTINGS_KEY, settings);
         }
         const bookText = icons.book && icons.book.subtitle ? htmlToText(icons.book.subtitle) : '';
-        const bookMatch = bookText.match(/medical cooldowns?\D{0,20}?(\d+)\s*%/i);
-        state.bookCut = bookMatch ? clamp(parseInt(bookMatch[1], 10), 0, 90) : 0;
+        state.bookCut = readBookCut([bookText]);
         state.earlyDischarge = false;
         state.radiation = /radiation/i.test(state.hospitalReason);
         for (const key in icons) {
@@ -520,8 +591,21 @@
                 state.radiation = true;
             }
         }
-        state.sidebarLoaded = true;
+        state.statusLoaded = true;
         noticeHospitalChange();
+    }
+
+    // The book being read can cut medical cooldowns. Torn words that either way round, so both
+    // orders are read.
+    function readBookCut(lines) {
+        for (const text of lines) {
+            const match = text.match(/medical(?: item)? cooldowns?\D{0,20}?(\d+)\s*%/i) ||
+                text.match(/(\d+)\s*%\D{0,30}?medical(?: item)? cooldown/i);
+            if (match) {
+                return clamp(parseInt(match[1], 10), 0, 90);
+            }
+        }
+        return 0;
     }
 
     function noticeHospitalChange() {
@@ -543,16 +627,103 @@
         applyVisibility();
     }
 
+    // ---- Reading the Torn API --------------------------------------------------------------
+
+    // Torn answers a refused call with 200 and an error body, so that becomes a throw carrying
+    // Torn's code.
+    async function apiGet(path, params) {
+        const query = new URLSearchParams(Object.assign({}, params, { key: apiKey, comment: API_COMMENT }));
+        const response = await fetch(API_URL + path + '?' + query.toString());
+        if (!response.ok) {
+            throw new Error('HTTP ' + response.status);
+        }
+        const data = await response.json();
+        if (data && data.error) {
+            const error = new Error(data.error.error || ('API error ' + data.error.code));
+            error.code = data.error.code;
+            throw error;
+        }
+        return data;
+    }
+
+    // A key Torn calls wrong is forgotten, and one it has switched off is left alone for the
+    // rest of the page: Torn may block an address that keeps sending a bad key.
+    function noteApiFailure(error) {
+        const code = error && error.code;
+        if (code === 2) {
+            forgetApiKey();
+            state.keyProblem = 'Torn did not accept your API key, so it was removed. Add it again in settings.';
+        } else if (code === 16) {
+            state.keyProblem = 'Your API key\'s access level is too low. A Minimal key is the least that works.';
+        } else if ([1, 10, 13, 18].indexOf(code) !== -1) {
+            state.keyProblem = 'Torn turned your API key down: ' + error.message;
+        }
+        console.warn(LOG_PREFIX, 'API read failed:', error);
+    }
+
+    // Hospital, cooldown, icons and the server clock in one call, with the perks now and then.
+    // A fresh timestamp steps past the API's 30-second cache, which matters most right after a
+    // med.
+    function refreshStatus() {
+        if (state.statusBusy) {
+            return state.statusBusy;
+        }
+        if (!keyUsable()) {
+            return Promise.resolve();
+        }
+        const withPerks = Date.now() - state.perksReadAt >= PERKS_REFRESH_MS;
+        state.statusBusy = apiGet('/user', {
+            selections: 'basic,cooldowns,icons,timestamp' + (withPerks ? ',perks' : ''),
+            timestamp: String(Math.floor(Date.now() / 1000))
+        })
+            .then(applyStatus)
+            .catch(noteApiFailure)
+            .finally(function(){
+                state.statusBusy = null;
+                state.statusReadAt = Date.now();
+                updateReserve();
+                render();
+            });
+        return state.statusBusy;
+    }
+
+    function applyStatus(data) {
+        if (typeof data.timestamp === 'number') {
+            state.clockOffset = data.timestamp - Date.now() / 1000;
+        }
+        const status = (data.profile && data.profile.status) || {};
+        const hospital = /hospital/i.test(String(status.state || '')) && status.until > 0;
+        state.hospitalUntil = hospital ? status.until : null;
+        state.hospitalReason = hospital ? htmlToText(status.details || status.description || '') : '';
+        const medical = data.cooldowns ? Number(data.cooldowns.medical) || 0 : 0;
+        state.cooldownUntil = medical > 0 ? serverNow() + medical : null;
+        const iconText = (Array.isArray(data.icons) ? data.icons : []).map(function(icon){
+            return ((icon && icon.title) || '') + ' ' + ((icon && icon.description) || '');
+        });
+        state.earlyDischarge = iconText.some(function(text){ return /discharge/i.test(text); });
+        state.radiation = /radiation/i.test(state.hospitalReason) ||
+            iconText.some(function(text){ return /radiation/i.test(text); });
+        if (data.perks) {
+            state.perksReadAt = Date.now();
+            state.bookCut = readBookCut(collectStrings(data.perks.book).concat(iconText));
+            if (settings.effectivenessSource === 'api') {
+                applyPerks(parsePerks(collectStrings(data.perks)));
+            }
+        }
+        state.statusLoaded = true;
+        noticeHospitalChange();
+    }
+
     function refreshStock() {
         if (state.stockBusy) {
             return state.stockBusy;
         }
+        if (!keyUsable()) {
+            state.factionStatus = 'nokey';
+            render();
+            return Promise.resolve();
+        }
         state.stockBusy = Promise.all([readOwnMeds(), readArmouryMeds()])
-            .then(function(results){
-                state.stock.own = results[0];
-                state.stock.faction = results[1];
-                state.factionStatus = results[1] ? 'ok' : 'none';
-            })
             .finally(function(){
                 state.stockBusy = null;
                 updateReserve();
@@ -561,58 +732,167 @@
         return state.stockBusy;
     }
 
-    // Torn hands out the whole Medical category whichever tab is open, so the panel does not
-    // depend on the player having the Medical tab selected.
     async function readOwnMeds() {
-        const stock = {};
         try {
-            let start = 0;
-            for (let page = 0; page < 5; page++) {
-                const data = await tornPost('/item.php', { step: 'getCategoryList', itemName: 'Medical', start: String(start) });
-                const list = Array.isArray(data.list) ? data.list : [];
-                for (const entry of list) {
-                    const id = parseInt(entry.ID ?? entry.itemID, 10);
-                    stock[id] = (stock[id] || 0) + (parseInt(entry.Qty, 10) || 0);
-                }
-                start += list.length;
-                if (list.length === 0 || !(data.total > start)) {
-                    break;
-                }
+            const data = await apiGet('/user/inventory', { cat: 'Medical', limit: '250' });
+            const inventory = data.inventory || {};
+            const stock = {};
+            for (const item of Array.isArray(inventory.items) ? inventory.items : []) {
+                const id = parseInt(item.id, 10);
+                stock[id] = (stock[id] || 0) + (parseInt(item.amount, 10) || 0);
             }
+            state.stockError = null;
+            takeStock('own', stock, Number(inventory.timestamp) || serverNow());
         } catch (error) {
-            console.warn(LOG_PREFIX, 'Reading your meds failed:', error);
+            state.stockError = error.message;
+            noteApiFailure(error);
         }
-        return stock;
     }
 
-    // Returns null when there is no armoury to draw from: no faction, or no right to use its
-    // medical items. Entries loaned out to other members come back unusable and are skipped.
+    // The faction's medical shelf, which takes a Limited key. Entries loaned out to other
+    // members cannot be used and are skipped. Whether you may take from the armoury at all is
+    // not something the API says; Torn's answer to the first try settles that.
     async function readArmouryMeds() {
         try {
-            const data = await tornPost('/factions.php', { step: 'armouryTabContent', type: 'medical', start: '0' });
-            if (!data || !Array.isArray(data.items)) {
-                return null;
-            }
+            const data = await apiGet('/faction/inventory', { cat: 'medical', limit: '100' });
             const stock = {};
-            let usable = false;
-            for (const item of data.items) {
-                if (!item.itemActions || item.itemActions.use !== true) {
+            for (const item of Array.isArray(data.inventory) ? data.inventory : []) {
+                if (item.loaned) {
                     continue;
                 }
-                const id = parseInt(item.itemID ?? item.item, 10);
-                stock[id] = (stock[id] || 0) + (parseInt(item.qty, 10) || 0);
-                usable = true;
+                const id = parseInt(item.id, 10);
+                stock[id] = (stock[id] || 0) + (parseInt(item.amount, 10) || 0);
             }
-            return usable ? stock : null;
+            state.factionStatus = 'ok';
+            takeStock('faction', stock, Number(data.inventory_timestamp) || serverNow());
         } catch (error) {
-            console.warn(LOG_PREFIX, 'Reading the faction armoury failed:', error);
-            return null;
+            state.factionStatus = error.code === 16 ? 'limited' : 'none';
+            state.stock.faction = null;
+            if (error.code !== 16) {
+                noteApiFailure(error);
+            }
         }
+    }
+
+    // The API keeps an inventory for minutes, so a count can predate meds used since: those are
+    // taken off again. A count older than the one already held is ignored.
+    function takeStock(pool, counts, at) {
+        if (at < state.stockAt[pool]) {
+            return;
+        }
+        for (const use of recentUses) {
+            if (use && use.pool === pool && use.at > at && counts[use.id] > 0) {
+                counts[use.id] -= 1;
+            }
+        }
+        state.stock[pool] = counts;
+        state.stockAt[pool] = at;
+    }
+
+    // ---- Listening to the page -------------------------------------------------------------
+
+    // Torn's own page fetches the sidebar, and each item category as the player opens its tab.
+    // Those answers are read as they arrive, so the panel learns from traffic Torn was serving
+    // anyway and asks for nothing on its own account. Without a key, this is where the meds
+    // come from.
+    function watchPageTraffic() {
+        const page = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
+        try {
+            const xhr = page.XMLHttpRequest.prototype;
+            const open = xhr.open;
+            const send = xhr.send;
+            xhr.open = function(method, url){
+                this.silmarilQmoUrl = url;
+                return open.apply(this, arguments);
+            };
+            xhr.send = function(body){
+                const kind = pageAnswerKind(this.silmarilQmoUrl, body);
+                if (kind) {
+                    this.addEventListener('load', function(){ readPageAnswer(kind, this.responseText); });
+                }
+                return send.apply(this, arguments);
+            };
+        } catch (error) {
+            console.warn(LOG_PREFIX, 'Could not watch XHR:', error);
+        }
+        try {
+            const pageFetch = page.fetch;
+            page.fetch = function(resource, init){
+                const result = pageFetch.apply(this, arguments);
+                try {
+                    const url = resource && typeof resource === 'object' && typeof resource.url === 'string' ? resource.url : resource;
+                    const kind = pageAnswerKind(url, init && init.body);
+                    if (kind) {
+                        result.then(function(response){ return response.clone().text(); })
+                            .then(function(text){ readPageAnswer(kind, text); })
+                            .catch(function(){});
+                    }
+                } catch (error) {
+                    // Watching must never get in the way of the page's own request.
+                }
+                return result;
+            };
+        } catch (error) {
+            console.warn(LOG_PREFIX, 'Could not watch fetch:', error);
+        }
+    }
+
+    function pageAnswerKind(url, body) {
+        const address = String(url || '');
+        if (address.indexOf('sidebarAjaxAction.php') !== -1 && address.indexOf('getSidebarData') !== -1) {
+            return 'sidebar';
+        }
+        if (address.indexOf('item.php') !== -1) {
+            const fields = new URLSearchParams(bodyText(body));
+            if (fields.get('step') === 'getCategoryList' && fields.get('itemName') === 'Medical' &&
+                    !(parseInt(fields.get('start'), 10) > 0)) {
+                return 'meds';
+            }
+        }
+        return null;
+    }
+
+    function bodyText(body) {
+        if (typeof body === 'string') {
+            return body;
+        }
+        try {
+            return body ? new URLSearchParams(body).toString() : '';
+        } catch (error) {
+            return '';
+        }
+    }
+
+    function readPageAnswer(kind, text) {
+        let data;
+        try {
+            data = JSON.parse(text);
+        } catch (error) {
+            return;
+        }
+        if (kind === 'sidebar') {
+            applySidebar(data);
+        } else {
+            const list = data && Array.isArray(data.list) ? data.list : null;
+            // Only a whole list is a count: the first page of a longer one would undercount.
+            if (!list || data.total > list.length) {
+                return;
+            }
+            const stock = {};
+            for (const entry of list) {
+                const id = parseInt(entry.ID ?? entry.itemID, 10);
+                stock[id] = (stock[id] || 0) + (parseInt(entry.Qty, 10) || 0);
+            }
+            state.stockError = null;
+            takeStock('own', stock, serverNow());
+        }
+        updateReserve();
+        render();
     }
 
     // Torn's sidebar redraws its status icons as soon as anything changes: a hit, a revive, a
-    // med used from another tab. Reading the feed again then keeps the panel live without a
-    // tight poll.
+    // med used from another tab. Asking the API again then keeps the panel live without a tight
+    // poll.
     function watchSidebar() {
         const target = document.getElementById('sidebarroot') || document.getElementById('sidebar');
         if (!target || typeof MutationObserver !== 'function') {
@@ -628,31 +908,27 @@
                 return;
             }
             clearTimeout(timer);
-            timer = setTimeout(refreshSidebar, 600);
+            timer = setTimeout(function(){
+                if (Date.now() - state.statusReadAt >= 5000) {
+                    refreshStatus();
+                }
+            }, 600);
         }).observe(target, { childList: true, subtree: true });
     }
 
+    // Only the API is polled, and only while the page is in front.
     function schedulePoll() {
         clearTimeout(state.pollTimer);
-        const delay = document.hidden ? POLL_MS.hidden : (inHospital() || panelOpen() ? POLL_MS.hospital : POLL_MS.idle);
+        if (!keyUsable() || document.hidden) {
+            return;
+        }
+        const delay = inHospital() || panelOpen() ? POLL_MS.hospital : POLL_MS.idle;
         state.pollTimer = setTimeout(function(){
-            refreshSidebar().finally(schedulePoll);
+            refreshStatus().finally(schedulePoll);
         }, delay);
     }
 
     // ---- Perks from the Torn API -----------------------------------------------------------
-
-    function maybeRefreshPerks() {
-        if (!hasApiKey() || settings.effectivenessSource !== 'api') {
-            return;
-        }
-        if (Date.now() - (settings.perksReadAt || 0) < PERKS_REFRESH_MS) {
-            return;
-        }
-        readPerks(apiKey).then(applyPerks).catch(function(error){
-            console.warn(LOG_PREFIX, 'Reading perks failed:', error);
-        });
-    }
 
     async function readPerks(key) {
         let lastError = null;
@@ -737,8 +1013,12 @@
         return COMPATIBLE_BAGS[bloodType].slice().sort(function(a, b){ return rank(a) - rank(b); });
     }
 
+    function armouryDenied() {
+        return Date.now() - (settings.armouryDeniedAt || 0) < ARMOURY_DENIAL_MS;
+    }
+
     function factionQty(id) {
-        if (!settings.useArmoury || !state.stock.faction || state.armouryRefused[id]) {
+        if (!settings.useArmoury || !state.stock.faction || state.armouryRefused[id] || armouryDenied()) {
             return 0;
         }
         return state.stock.faction[id] || 0;
@@ -929,22 +1209,33 @@
             result = { success: false, text: error.message };
         }
         if (result.success) {
-            const pool = step.source.armoury ? state.stock.faction : state.stock.own;
+            const poolName = step.source.armoury ? 'faction' : 'own';
+            const pool = state.stock[poolName];
             if (pool && pool[step.source.id] > 0) {
                 pool[step.source.id] -= 1;
             }
+            recordUse(poolName, step.source.id);
             state.message = { kind: 'ok', text: result.text || ('Used ' + used.name + '.') };
-            // A poll already in flight was sent before the med and would report the old times.
-            if (state.sidebarBusy) {
-                await state.sidebarBusy;
+            if (keyUsable()) {
+                // A poll already in flight was sent before the med and would report the old times.
+                if (state.statusBusy) {
+                    await state.statusBusy;
+                }
+                await refreshStatus();
+                checkCalibration(before, used);
+            } else {
+                predictUse(used);
             }
-            await refreshSidebar();
-            checkCalibration(before, used);
         } else {
             // A refusal that names the armoury means this item cannot come from there; the next
-            // click takes it from the player's own items instead.
+            // click takes it from the player's own items instead. One for want of permission
+            // holds for every armoury med.
             if (step.source.armoury && /faction|armou?ry|permission/i.test(result.text)) {
                 state.armouryRefused[step.source.id] = true;
+                if (/permission|not allowed|not have access/i.test(result.text)) {
+                    settings.armouryDeniedAt = Date.now();
+                    saveJson(SETTINGS_KEY, settings);
+                }
             }
             state.message = { kind: 'bad', text: result.text || 'Torn did not accept that.' };
             refreshStock();
@@ -952,6 +1243,16 @@
         state.busy = false;
         updateReserve();
         render();
+    }
+
+    // Without a key nothing is read back after a med, so the clocks move by what the settings
+    // expect until the player reads them again.
+    function predictUse(used) {
+        const now = serverNow();
+        if (state.hospitalUntil) {
+            state.hospitalUntil = Math.max(now, state.hospitalUntil - used.hospital);
+        }
+        state.cooldownUntil = Math.max(now, state.cooldownUntil || 0) + used.cooldown;
     }
 
     // Compares what the med really did with what the settings predicted. The hospital and
@@ -1063,8 +1364,18 @@
             } else if (action === 'refresh') {
                 state.message = null;
                 state.armouryRefused = {};
-                refreshSidebar();
-                refreshStock();
+                if (settings.armouryDeniedAt) {
+                    settings.armouryDeniedAt = 0;
+                    saveJson(SETTINGS_KEY, settings);
+                }
+                if (keyUsable()) {
+                    refreshStatus();
+                    refreshStock();
+                } else {
+                    // The player asked for it, so this is the one read of Torn's own pages the
+                    // panel makes: a single request per press.
+                    refreshSidebar();
+                }
             } else if (action === 'settings') {
                 openSettings();
             } else if (action === 'pin') {
@@ -1210,19 +1521,23 @@
         const cooldown = cooldownLeft();
         const cap = cooldownCap();
 
+        // Before the first read the cooldown is not known, which is not the same as none.
+        const cooldownText = state.statusLoaded ? formatClock(cooldown) : '?';
+
         const mini = root.querySelector('.qmo-mini');
-        mini.textContent = (hospital > 0 ? 'Hosp ' + formatClock(hospital) + ' · ' : '') + 'CD ' + formatClock(cooldown);
+        mini.textContent = (hospital > 0 ? 'Hosp ' + formatClock(hospital) + ' · ' : '') + 'CD ' + cooldownText;
         root.classList.toggle('qmo-in-hospital', hospital > 0);
 
         const hospitalBox = root.querySelector('.qmo-hosp');
         hospitalBox.classList.toggle('qmo-active', hospital > 0);
         hospitalBox.querySelector('.qmo-value').textContent = hospital > 0 ? formatClock(hospital) : 'Out';
         const reason = hospitalBox.querySelector('.qmo-sub');
-        reason.textContent = hospital > 0 ? state.hospitalReason : (state.sidebarLoaded ? 'Not in hospital' : 'Reading…');
+        reason.textContent = hospital > 0 ? state.hospitalReason
+            : (state.statusLoaded ? 'Not in hospital' : (keyUsable() ? 'Reading…' : 'Not read yet'));
         reason.title = reason.textContent;
 
         const cooldownBox = root.querySelector('.qmo-cd');
-        cooldownBox.querySelector('.qmo-value').innerHTML = escapeHtml(formatClock(cooldown)) +
+        cooldownBox.querySelector('.qmo-value').innerHTML = escapeHtml(cooldownText) +
             ' <small>/ ' + escapeHtml(formatClock(cap)) + '</small>';
         cooldownBox.querySelector('.qmo-bar').classList.toggle('qmo-full', cooldown >= cap);
         cooldownBox.querySelector('.qmo-bar i').style.width = Math.min(100, cooldown / cap * 100).toFixed(1) + '%';
@@ -1254,8 +1569,9 @@
         });
 
         const message = root.querySelector('.qmo-msg');
-        message.className = 'qmo-msg' + (state.message ? ' qmo-' + state.message.kind : '');
-        message.textContent = state.message ? state.message.text : '';
+        const shown = state.message || (state.keyProblem ? { kind: 'bad', text: state.keyProblem } : null);
+        message.className = 'qmo-msg' + (shown ? ' qmo-' + shown.kind : '');
+        message.textContent = shown ? shown.text : '';
 
         const calibration = root.querySelector('.qmo-cal');
         const calibrationHtml = state.calibration
@@ -1273,11 +1589,13 @@
         const footText = '+' + effectiveness() + '% effectiveness · ' + cooldownCut() + '% cooldown cut' +
             (settings.cooldownCutAuto && state.bookCut > 0 ? ' (book)' : '') +
             ' · blood ' + (settings.bloodType || 'not set') +
-            ' · armoury ' + (!settings.useArmoury ? 'off' : (state.factionStatus === 'ok' ? 'on' : (state.factionStatus === 'none' ? 'no access' : '…')));
+            ' · armoury ' + (!settings.useArmoury ? 'off' : armouryDenied() ? 'no access' : (ARMOURY_STATUS[state.factionStatus] || '…'));
         if (foot.textContent !== footText) {
             foot.textContent = footText;
         }
     }
+
+    const ARMOURY_STATUS = { ok: 'on', none: 'no access', limited: 'needs a Limited key', nokey: 'needs an API key' };
 
     function buildPlanHtml(hospital, cooldown, cap) {
         const budget = cap - cooldown;
@@ -1285,6 +1603,9 @@
         const unlock = 'Medical cooldown is at its cap. Meds unlock again in ' + live('unlock', 0) + '.';
         state.nextStep = null;
         state.waitStep = null;
+        if (!state.statusLoaded && !keyUsable()) {
+            parts.push(note('Cooldown not read yet: press Read again (the round arrow above), or add an API key in settings so the panel keeps up on its own.'));
+        }
         if (hospital <= 0) {
             if (budget <= 0) {
                 parts.push(line(unlock, true));
@@ -1303,7 +1624,11 @@
             return parts.join('');
         }
         if (state.stock.own == null) {
-            parts.push(line('Reading your meds…'));
+            if (!keyUsable()) {
+                parts.push(note('Open the Medical tab of your items to count your meds, or add an API key in settings.'));
+            } else {
+                parts.push(state.stockError ? note('Could not read your meds: ' + state.stockError) : line('Reading your meds…'));
+            }
             return parts.join('');
         }
         if (budget <= 0) {
@@ -1315,7 +1640,7 @@
             parts.push('<p class="qmo-hint" data-qmo="settings">Set your blood type in settings to include blood bags.</p>');
         }
         if (groups.length === 0) {
-            parts.push(note('No meds to use: none in your items' + (settings.useArmoury ? ' or the faction armoury.' : '.')));
+            parts.push(note('No meds to use: none in your items' + (settings.useArmoury && state.stock.faction ?' or the faction armoury.' : '.')));
             return parts.join('');
         }
         const result = planMedOut(groups, hospital, budget);
@@ -1464,7 +1789,9 @@
                     '<div class="qmo-field"><span class="qmo-field-name">Torn API key (optional)</span>' +
                         '<div class="qmo-row"><input type="password" class="qmo-f-key" placeholder="16-character key" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">' +
                         '<button type="button" class="qmo-small qmo-f-read">Read perks</button></div>' +
-                        '<small class="qmo-f-key-note">A Minimal key is enough. It is only sent to api.torn.com, to read your faction and education perks.</small></div>' +
+                        '<small class="qmo-f-key-note">With a Minimal key the panel keeps your hospital time, cooldown, perks and meds up to date on its own; ' +
+                            'a Limited key also counts your faction armoury. The key and what it reads stay in this browser: ' +
+                            'the key is only sent to api.torn.com and nothing is shared anywhere else.</small></div>' +
                     '<div class="qmo-modal-actions"><button type="button" class="qmo-small qmo-f-cancel">Cancel</button>' +
                         '<button type="button" class="qmo-small qmo-primary qmo-f-save">Save</button></div>' +
                 '</div>';
@@ -1545,9 +1872,13 @@
                 saveJson(SETTINGS_KEY, settings);
                 state.calibration = null;
                 closeSettings();
+                // A key typed in afresh gets another chance, and reads everything again.
+                state.keyProblem = null;
+                state.perksReadAt = 0;
                 updateReserve();
                 render();
-                maybeRefreshPerks();
+                refreshStatus().then(function(){ return refreshStock(); });
+                schedulePoll();
             });
             overlay.classList.add('qmo-open');
         });
@@ -1725,6 +2056,7 @@
     }
 
     // Last, so every constant above exists before the panel is drawn.
+    watchPageTraffic();
     readBannerFallback();
     whenBodyReady(start);
 })();
