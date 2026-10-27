@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         One Click Attack
 // @namespace    https://github.com/SOLiNARY
-// @version      1.1.0
+// @version      1.2.0
 // @description  Configurable attack shortcuts and a one-button battle workflow with weapon priorities, finishing choices, tab closing, and a movable floating button for phones.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT
@@ -25,7 +25,7 @@
     // shows one panel, not eight. The DOM is the channel because userscript sandboxes cannot see
     // each other's globals, and it needs no grants beyond what each script already asks for.
 
-    const SCRIPT_VERSION = "1.1.0";  // keep in sync with @version above
+    const SCRIPT_VERSION = "1.2.0";  // keep in sync with @version above
     const WHATS_NEW_NAME = "One Click Attack";
     const WHATS_NEW_KEY = "silmaril-attack-shortcuts-last-seen-version";
     // Newest release first. Every release above the version last seen is shown at once, so
@@ -33,6 +33,15 @@
     // `silent: true` is left out of that and never opens the popup by itself; it is listed
     // only when the popup is opened from the menu. Leaving the flag off means false.
     const CHANGELOG = [
+        {
+            version: "1.2.0",
+            date: "2026-10-27",
+            changes: [
+                'Phones and tablets no longer show your shortcut keys in the corners of weapons and battle buttons.',
+                'Bring them back, or hide them on desktop too, with Key hints in the Bindings settings.',
+                'After you act, the pulsing frame stays on what you pressed and turns grey until your next action is ready.'
+            ]
+        },
         {
             version: "1.1.0",
             date: "2026-10-26",
@@ -253,6 +262,8 @@
     // Kept apart from the settings so dragging the button never saves or discards a settings draft.
     const FLOAT_POSITION_KEY = 'silmaril-attack-shortcuts-float-position';
     const FLOAT_MODES = ['off', 'touch', 'always'];
+    // Key hints help a keyboard. On a touch screen they only cover the buttons being tapped.
+    const HINT_MODES = ['off', 'desktop', 'always'];
     const FLOAT_SIZE = 62;
     const FLOAT_MARGIN = 12;
     // The position is a share of the free space, so it survives rotation and resizing on-screen.
@@ -300,6 +311,8 @@
     let refreshScheduled = false;
     let battleOverlayLayer = null;
     let nextActionOverlay = null;
+    // The action the frame belongs to: the decided one, or while waiting the one just pressed.
+    let framedAction = null;
     let overlayResizeObserver = null;
     const shortcutOverlays = new Map();
     const overlayTargets = new Set();
@@ -344,6 +357,7 @@
         return {
             enabled: true,
             floating: 'touch',
+            hints: 'desktop',
             workflow: workflowDefaults(),
             bindings: Object.fromEntries(ACTIONS.map(action => [action.id, {
                 code: action.code, ctrl: false, alt: false, shift: false, meta: false
@@ -372,6 +386,7 @@
             if (!saved || typeof saved !== 'object') return result;
             if (typeof saved.enabled === 'boolean') result.enabled = saved.enabled;
             if (FLOAT_MODES.includes(saved.floating)) result.floating = saved.floating;
+            if (HINT_MODES.includes(saved.hints)) result.hints = saved.hints;
             result.workflow = normalizeWorkflow(saved.workflow);
             const configured = new Set();
             for (const action of ACTIONS) {
@@ -718,7 +733,7 @@
         const targets = new Set();
         const active = new Set();
         const controls = root && settings.enabled ? actionControls(root) : new Map();
-        if (root && settings.enabled && !settingsDialog?.open) {
+        if (root && settings.enabled && hintsWanted() && !settingsDialog?.open) {
             for (const action of ACTIONS) {
                 if (!action.weapon && !action.control) continue;
                 const binding = settings.bindings[action.id];
@@ -759,10 +774,25 @@
             !blockingDialogOpen() && !editingElement(document.activeElement);
         const launcher = ['tas-float', 'tas-workflow'].map(id => document.getElementById(id))
             .find(element => element && !element.hidden);
-        const nextTarget = canHighlight && (nextAction?.kind === 'click' ? nextAction.target :
-            nextAction?.kind === 'close' ? launcher : null);
+        const waiting = nextAction?.kind === 'wait';
+        // After a press the frame stays on what was pressed, in grey, until the next action is
+        // decided. A stop, or a new fight, clears it.
+        if (nextAction?.kind === 'click' || nextAction?.kind === 'close') {
+            framedAction = { pageKey: fightState.pageKey, id: nextAction.id || 'closeTab' };
+        } else if (waiting && fightState.pending) {
+            framedAction = { pageKey: fightState.pageKey, id: fightState.pending.id };
+        } else if (!waiting || framedAction?.pageKey !== fightState.pageKey) {
+            framedAction = null;
+        }
+        let nextTarget = null;
+        if (canHighlight && framedAction) {
+            const id = framedAction.id;
+            nextTarget = !waiting ? (nextAction.kind === 'click' ? nextAction.target : launcher) :
+                id === 'closeTab' ? launcher : weaponSlot(id, root) || controls.get(id);
+        }
         const nextRect = overlayRect(nextTarget);
-        if (nextRect && isAvailable(nextTarget)) {
+        // A pressed control is busy or disabled while Torn responds, so it only has to stay in view.
+        if (nextRect && (waiting || isAvailable(nextTarget))) {
             targets.add(nextTarget);
             if (!nextActionOverlay) {
                 nextActionOverlay = document.createElement('span');
@@ -770,7 +800,8 @@
             }
             const layer = ensureBattleOverlayLayer();
             if (nextActionOverlay.parentElement !== layer) layer.appendChild(nextActionOverlay);
-            nextActionOverlay.dataset.action = nextAction.id || 'closeTab';
+            nextActionOverlay.dataset.action = framedAction.id;
+            nextActionOverlay.classList.toggle('tas-next-waiting', waiting);
             nextActionOverlay.style.left = (nextRect.left - 2) + 'px';
             nextActionOverlay.style.top = (nextRect.top - 2) + 'px';
             nextActionOverlay.style.width = (nextRect.width + 4) + 'px';
@@ -953,11 +984,18 @@
         refreshWorkflowButton();
     }
 
+    function touchScreen() {
+        return matchMedia('(pointer: coarse)').matches;
+    }
+
     function floatingWanted() {
         if (placing) return true;
         if (!settings.enabled || !settings.workflow.enabled) return false;
-        return settings.floating === 'always' ||
-            (settings.floating === 'touch' && matchMedia('(pointer: coarse)').matches);
+        return settings.floating === 'always' || (settings.floating === 'touch' && touchScreen());
+    }
+
+    function hintsWanted() {
+        return settings.hints === 'always' || (settings.hints === 'desktop' && !touchScreen());
     }
 
     function refreshWorkflowButton() {
@@ -1141,11 +1179,15 @@
         refreshWorkflowButton();
     }
 
-    function renderFloatSettings() {
-        settingsDialog.querySelectorAll('[name="floating"]').forEach(input => {
-            input.checked = input.value === draft.floating;
+    function renderSegments() {
+        settingsDialog.querySelectorAll('.tas-seg input').forEach(input => {
+            input.checked = input.value === draft[input.name];
             input.parentElement.classList.toggle('tas-seg-on', input.checked);
         });
+    }
+
+    function renderFloatSettings() {
+        renderSegments();
         const centred = floatPosition.x === FLOAT_DEFAULT_POSITION.x && floatPosition.y === FLOAT_DEFAULT_POSITION.y;
         settingsDialog.querySelector('.tas-float-where').textContent = 'Position: ' + (centred ? 'centre right' : 'your spot');
     }
@@ -1282,6 +1324,15 @@
                         Closing becomes available only after a confirmed result.</p>
                 </section>
                 <section id="tas-panel-bindings" role="tabpanel" data-panel="bindings" aria-labelledby="tas-tab-bindings" hidden>
+                    <div class="tas-hint-settings"><span id="tas-hint-title">Key hints</span>
+                        <div class="tas-seg" role="radiogroup" aria-labelledby="tas-hint-title">
+                            <label><input type="radio" name="hints" value="off">Off</label>
+                            <label><input type="radio" name="hints" value="desktop">Desktop</label>
+                            <label><input type="radio" name="hints" value="always">Everywhere</label>
+                        </div>
+                        <p class="tas-help">Your keys in the corners of weapons and battle buttons. Desktop: hidden on phones and tablets.
+                            Everywhere: on touch screens too, such as a tablet with a keyboard.</p>
+                    </div>
                     <p class="tas-help">Click a binding, then press your new key. Ctrl, Alt, Shift and Meta combinations work too.
                         Escape cancels recording; Backspace or Delete clears it. Number row and numpad share bindings.</p>
                     <div class="tas-bindings"></div>
@@ -1399,9 +1450,9 @@
                 settingsDialog.querySelector('[data-tab="' + name + '"]').focus();
             });
         });
-        settingsDialog.querySelectorAll('[name="floating"]').forEach(input => input.addEventListener('change', () => {
-            draft.floating = input.value;
-            renderFloatSettings();
+        settingsDialog.querySelectorAll('.tas-seg input').forEach(input => input.addEventListener('change', () => {
+            draft[input.name] = input.value;
+            renderSegments();
             settingsMessage('Press Save to apply.');
         }));
         settingsDialog.querySelector('[data-command="place"]').addEventListener('click', startPlacing);
@@ -1484,6 +1535,12 @@
             @keyframes tas-next-pulse {
                 0%, 100% { opacity: 1; box-shadow: 0 0 0 0 #b5d56a66; }
                 50% { opacity: .6; box-shadow: 0 0 0 5px #b5d56a00; }
+            }
+            #tas-battle-overlays .tas-next-action.tas-next-waiting { border-color: #9a9a9a;
+                animation-name: tas-waiting-pulse; }
+            @keyframes tas-waiting-pulse {
+                0%, 100% { opacity: 1; box-shadow: 0 0 0 0 #9a9a9a66; }
+                50% { opacity: .6; box-shadow: 0 0 0 5px #9a9a9a00; }
             }
             #tas-launcher { position: fixed; right: 16px; top: 16px; z-index: 100000;
                 border: 1px solid #666; border-radius: 6px; background: #282828; color: #eee;
@@ -1569,9 +1626,9 @@
             #tas-settings .tas-keybar > div { display: flex; gap: 6px; }
             #tas-settings .tas-keybar [data-bind] { min-width: 90px; }
             #tas-settings .tas-key-help { margin-top: 8px; }
-            #tas-settings .tas-float-settings { display: grid; gap: 8px; margin-top: 4px; padding-bottom: 4px;
-                border-bottom: 1px solid #484848; }
-            #tas-settings .tas-float-settings .tas-help { margin: 0 0 8px; }
+            #tas-settings .tas-float-settings, #tas-settings .tas-hint-settings { display: grid; gap: 8px;
+                margin-top: 4px; padding-bottom: 4px; border-bottom: 1px solid #484848; }
+            #tas-settings .tas-float-settings .tas-help, #tas-settings .tas-hint-settings .tas-help { margin: 0 0 8px; }
             #tas-settings .tas-seg { display: flex; border: 1px solid #666; border-radius: 6px; overflow: hidden; }
             #tas-settings .tas-seg label { flex: 1; position: relative; display: flex; align-items: center; justify-content: center;
                 padding: 7px 4px; text-align: center; background: #363636; cursor: pointer; }
