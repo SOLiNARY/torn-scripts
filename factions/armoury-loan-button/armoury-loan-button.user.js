@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Armoury Loan Button
 // @namespace    https://github.com/SOLiNARY
-// @version      0.6.9
+// @version      0.7.0
 // @description  Caches loanable faction armoury items and adds a "Loan" chip to every organized crime role that needs one, loaning the item to whoever holds that role. Your own role loans in one click, any other role confirms first. Give it a limited API key and it reads the armoury straight from Torn, so weapon and armour counts stay right without opening the armoury tab. After an update, a "What's new" popup lists what changed.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT License
@@ -22,7 +22,7 @@
     // shows one panel, not eight. The DOM is the channel because userscript sandboxes cannot see
     // each other's globals, and it needs no grants beyond what each script already asks for.
 
-    const SCRIPT_VERSION = "0.6.9";  // keep in sync with @version above
+    const SCRIPT_VERSION = "0.7.0";  // keep in sync with @version above
     const WHATS_NEW_NAME = "Armoury Loan Button";
     const WHATS_NEW_KEY = "silmaril-armoury-loan-button-last-seen-version";
     // Newest release first. Every release above the version last seen is shown at once, so
@@ -30,6 +30,14 @@
     // `silent: true` is left out of that and never opens the popup by itself; it is listed
     // only when the popup is opened from the menu. Leaving the flag off means false.
     const CHANGELOG = [
+        {
+            version: "0.7.0",
+            date: "2026-10-27",
+            changes: [
+            'Loaning the missing items for a crime now takes one press per loan, as Torn&rsquo;s scripting rules require. The list ticks each one off and shows which comes next.',
+            'The API key prompt now says where your key goes: it stays in this browser and is only sent to the Torn API.'
+            ]
+        },
         {
             version: "0.6.9",
             date: "2026-10-20",
@@ -664,6 +672,28 @@
     color: #8f8f8f;
 }
 
+/* The row the next press loans, and how each one went. */
+.silmaril-modal .silmaril-r.silmaril-next .silmaril-it {
+    color: #fff;
+    font-weight: bold;
+}
+
+.silmaril-modal .silmaril-r .silmaril-rm {
+    display: flex;
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+    color: #8f8f8f;
+}
+
+.silmaril-modal .silmaril-r.silmaril-ok .silmaril-rm {
+    color: #8bb08f;
+}
+
+.silmaril-modal .silmaril-r.silmaril-fail .silmaril-rm {
+    color: #e0806f;
+}
+
 .silmaril-modal .silmaril-foot {
     padding: 0 11px 10px;
     font-size: 10px;
@@ -954,7 +984,8 @@
         // text, so anyone looking at the screen reads the key. Blank keeps the saved one.
         const keyIsSet = hasApiKey();
         const entered = prompt('Please enter a LIMITED Api Key. It is used to read your ' +
-            'faction armoury without opening it:' +
+            'faction armoury without opening it. The key stays in this browser and is only ' +
+            'sent to api.torn.com; nothing is stored or shared anywhere else:' +
             (keyIsSet ? '\n\nA key is already saved. Leave this blank to keep it.' : ''), '');
         if (entered == null) return false;
         const trimmed = entered.trim();
@@ -1357,9 +1388,6 @@
         'permission', 'not allowed', 'cannot loan', 'can not loan',
         'do not have access', 'access to the armoury', 'not have access'
     ];
-    // Loans are sent one at a time with a gap, so a crew handover does not arrive as a
-    // burst Torn could reasonably treat as automation.
-    const BATCH_GAP_MS = 400;
     // Torn words the requirement two ways: a role somebody holds says "Used item", an
     // empty one says "Required item". Only matching the first is why this used to see
     // nothing but your own role.
@@ -2258,6 +2286,9 @@
     window.addEventListener('resize', closeConfirm);
 
     // --- the crew handover -------------------------------------------------------
+    // Torn's rules allow a script to send Torn a request only when the player asked for
+    // that one request, so a handover is a queue rather than a burst: every press of the
+    // button loans one item, to the next ticked row, and the rows tick off as they go.
 
     function openBatch(candidates, ownId) {
         closeConfirm();
@@ -2295,38 +2326,53 @@
                 you.textContent = ' (you)';
                 to.appendChild(you);
             }
+            const mark = document.createElement('span');
+            mark.className = 'silmaril-rm';
             row.appendChild(box);
             row.appendChild(art);
             row.appendChild(item);
             row.appendChild(to);
+            row.appendChild(mark);
             rows.appendChild(row);
-            boxes.push({ box: box, candidate: candidate });
+            boxes.push({ box: box, row: row, mark: mark, candidate: candidate, done: false });
         }
 
         const foot = document.createElement('div');
         foot.className = 'silmaril-foot';
-        foot.textContent = 'Each one is free in the armoury as far as this has seen.';
+        foot.textContent = 'Each one is free in the armoury as far as this has seen. One press loans one item.';
 
         const actions = document.createElement('div');
         actions.className = 'silmaril-ca';
         const cancel = document.createElement('button');
         cancel.type = 'button';
         cancel.className = 'silmaril-btn silmaril-ghost';
-        cancel.textContent = 'Cancel';
+        cancel.textContent = 'Close';
         const commit = document.createElement('button');
         commit.type = 'button';
         commit.className = 'silmaril-btn silmaril-go';
         actions.appendChild(cancel);
         actions.appendChild(commit);
 
-        function refreshCount() {
-            const chosen = boxes.filter(function (entry) { return entry.box.checked; }).length;
-            question.textContent = 'Loan ' + chosen + (chosen === 1 ? ' item?' : ' items?');
-            commit.textContent = 'Loan ' + chosen;
-            commit.disabled = chosen === 0;
+        let busy = false;
+        function pending() {
+            return boxes.filter(function (entry) { return !entry.done && entry.box.checked; });
         }
-        boxes.forEach(function (entry) { entry.box.addEventListener('change', refreshCount); });
-        refreshCount();
+        function refreshQueue() {
+            const left = pending();
+            boxes.forEach(function (entry) { entry.row.classList.toggle('silmaril-next', entry === left[0]); });
+            if (left.length > 0) {
+                question.textContent = 'Loan ' + left.length + (left.length === 1 ? ' item' : ' items') + ', one press each';
+                commit.textContent = 'Loan next';
+                commit.disabled = busy;
+                return;
+            }
+            const finished = boxes.some(function (entry) { return entry.done; });
+            question.textContent = finished ? 'All done' : 'Nothing ticked';
+            commit.textContent = 'Done';
+            commit.disabled = busy || !finished;
+        }
+        boxes.forEach(function (entry) { entry.box.addEventListener('change', refreshQueue); });
+        refreshQueue();
 
         modal.appendChild(question);
         modal.appendChild(rows);
@@ -2338,11 +2384,40 @@
         function close() { overlay.remove(); }
         cancel.addEventListener('click', close);
         overlay.addEventListener('click', function (event) { if (event.target === overlay) close(); });
-        commit.addEventListener('click', function () {
-            const chosen = boxes.filter(function (entry) { return entry.box.checked; })
-                .map(function (entry) { return entry.candidate; });
-            close();
-            runBatch(chosen);
+        commit.addEventListener('click', async function () {
+            if (busy) return;
+            const entry = pending()[0];
+            if (entry == null) {
+                close();
+                return;
+            }
+            busy = true;
+            entry.box.disabled = true;
+            entry.mark.innerHTML = ICON_SPIN;
+            refreshQueue();
+            const candidate = entry.candidate;
+            const wrap = candidate.slot.wrapper.querySelector('.silmaril-chip-wrap');
+            if (wrap != null) setChipBusy(wrap);
+            const result = await performLoan(candidate.state.itemId, candidate.slot.occupant, candidate.slot);
+            if (wrap != null) wrap.dataset.silmarilBusy = '0';
+            busy = false;
+            entry.done = true;
+            if (result.denied) {
+                close();
+                markDenied();
+                return;
+            }
+            if (result.ok) slotFailures.delete(candidate.slot.ocKey);
+            else slotFailures.set(candidate.slot.ocKey, result.message);
+            entry.row.classList.add(result.ok ? 'silmaril-ok' : 'silmaril-fail');
+            entry.mark.innerHTML = result.ok ? ICON_CHECK : ICON_ALERT;
+            if (!result.ok) {
+                entry.row.title = result.message;
+                foot.textContent = result.message;
+            }
+            if (wrap != null) wrap.remove();
+            scanCrimes();
+            refreshQueue();
         });
     }
 
@@ -2495,25 +2570,6 @@
         if (result.ok) slotFailures.delete(slot.ocKey);
         else slotFailures.set(slot.ocKey, result.message);
         wrap.remove();
-        scanCrimes();
-    }
-
-    async function runBatch(candidates) {
-        for (const candidate of candidates) {
-            const wrap = candidate.slot.wrapper.querySelector('.silmaril-chip-wrap');
-            if (wrap != null) setChipBusy(wrap);
-            const result = await performLoan(candidate.state.itemId, candidate.slot.occupant, candidate.slot);
-            if (wrap != null) wrap.dataset.silmarilBusy = '0';
-            if (result.denied) {
-                markDenied();
-                return;
-            }
-            if (result.ok) slotFailures.delete(candidate.slot.ocKey);
-            else slotFailures.set(candidate.slot.ocKey, result.message);
-            if (wrap != null) wrap.remove();
-            scanCrimes();
-            await delay(BATCH_GAP_MS);
-        }
         scanCrimes();
     }
 
