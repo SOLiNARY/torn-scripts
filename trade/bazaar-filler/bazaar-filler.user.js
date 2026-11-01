@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Bazaar Filler
 // @namespace    https://github.com/SOLiNARY
-// @version      1.11.6
+// @version      1.12.0
 // @description  Adds a Fill button to every item on your bazaar's Add and Manage pages: one click sets the price and quantity. Price from the item market (cheapest minus $1 by default), market value or live bazaars via weav3r.dev, with your own formula and min/max ranges. Quantity modes, per-category settings, favourites with Fill All, and a bubble that warns when your price is far below the competition. Open settings with the cog on the Fill All bar or by holding Fill for 3s.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT License
@@ -20,7 +20,7 @@
     'use strict';
 
     // Keep in sync with @version above — it keys the "What's new" popup.
-    const SCRIPT_VERSION = "1.11.6";
+    const SCRIPT_VERSION = "1.12.0";
 
     const marketUrl = "https://api.torn.com/v2/market?id={itemId}&selections=itemMarket&key={apiKey}&comment=BazaarFiller";
     const itemUrl = "https://api.torn.com/torn/{itemId}?selections=items&key={apiKey}&comment=BazaarFiller";
@@ -92,6 +92,16 @@
     // Write every line for a player, not a developer: one short sentence, plain words,
     // what changed for them rather than what changed in the code.
     const CHANGELOG = [
+        {
+            version: "1.12.0",
+            date: "2026-11-01",
+            changes: [
+                'New: undercut only the big stacks. <code>-1[100x+]</code> undercuts the cheapest listing of 100 or more, so a first page full of 1x and 2x sellers no longer drags your price down.',
+                '<code>-1[mine+]</code> undercuts the cheapest listing at least as big as the stack you are filling. <code>-1[2xmine+]</code> looks for one at least twice as big, <code>-1[0.5xmine+]</code> at least half.',
+                'Add <code>above</code> to skip sellers who are too cheap: <code>-1[mine+ above +5%[market]]</code> undercuts the first big stack that still leaves you 5% over market value.',
+                'Stack sizes work on bazaar prices too, like <code>-1[bazaar:100x+]</code>. When no listing fits, the price is left as it is and a note says why.'
+            ]
+        },
         {
             version: "1.11.5",
             date: "2026-10-20",
@@ -461,7 +471,11 @@
                     return reportSkippedRow(wave, extractedItemId, maxQuantity, categoryMode, isAuto);
                 }
             }
-            let resolved = await resolveFillPrice(pricing, extractedItemId);
+            let resolved = await resolveFillPrice(pricing, extractedItemId, { mine: resolvedQuantity });
+            if (resolved.unmatched != null){
+                skipped = true;
+                return reportUnmatchedRow(wave, extractedItemId, resolved.unmatched, isAuto);
+            }
             if (resolved.error != null){
                 return handleApiError(resolved.error, wave) ?? "error";
             }
@@ -501,7 +515,7 @@
         }
     }
 
-    async function updatePrice(element){
+    async function updatePrice(element, isAuto){
         let moneyGroupDiv;
         let parentNode4 = element.parentNode.parentNode.parentNode.parentNode;
         if (isMobileView){
@@ -551,7 +565,11 @@
             if (apiErrorStatus !== null){
                 return apiErrorStatus;
             }
-            let resolved = await resolveFillPrice(pricing, extractedItemId);
+            // On Manage the stack is the one already in the bazaar.
+            let resolved = await resolveFillPrice(pricing, extractedItemId, { mine: getMaxQuantity(element, pages.ManageItems) });
+            if (resolved.unmatched != null){
+                return reportUnmatchedRow(wave, extractedItemId, resolved.unmatched, isAuto);
+            }
             if (resolved.error != null){
                 return handleApiError(resolved.error, wave) ?? "error";
             }
@@ -702,6 +720,19 @@
         if (!isAuto){
             showToast("Nothing listed — quantity mode \"" + modeLabel + "\" keeps all " +
                       (maxQuantity ?? "?") + " of this item.");
+        }
+        return "skipped";
+    }
+
+    // A stack size or "above" limit left no listing to read, so the row is left as it is.
+    function reportUnmatchedRow(wave, itemId, why, isAuto){
+        wave.style.backgroundColor = "white";
+        wave.style.animation = 'none';
+        wave.offsetHeight;
+        wave.style.animation = null;
+        console.info("[TornBazaarFiller] Item " + itemId + " left untouched: " + why + ".");
+        if (!isAuto){
+            showToast("Price left as it is: " + why + ".");
         }
         return "skipped";
     }
@@ -1225,7 +1256,7 @@
                         fillInput.parentNode.style.display = "none";
                         status = await fillQuantityAndPrice(fillInput, pageType, true);
                     } else {
-                        status = await updatePrice(fillInput);
+                        status = await updatePrice(fillInput, true);
                     }
                 } catch (error) {
                     // A single row with unexpected DOM must not abort the whole run.
@@ -1318,9 +1349,11 @@
 
     // Split on the separators that belong to this level only: the ones inside a nested
     // min(...)/max(...) belong to that call, not to us.
+    // A comma inside a formula's [ ] is part of a stack size, like [1,000x+], not a separator.
     function splitTopLevel(body){
         let parts = [];
         let depth = 0;
+        let squareDepth = 0;
         let current = '';
         for (let i = 0; i < body.length; i++){
             let ch = body.charAt(i);
@@ -1328,7 +1361,11 @@
                 depth++;
             } else if (ch === ')'){
                 depth--;
-            } else if ((ch === '|' || ch === ',') && depth <= 0){
+            } else if (ch === '['){
+                squareDepth++;
+            } else if (ch === ']'){
+                squareDepth--;
+            } else if ((ch === '|' || ch === ',') && depth <= 0 && squareDepth <= 0){
                 parts.push(current);
                 current = '';
                 continue;
@@ -1408,13 +1445,6 @@
         return formula.indexOf('[') == -1 ? formula : formula.substring(0, formula.indexOf('[')).trim();
     }
 
-    function getDeltaSlotOffset(formula){
-        if (formula.indexOf('[') == -1) {
-            return 0;
-        }
-        let parsed = parseInt(formula.substring(formula.indexOf('[') + 1, formula.indexOf(']')), 10);
-        return isNaN(parsed) ? 0 : parsed;
-    }
 
     function loadCategoryDeltas(){
         try {
@@ -1513,14 +1543,70 @@
     // ---- Price sources ---------------------------------------------------------------------
     // A formula names its source inside its bracket: no bracket or [n] is Torn's item market,
     // [market] is Torn's market value, [bazaar...] is weav3r's player-bazaar data.
+    // A listing source can also say which listings count at all. [100x+] keeps stacks of 100
+    // or more, [mine+] stacks at least as big as the one being filled, [2xmine+] at least twice
+    // that. "above <formula>" at the end skips every listing that would put the price under
+    // that formula's price: -1[mine+ above +5%[market]]. Parts are joined with ":", in any
+    // order: [bazaar:1:100x+] is the 2nd cheapest bazaar listing of 100 or more.
 
-    function bracketToken(formula){
+    // The item market will not take a bigger listing than this, so asking it for a bigger
+    // stack could never match anything.
+    const ITEM_MARKET_MAX_STACK = 9999;
+
+    // The ] that closes the [ at `open`, counting the brackets of an "above" limit inside it,
+    // or -1 when nothing closes it.
+    function matchingBracket(text, open){
+        let depth = 0;
+        for (let i = open; i < text.length; i++){
+            if (text.charAt(i) === '['){
+                depth++;
+            } else if (text.charAt(i) === ']'){
+                depth--;
+                if (depth === 0){
+                    return i;
+                }
+            }
+        }
+        return -1;
+    }
+
+    // What sits between a formula's brackets, or null when it has none.
+    function bracketBody(formula){
         let open = formula.indexOf('[');
         if (open == -1){
-            return '';
+            return null;
         }
-        let close = formula.indexOf(']', open);
-        return (close == -1 ? formula.substring(open + 1) : formula.substring(open + 1, close)).trim().toLowerCase();
+        let close = matchingBracket(formula, open);
+        return close == -1 ? formula.substring(open + 1) : formula.substring(open + 1, close);
+    }
+
+    // A bracket is "<selector>" or "<selector> above <limit formula>". Split on the first
+    // "above" that is not inside the limit's own bracket.
+    function splitAbove(body){
+        let depth = 0;
+        for (let i = 0; i < body.length; i++){
+            let ch = body.charAt(i);
+            if (ch === '['){
+                depth++;
+            } else if (ch === ']'){
+                depth--;
+            } else if (depth === 0 && (i === 0 || /\s/.test(body.charAt(i - 1))) &&
+                       /^above(\s|$)/i.test(body.substring(i))){
+                return { selector: body.substring(0, i), limit: body.substring(i + 'above'.length).trim() };
+            }
+        }
+        return { selector: body, limit: null };
+    }
+
+    function bracketToken(formula){
+        let body = bracketBody(formula);
+        return body == null ? '' : splitAbove(body).selector.trim().toLowerCase();
+    }
+
+    // The formula after "above", or null when the bracket has no limit.
+    function aboveLimit(formula){
+        let body = bracketBody(formula);
+        return body == null ? null : splitAbove(body).limit;
     }
 
     function sourceOf(formula){
@@ -1534,17 +1620,192 @@
         return SOURCE_ITEM_MARKET;
     }
 
-    // What a [bazaar...] formula reads: a listing slot, the bazaar average, or the median listing.
-    function bazaarSelector(formula){
-        let argument = bracketToken(formula).substring('bazaar'.length).replace(/^:/, '').trim();
-        if (argument === 'avg' || argument === 'average'){
+    // Every source a formula needs, its "above" limit included.
+    function sourcesOf(formula){
+        let limit = aboveLimit(formula);
+        return [sourceOf(formula)].concat(limit != null && limit !== '' ? sourcesOf(limit) : []);
+    }
+
+    // One part of a listing selector, or null when it is not one.
+    function readSelectorPart(part){
+        let match;
+        if (part === 'avg' || part === 'average'){
             return { kind: 'avg' };
         }
-        if (argument === 'median'){
+        if (part === 'median'){
             return { kind: 'median' };
         }
-        let slot = parseInt(argument, 10);
-        return { kind: 'slot', index: isNaN(slot) ? 0 : slot };
+        if (/^\d+$/.test(part)){
+            return { kind: 'slot', index: parseInt(part, 10) };
+        }
+        if ((match = part.match(/^(\d[\d,]*)x\+$/)) != null){
+            return { size: 'fixed', minStack: parseInt(match[1].replace(/,/g, ''), 10) };
+        }
+        if ((match = part.match(/^(?:(\d+(?:\.\d+)?)x)?mine\+$/)) != null){
+            return { size: 'mine', factor: match[1] == null ? 1 : parseFloat(match[1]) };
+        }
+        return null;
+    }
+
+    // What a listing source reads: a listing slot, the median, or (bazaar only) the average,
+    // plus the smallest stack a listing must hold to count. Parts it cannot read are ignored
+    // here; Save refuses them before they get this far.
+    function listingSelector(formula){
+        let parts = bracketToken(formula).split(':').map(function(part){ return part.trim(); })
+            .filter(function(part){ return part !== ''; });
+        if (parts[0] === 'bazaar'){
+            parts.shift();
+        }
+        let selector = { kind: 'slot', index: 0, minStack: null, mineFactor: null };
+        parts.forEach(function(part){
+            let read = readSelectorPart(part);
+            if (read == null){
+                return;
+            }
+            if (read.kind != null){
+                selector.kind = read.kind;
+                if (read.kind === 'slot'){
+                    selector.index = read.index;
+                }
+            } else if (read.size === 'fixed'){
+                selector.minStack = read.minStack;
+            } else {
+                selector.mineFactor = read.factor;
+            }
+        });
+        return selector;
+    }
+
+    // Kept for the call sites that only care about the bazaar read kind.
+    function bazaarSelector(formula){
+        return listingSelector(formula);
+    }
+
+    function usesMine(formula){
+        return listingSelector(formula).mineFactor != null ||
+            (aboveLimit(formula) != null && usesMine(aboveLimit(formula)));
+    }
+
+    // The smallest stack a listing needs to count for this formula: null when any size counts,
+    // undefined when it depends on your stack and that is not known here.
+    function minimumStack(formula, mine, source){
+        let selector = listingSelector(formula);
+        let wanted = selector.minStack;
+        if (selector.mineFactor != null){
+            if (mine == null || !(mine > 0)){
+                return undefined;
+            }
+            wanted = Math.ceil(mine * selector.mineFactor);
+        }
+        if (wanted == null){
+            return null;
+        }
+        wanted = Math.max(1, wanted);
+        return source === SOURCE_ITEM_MARKET ? Math.min(wanted, ITEM_MARKET_MAX_STACK) : wanted;
+    }
+
+    // The listings a formula may read, after its stack size and "above" limit are applied.
+    // `context` carries your stack (`mine`) and the limit's price (`limit`). Returns
+    // {listings} or, when nothing is left, {unmatched: a sentence saying why}.
+    function eligibleListings(listings, formula, source, context){
+        let minimum = minimumStack(formula, context == null ? null : context.mine, source);
+        if (minimum === undefined){
+            return { unmatched: "your stack size could not be read here, so [" + bracketToken(formula) + "] has nothing to compare with" };
+        }
+        let limit = context == null ? null : context.limit;
+        let delta = stripDeltaBracket(formula);
+        let kept = listings.filter(function(listing){
+            if (minimum != null && Number(listing.amount ?? 1) < minimum){
+                return false;
+            }
+            return limit == null || performOperation(listing.price, delta) >= limit;
+        });
+        if (kept.length > 0){
+            return { listings: kept };
+        }
+        let why = "no listing";
+        if (minimum != null){
+            why += " of " + minimum.toLocaleString('en-US') + " or more";
+        }
+        if (limit != null){
+            why += " that keeps the price at or above $" + Math.round(limit).toLocaleString('en-US');
+        }
+        return { unmatched: why };
+    }
+
+    // When a bazaar formula falls back to the item market, its stack size and "above" limit
+    // carry over; which bazaar listing it read does not.
+    function itemMarketFallbackFormula(formula){
+        let parts = bracketToken(formula).split(':').map(function(part){ return part.trim(); })
+            .filter(function(part){
+                let read = readSelectorPart(part);
+                return read != null && read.size != null;
+            });
+        let limit = aboveLimit(formula);
+        if (parts.length === 0 && limit == null){
+            return stripDeltaBracket(formula);
+        }
+        return stripDeltaBracket(formula) + '[' + parts.join(':') + (limit == null ? '' : ' above ' + limit) + ']';
+    }
+
+    // Save's check of one bracket. Returns a sentence for the player, or null when it is fine.
+    function bracketProblem(formula){
+        let token = bracketToken(formula);
+        let limit = aboveLimit(formula);
+        if (token === 'market'){
+            return limit == null ? null : "[market] is one price, not a list, so there is nothing for 'above' to skip.";
+        }
+        let isBazaar = token === 'bazaar' || token.indexOf('bazaar:') === 0;
+        let parts = token.split(':').map(function(part){ return part.trim(); });
+        if (isBazaar){
+            parts.shift();
+        }
+        parts = parts.filter(function(part){ return part !== ''; });
+        let picks = 0;
+        let sizes = 0;
+        let average = false;
+        for (let i = 0; i < parts.length; i++){
+            let read = readSelectorPart(parts[i]);
+            if (read == null){
+                return isBazaar
+                    ? "[" + token + "] is not a bazaar source. Use [bazaar], [bazaar:2], [bazaar:avg], [bazaar:median] or [bazaar:100x+]."
+                    : "[" + token + "] is not a price source. Use [0], [median], [market], [bazaar], [100x+] or [mine+].";
+            }
+            if (read.kind === 'avg' && !isBazaar){
+                return "[" + token + "]: only bazaars have an average. Use [bazaar:avg].";
+            }
+            if (read.kind != null){
+                picks++;
+                average = average || read.kind === 'avg';
+            } else {
+                sizes++;
+                if (read.size === 'fixed' && !(read.minStack >= 1)){
+                    return "[" + parts[i] + "] needs a stack size of 1 or more, like [100x+].";
+                }
+                if (read.size === 'mine' && !(read.factor > 0)){
+                    return "[" + parts[i] + "] needs a number above 0 before x, like [2xmine+].";
+                }
+            }
+        }
+        if (picks > 1){
+            return "[" + token + "] picks a listing more than once. Use one of a number, median or avg.";
+        }
+        if (sizes > 1){
+            return "[" + token + "] has more than one stack size. Use one, like [100x+] or [mine+].";
+        }
+        if (average && (sizes > 0 || limit != null)){
+            return "[" + token + "]: the bazaar average is one price, so stack sizes and 'above' do not apply to it.";
+        }
+        if (limit != null){
+            if (limit === ''){
+                return "'above' needs a price after it, like [mine+ above +5%[market]].";
+            }
+            if (aboveLimit(limit) != null){
+                return "the price after 'above' cannot have an 'above' of its own.";
+            }
+            return formulaProblem(limit);
+        }
+        return null;
     }
 
     // ---- Cross-origin transport -------------------------------------------------------------
@@ -1754,17 +2015,23 @@
 
     // Resolve a [bazaar...] formula against a weav3r payload. Returns null when weav3r has
     // nothing usable, which tells the caller to fall back to Torn's item market.
-    function bazaarPriceFrom(data, formula, itemId){
+    // A stack size or "above" limit that rules out every listing is not "weav3r has nothing":
+    // it returns {unmatched}, so the row is not quietly priced off the item market instead.
+    function bazaarPriceFrom(data, formula, itemId, context){
         let selector = bazaarSelector(formula);
         let listings = normaliseBazaarListings(data);
         let basis = null;
         if (selector.kind === 'avg'){
             let average = Number(data.bazaar_average);
             basis = data.bazaar_average == null || !Number.isFinite(average) ? null : average;
-        } else if (selector.kind === 'median'){
-            basis = listings.length > 0 ? getMedianPrice(listings) : null;
         } else if (listings.length > 0){
-            basis = listings[Math.min(selector.index, listings.length - 1)].price;
+            let eligible = eligibleListings(listings, formula, SOURCE_BAZAAR, context);
+            if (eligible.unmatched != null){
+                return { unmatched: eligible.unmatched };
+            }
+            basis = selector.kind === 'median'
+                ? getMedianPrice(eligible.listings)
+                : eligible.listings[Math.min(selector.index, eligible.listings.length - 1)].price;
         }
         if (basis == null){
             console.warn("[TornBazaarFiller] weav3r has no usable bazaar price for item " + itemId + ".");
@@ -1782,7 +2049,7 @@
     function needsTornApiKey(){
         return [priceDeltaRaw].concat(Object.values(categoryDeltas)).some(function(setting){
             return formulaBranches(setting).some(function(branch){
-                return sourceOf(branch) !== SOURCE_BAZAAR;
+                return sourcesOf(branch).some(function(source){ return source !== SOURCE_BAZAAR; });
             });
         });
     }
@@ -1800,7 +2067,7 @@
         return fetch(buildTornPriceUrl(source, itemId)).then(response => response.json());
     }
 
-    function itemMarketPrice(data, formula, itemId){
+    function itemMarketPrice(data, formula, itemId, context){
         // Nothing listed means nothing to undercut: fail the row like an API error, leaving it as
         // is. The error is a Torn-shaped payload, the same as every other `{ error }` returned here.
         if (data.itemmarket.listings.length === 0){
@@ -1813,9 +2080,16 @@
             console.warn("[TornBazaarFiller] The API is BROKEN!");
         }
         let listings = data.itemmarket.listings;
-        let basis = bracketToken(formula) === 'median'
-            ? getMedianPrice(listings)
-            : listings[Math.min(getDeltaSlotOffset(formula), listings.length - 1)].price;
+        // The stack size and "above" limit narrow what the price is read from, but the colour
+        // warning still compares against every listing, since that is what buyers see.
+        let eligible = eligibleListings(listings, formula, SOURCE_ITEM_MARKET, context);
+        if (eligible.unmatched != null){
+            return { unmatched: eligible.unmatched };
+        }
+        let selector = listingSelector(formula);
+        let basis = selector.kind === 'median'
+            ? getMedianPrice(eligible.listings)
+            : eligible.listings[Math.min(selector.index, eligible.listings.length - 1)].price;
         return {
             price: Math.round(performOperation(basis, stripDeltaBracket(formula))),
             listings: listings
@@ -1838,7 +2112,20 @@
     // `allowFallback` is off while several branches compete: the user has already named their
     // own alternative, so a thin bazaar item lets the next branch answer instead of quietly
     // spending a Torn call on the item market. Returns null when the branch prices nothing.
-    async function resolveBranchPrice(branch, pricing, itemId, allowFallback){
+    // `context.mine` is the stack being filled, for [mine+]. A formula with an "above" limit
+    // prices that limit first; a limit that prices nothing leaves the formula nothing to read.
+    async function resolveBranchPrice(branch, pricing, itemId, allowFallback, context){
+        let limitFormula = aboveLimit(branch);
+        let limit = null;
+        if (limitFormula != null){
+            let limitResolved = await resolveBranchPrice(limitFormula, pricing, itemId, false, context);
+            if (limitResolved == null || limitResolved.error != null || limitResolved.unmatched != null ||
+                typeof limitResolved.price !== 'number' || !isFinite(limitResolved.price)){
+                return { unmatched: "the price after 'above' (" + limitFormula + ") could not be worked out" };
+            }
+            limit = limitResolved.price;
+        }
+        let branchContext = { mine: context == null ? null : context.mine, limit: limit };
         let source = sourceOf(branch);
         let data = preloadMatches(pricing, branch, source)
             ? pricing.data
@@ -1851,7 +2138,7 @@
             return { price: Math.round(performOperation(marketValue, stripDeltaBracket(branch))), listings: null };
         }
         if (source === SOURCE_BAZAAR){
-            let resolved = bazaarPriceFrom(data, branch, itemId);
+            let resolved = bazaarPriceFrom(data, branch, itemId, branchContext);
             if (resolved != null){
                 return resolved;
             }
@@ -1859,21 +2146,22 @@
                 return null;
             }
             // A thin or unanswerable item falls back to Torn rather than failing the row, so one
-            // bad item never stops a Fill All run. The delta carries over; the selector cannot.
+            // bad item never stops a Fill All run. The delta, stack size and "above" limit carry
+            // over; which bazaar listing it read cannot.
             console.warn("[TornBazaarFiller] No usable weav3r bazaar price for item " + itemId + "; using the item market.");
             if (!hasUsableApiKey()){
                 // A bazaar-only setup was never asked for a key, so there is nothing to fall
                 // back with. Say that instead of spending a call on a guaranteed key error.
                 return { error: weav3rError(0, "no price for item " + itemId + ", and no API key is set for the item-market fallback") };
             }
-            let fallbackFormula = stripDeltaBracket(branch);
+            let fallbackFormula = itemMarketFallbackFormula(branch);
             let fallbackData = await fetchForSource(SOURCE_ITEM_MARKET, fallbackFormula, itemId);
             if (fallbackData.error != null){
                 return { error: fallbackData };
             }
-            return itemMarketPrice(fallbackData, fallbackFormula, itemId);
+            return itemMarketPrice(fallbackData, fallbackFormula, itemId, branchContext);
         }
-        return itemMarketPrice(data, branch, itemId);
+        return itemMarketPrice(data, branch, itemId, branchContext);
     }
 
     // Walk the parsed setting and pick the winning branch: the highest under max(), the lowest
@@ -1900,11 +2188,11 @@
     // Price every formula in the row's setting, then let the min()/max() tree pick which one
     // fills. One formula takes exactly the path, and costs exactly the calls, it did before any
     // of this, and a formula written twice in the same setting is still fetched once.
-    async function resolveFillPrice(pricing, itemId){
+    async function resolveFillPrice(pricing, itemId, context){
         let root = parseSetting(pricing.setting);
         let formulas = collectFormulas(root);
         if (root.kind === 'formula'){
-            return resolveBranchPrice(root.formula, pricing, itemId, true);
+            return resolveBranchPrice(root.formula, pricing, itemId, true, context);
         }
         let priced = new Map();
         for (let i = 0; i < formulas.length; i++){
@@ -1913,7 +2201,7 @@
             }
             let resolved = null;
             try {
-                resolved = await resolveBranchPrice(formulas[i], pricing, itemId, false);
+                resolved = await resolveBranchPrice(formulas[i], pricing, itemId, false, context);
             } catch (error) {
                 // A formula stored before Save started validating them can still throw here.
                 // That is one dead branch rather than a dead row.
@@ -1928,7 +2216,7 @@
         let best = chooseBranch(root, priced);
         // Nothing priced: re-run the first formula the ordinary way, so the row reports the same
         // error — and gets the same item-market fallback — as a setting with no pipes at all.
-        return best ?? resolveBranchPrice(formulas[0], pricing, itemId, true);
+        return best ?? resolveBranchPrice(formulas[0], pricing, itemId, true, context);
     }
 
     // Colour the row by how far the filled price sits under the 3rd-cheapest listing of whichever
@@ -2185,6 +2473,7 @@
                     '<button type="button" class="tbf-modal-save">Save</button>' +
                 '</div>' +
                 '<div class="tbf-modal-help">Item market: <code>-1</code> (lowest listing − $1), <code>-5%</code>, <code>-1[1]</code> (2nd lowest listing), <code>[market]</code> (Torn market value).<br>' +
+                'Stack size: <code>-1[100x+]</code> undercuts the cheapest listing of 100 or more, <code>-1[mine+]</code> the cheapest at least as big as your stack, <code>-1[2xmine+]</code> at least twice as big. <code>-1[mine+ above +5%[market]]</code> also skips any listing that would put you under 5% over market value.<br>' +
                 'Player bazaars, via weav3r.dev, no API key: <code>-1[bazaar]</code> (cheapest bazaar − $1), <code>-1[bazaar:2]</code> (3rd cheapest), <code>-5%[bazaar:avg]</code> (bazaar average), <code>[bazaar:median]</code>.<br>' +
                 'Combine sources: <code>-1[bazaar] | -1</code> prices both and fills the higher one, so the second is a floor under the first. <code>max(-1[bazaar], -1)</code> is the same; <code>min(-1[bazaar], -1)</code> fills the lower one, to undercut whichever source is cheapest.<br>' +
                 'Price range: put one inside the other to keep a price between a floor and a ceiling. <code>min(max(-1, +10%[market]), -1[14])</code> never fills below 10% over market value, and never above the 15th listing &minus; $1.<br>' +
@@ -2289,25 +2578,14 @@
         if (open === -1){
             return null;
         }
-        let close = branch.indexOf(']', open);
+        let close = matchingBracket(branch, open);
         if (close === -1){
             return "'" + branch + "' is missing its closing ].";
         }
         if (branch.substring(close + 1).trim() !== ''){
             return "'" + branch + "' has stray text after the ].";
         }
-        let token = bracketToken(branch);
-        if (token === 'market' || token === 'median' || /^\d+$/.test(token)){
-            return null;
-        }
-        if (token === 'bazaar' || token.indexOf('bazaar:') === 0){
-            let argument = token.substring('bazaar'.length).replace(/^:/, '').trim();
-            if (argument === '' || argument === 'avg' || argument === 'average' || argument === 'median' || /^\d+$/.test(argument)){
-                return null;
-            }
-            return "[" + token + "] is not a bazaar source. Use [bazaar], [bazaar:2], [bazaar:avg] or [bazaar:median].";
-        }
-        return "[" + token + "] is not a price source. Use [0], [median], [market] or [bazaar].";
+        return bracketProblem(branch);
     }
 
     // Whole setting: a lone formula, "a | b", or min(...)/max(...) around a list of them, which
