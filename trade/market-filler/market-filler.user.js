@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Market Filler
 // @namespace    https://github.com/SOLiNARY
-// @version      1.3.0
+// @version      2.0.0
 // @description  Adds a Fill button to every row when you list on the Item Market: one click sets the price and quantity. Price from listings (cheapest minus $1 by default), market value or live bazaars via weav3r.dev, with your own formula and min/max ranges. A popup shows the 5 cheapest listings; click one to undercut it. Quantity modes, per-category settings, favourites with Fill All. Open settings with the cog on the Fill All bar or by holding Fill for 2s. A chart square next to Fill opens item analytics: item-market and bazaar listings on one price ladder, where your price lands, stack sizes, what your formula picked, and what you keep after the market tax.
 // @author       Silmaril [2665762]
 // @license      MIT License
@@ -19,7 +19,7 @@
     'use strict';
 
     // Keep in sync with @version above — it keys the "What's new" popup.
-    const SCRIPT_VERSION = "1.3.0";
+    const SCRIPT_VERSION = "2.0.0";
 
     const itemUrl = "https://api.torn.com/torn/{itemId}?selections=items&key={apiKey}&comment=MarketFiller";
     const marketUrl = "https://api.torn.com/v2/market/{itemId}?selections=itemMarket&key={apiKey}&comment=MarketFiller";
@@ -93,7 +93,7 @@
     // what changed for them rather than what changed in the code.
     const CHANGELOG = [
         {
-            version: "1.3.0",
+            version: "2.0.0",
             date: "2026-11-01",
             changes: [
                 'New: a <code>▂▅▇</code> square left of Fill opens item analytics. The cheapest item-market and bazaar listings sit on one price ladder with your price slotted in, with how many units are ahead of you and how the listings split by stack size.',
