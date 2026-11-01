@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Torn Market Filler
 // @namespace    https://github.com/SOLiNARY
-// @version      1.2.0
-// @description  Adds a Fill button to every row when you list on the Item Market: one click sets the price and quantity. Price from listings (cheapest minus $1 by default), market value or live bazaars via weav3r.dev, with your own formula and min/max ranges. A popup shows the 5 cheapest listings; click one to undercut it. Quantity modes, per-category settings, favourites with Fill All. Open settings with the cog on the Fill All bar or by holding Fill for 2s.
+// @version      1.3.0
+// @description  Adds a Fill button to every row when you list on the Item Market: one click sets the price and quantity. Price from listings (cheapest minus $1 by default), market value or live bazaars via weav3r.dev, with your own formula and min/max ranges. A popup shows the 5 cheapest listings; click one to undercut it. Quantity modes, per-category settings, favourites with Fill All. Open settings with the cog on the Fill All bar or by holding Fill for 2s. A chart square next to Fill opens item analytics: item-market and bazaar listings on one price ladder, where your price lands, stack sizes, what your formula picked, and what you keep after the market tax.
 // @author       Silmaril [2665762]
 // @license      MIT License
 // @match        https://www.torn.com/page.php?sid=ItemMarket*
@@ -19,7 +19,7 @@
     'use strict';
 
     // Keep in sync with @version above — it keys the "What's new" popup.
-    const SCRIPT_VERSION = "1.2.0";
+    const SCRIPT_VERSION = "1.3.0";
 
     const itemUrl = "https://api.torn.com/torn/{itemId}?selections=items&key={apiKey}&comment=MarketFiller";
     const marketUrl = "https://api.torn.com/v2/market/{itemId}?selections=itemMarket&key={apiKey}&comment=MarketFiller";
@@ -82,6 +82,8 @@
 
     GM_addStyle(`.tmf-changelog-release{margin:0 0 14px}.tmf-changelog-release:last-of-type{margin-bottom:0}.tmf-changelog-ver{display:flex;align-items:baseline;gap:8px;margin:0 0 6px}.tmf-changelog-ver b{color:#fff;font-size:13px}.tmf-changelog-date{color:#8a8a8a;font-size:11px;margin-left:auto}.tmf-changelog-badge{background:#2e7d32;color:#fff;border-radius:10px;padding:1px 7px;font-size:10px;text-transform:uppercase;letter-spacing:.04em}.tmf-changelog-items{margin:0;padding-left:18px;color:#cfcfcf}.tmf-changelog-items li{margin:0 0 5px}.tmf-changelog-items code{background:#000;padding:1px 4px;border-radius:3px;color:#cfc}`);
 
+    GM_addStyle(`.input-money-group>.tmf-ana-btn{cursor:pointer;position:relative;display:inline-flex!important;align-items:center;justify-content:center;font-size:9px!important;letter-spacing:-1px!important;line-height:1!important;text-indent:0!important;background-image:none!important;user-select:none;-webkit-user-select:none}.tmf-ana-btn:before,.tmf-ana-btn:after{content:none!important}.tmf-ana-btn>span{pointer-events:none;display:block}.tmf-ana{display:none;position:fixed;top:60px;left:40px;width:540px;max-width:calc(100vw - 16px);max-height:calc(100vh - 24px);overflow:auto;background:#1f1f1f;color:#e6e6e6;border:1px solid #666;border-radius:10px;box-shadow:0 10px 40px rgba(0,0,0,.6);padding:12px 14px;box-sizing:border-box;font-size:12px;line-height:1.45;z-index:999999;text-align:left}.tmf-ana--open{display:block}@media (max-width:784px){.tmf-ana{top:auto!important;left:0!important;right:0;bottom:0;width:auto;max-width:none;max-height:85vh;border-radius:14px 14px 0 0;border-bottom:0}}.tmf-ana-head{display:flex;align-items:center;gap:10px;margin-bottom:8px;cursor:move;user-select:none;-webkit-user-select:none}@media (max-width:784px){.tmf-ana-head{cursor:default}}.tmf-ana-img{width:34px;height:34px;border-radius:4px;background:#2a2a2a;flex:none;object-fit:contain}.tmf-ana-title{display:flex;flex-direction:column;line-height:1.3;min-width:0}.tmf-ana-title b{font-size:15px;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.tmf-ana-title small{font-size:11px;color:#a5a5a5}.tmf-ana-hb{margin-left:auto;color:#bbb;font-size:16px;line-height:1;cursor:pointer;width:22px;text-align:center;flex:none}.tmf-ana-hb:hover{color:#fff}.tmf-ana-hb.tmf-ana-close{margin-left:0;font-size:22px}.tmf-ana-tabs{display:flex;gap:2px;border-bottom:1px solid #444;margin:0 0 8px}.tmf-ana-tab{padding:5px 12px;font-size:12px;color:#aaa;border-bottom:2px solid transparent;margin-bottom:-1px;cursor:pointer}.tmf-ana-tab:hover{color:#ddd}.tmf-ana-tab--on,.tmf-ana-tab--on:hover{color:#fff;border-bottom-color:#b5d56a}.tmf-ana-kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:6px 0 8px}@media (max-width:784px){.tmf-ana-kpis{grid-template-columns:1fr 1fr}}.tmf-ana-kpi{background:#262626;border:1px solid #3a3a3a;border-radius:6px;padding:6px 8px;min-width:0}.tmf-ana-kpi .l{font-size:9.5px;color:#9a9a9a;text-transform:uppercase;letter-spacing:.5px;white-space:nowrap}.tmf-ana-kpi .v{font-size:15px;font-weight:bold;color:#fff;margin:2px 0 1px;white-space:nowrap}.tmf-ana-kpi .d{font-size:10.5px;color:#aaa;line-height:1.3}.tmf-ana-legend{display:flex;gap:14px;flex-wrap:wrap;font-size:10.5px;color:#bbb;margin:2px 0 4px}.tmf-ana-legend span{display:inline-flex;align-items:center;gap:5px;white-space:nowrap}.tmf-ana-sw{display:inline-block;width:9px;height:9px;border-radius:2px}.tmf-ana-m{background:#3987e5}.tmf-ana-b{background:#d95926}.tmf-ana-src{width:16px;height:16px;border-radius:50%;font-size:9px;font-weight:bold;display:inline-grid;place-items:center;color:#fff;flex:none}.tmf-ana-src.tmf-ana-y{background:#c9a227;color:#1f1f1f;font-size:10px}.tmf-ana-sec{font-size:10.5px;color:#bbb;text-transform:uppercase;letter-spacing:.5px;margin:8px 0 4px;font-weight:bold}.tmf-ana-sec code{text-transform:none;letter-spacing:0}.tmf-ana-sec small{text-transform:none;letter-spacing:0;font-weight:normal;color:#8a8a8a;margin-left:4px}.tmf-ana-cols{display:grid;grid-template-columns:1fr 1fr;gap:16px}@media (max-width:784px){.tmf-ana-cols{grid-template-columns:1fr}}.tmf-ana-band{margin:0 0 7px}.tmf-ana-bl{font-size:11px;color:#ddd;margin-bottom:2px}.tmf-ana-brow{display:flex;align-items:center;gap:6px;height:14px;margin:1px 0}.tmf-ana-bar{display:block;height:8px;border-radius:0 4px 4px 0;flex:none;max-width:46%}.tmf-ana-bv{font-size:10.5px;color:#aaa;white-space:nowrap}.tmf-ana-lad{margin:4px 0 2px;border-top:1px solid #333}.tmf-ana-lr{display:flex;align-items:center;gap:8px;padding:3px 6px;border-bottom:1px solid #2c2c2c;font-size:12px;min-height:25px;box-sizing:border-box}.tmf-ana-lr[data-price]{cursor:pointer}.tmf-ana-lr[data-price]:hover{background:#2a2a2a}.tmf-ana-lr .p{width:82px;text-align:right;color:#f0f0f0;flex:none}.tmf-ana-lr .q{width:56px;color:#bbb;text-align:right;flex:none}.tmf-ana-lr .n{flex:1;color:#999;font-size:10.5px;min-width:0;line-height:1.3}.tmf-ana-lr--you{background:#3a3414;border:1px solid #c9a227;border-radius:6px;margin:2px 0;color:#fff}.tmf-ana-lr--you .p,.tmf-ana-lr--you .n{color:#fff}.tmf-ana-lr--dim .p,.tmf-ana-lr--dim .q{color:#777}.tmf-ana-lr--more{min-height:22px;border-bottom:0}.tmf-ana-lr--hidden{display:none}.tmf-ana--all .tmf-ana-lr--hidden{display:flex}.tmf-ana--all .tmf-ana-showall{display:none}.tmf-ana-tag{display:inline-block;font-size:9.5px;padding:1px 6px;border-radius:8px;background:#2e7d32;color:#fff;white-space:nowrap;line-height:1.4;margin-right:4px}.tmf-ana-tag--gray{background:#444;color:#ccc}.tmf-ana-tag--blue{background:#1c5cab}.tmf-ana-hint{font-size:10.5px;color:#8a8a8a;margin:4px 0 2px}.tmf-ana-verdict{margin:8px 0 2px;padding:7px 9px;background:#262626;border-left:3px solid #c9a227;border-radius:0 6px 6px 0;font-size:11.5px;line-height:1.45;color:#ddd}.tmf-ana code{background:#000;padding:1px 4px;border-radius:3px;color:#cfc;font-size:10.5px}.tmf-ana a{color:#9cc25e;text-decoration:underline;cursor:pointer}.tmf-ana-foot{display:flex;align-items:center;gap:8px;margin-top:10px;padding-top:8px;border-top:1px solid #333}.tmf-ana-foot:empty{display:none}.tmf-ana-sum{flex:1;font-size:10.5px;color:#9a9a9a;line-height:1.3}.tmf-ana-foot button{cursor:pointer;padding:6px 12px;border-radius:5px;border:1px solid #666;background:#333;color:#eee;font-size:12px;white-space:nowrap}.tmf-ana-foot button.tmf-ana-apply{background:#2e7d32;border-color:#2e7d32;color:#fff}.tmf-ana-trace{margin:4px 0 0;font-size:11.5px}.tmf-ana-tr{display:flex;align-items:baseline;gap:8px;padding:3px 6px;border-radius:4px;flex-wrap:wrap;line-height:1.35}.tmf-ana-tr .op{color:#9a9a9a;font-family:monospace;font-size:12px}.tmf-ana-tr .r{font-weight:bold;color:#fff;white-space:nowrap}.tmf-ana-tr .why{color:#9a9a9a;font-size:10.5px;flex:1 1 100%;padding-left:2px}.tmf-ana-tr--win{background:#2a2f1e;border-left:3px solid #8fd08f}.tmf-ana-tr--win .r{color:#b5d56a}.tmf-ana-note{margin-top:6px;font-size:10.5px;color:#8a8a8a;border-top:1px solid #333;padding-top:6px}.tmf-ana-alert{margin:0 0 6px;padding:8px 10px;border-radius:6px;background:#3a2f1f;border:1px solid #a7792a;color:#ffd9a0;font-size:11.5px;line-height:1.4}.tmf-ana-skel{display:inline-block;height:8px;border-radius:4px;background:#333;margin:3px 0}.tmf-ana-muted{color:#8a8a8a;font-size:11px;margin:4px 0}`);
+
     const lastSeenVersionKey = "silmaril-torn-market-filler-last-seen-version";
     // Newest release first. Everything a user could have skipped over is listed, so updating
     // across several versions still shows the whole gap in one popup. A release marked
@@ -90,6 +92,15 @@
     // Write every line for a player, not a developer: one short sentence, plain words,
     // what changed for them rather than what changed in the code.
     const CHANGELOG = [
+        {
+            version: "1.3.0",
+            date: "2026-11-01",
+            changes: [
+                'New: a <code>▂▅▇</code> square left of Fill opens item analytics. The cheapest item-market and bazaar listings sit on one price ladder with your price slotted in, with how many units are ahead of you and how the listings split by stack size.',
+                'Its Formula tab works your price setting out branch by branch: the listing each one read, the ones it skipped, and which one filled. The footer says what you keep after the market tax.',
+                'Click a listing in the popup to price $1 under it. Opened right after a fill, the popup reuses what the fill read and costs no extra request.'
+            ]
+        },
         {
             version: "1.2.0",
             date: "2026-11-01",
@@ -318,6 +329,17 @@
                 favHost.prepend(favBtn);
             }
             moneyGroup.prepend(span);
+            // One more square, left of Fill: the item analytics popup, fed by the same reads.
+            const anaBtn = document.createElement('span');
+            anaBtn.className = 'tmf-ana-btn input-money-symbol';
+            anaBtn.title = 'Item analytics: market and bazaar listings, stack sizes, and what your formula picked';
+            anaBtn.innerHTML = '<span>' + ANALYTICS_GLYPH + '</span>';
+            anaBtn.addEventListener('click', function(event){
+                event.preventDefault();
+                event.stopPropagation();
+                openAnalytics({ itemId: itemId, host: wrapperParent, target: span, pageType: getCurrentPage() });
+            });
+            moneyGroup.prepend(anaBtn);
             if (autoFillActive){
                 enqueueFavouriteRow(wrapperParent);
             }
@@ -969,7 +991,46 @@
             .replace("{apiKey}", apiKey);
     }
 
-    async function fetchForSource(source, formula, itemId){
+    // One item's reads for one fill, or for one analytics popup. A source several branches need
+    // is fetched once, and a popup opened right after a fill reads what the fill read instead of
+    // asking again. A fill always starts a fresh session; only the popup reuses one, and only
+    // while it is this fresh.
+    const SESSION_TTL_MS = 60 * 1000;
+    let itemSessions = new Map();
+
+    function newSession(itemId){
+        let session = { itemId: itemId, ts: Date.now(), reads: new Map(), branches: new Map(), trace: null, mine: null, category: null };
+        itemSessions.set(String(itemId), session);
+        return session;
+    }
+
+    function recentSession(itemId){
+        let session = itemSessions.get(String(itemId));
+        return session != null && (Date.now() - session.ts) <= SESSION_TTL_MS ? session : null;
+    }
+
+    function forgetSession(itemId){
+        itemSessions.delete(String(itemId));
+    }
+
+    // [bazaar:avg] is served from the bulk snapshot and every other bazaar read from the per-item
+    // endpoint; the two carry different fields, so they are remembered apart.
+    function readKey(source, formula){
+        return source === SOURCE_BAZAAR && bazaarSelector(formula).kind === 'avg' ? 'bazaar:avg' : source;
+    }
+
+    async function fetchForSource(source, formula, itemId, session){
+        if (session == null){
+            return fetchSource(source, formula, itemId);
+        }
+        let key = readKey(source, formula);
+        if (!session.reads.has(key)){
+            session.reads.set(key, fetchSource(source, formula, itemId));
+        }
+        return session.reads.get(key);
+    }
+
+    function fetchSource(source, formula, itemId){
         if (source === SOURCE_BAZAAR){
             return fetchBazaarData(formula, itemId);
         }
@@ -1075,17 +1136,65 @@
     // `context.mine` is the stack being filled, for [mine+]. A formula with an "above" limit
     // prices that limit first; a limit that prices nothing leaves the formula nothing to read.
     async function priceBranch(branch, itemId, category, preloaded, allowFallback, context){
+        let session = context == null ? null : context.session;
         let limitFormula = aboveLimit(branch);
         let limit = null;
         if (limitFormula != null){
             let limitResult = await priceBranch(limitFormula, itemId, category, preloaded, false, context);
             limit = limitResult.prices == null ? null : branchPrice(limitResult);
             if (limit == null){
-                return { prices: unmatchedPrices("the price after 'above' (" + limitFormula + ") could not be worked out"), formula: branch, category: category };
+                let unmatched = { prices: unmatchedPrices("the price after 'above' (" + limitFormula + ") could not be worked out"), formula: branch, category: category };
+                return recordBranch(session, branch, unmatched, null, limitFormula, null);
             }
         }
-        let result = await priceBranchListings(branch, itemId, category, preloaded, allowFallback);
-        return narrowToEligible(result, { mine: context == null ? null : context.mine, limit: limit });
+        let result = await priceBranchListings(branch, itemId, category, preloaded, allowFallback, session);
+        // Every listing the source returned, before the bracket narrows them: the popup shows
+        // the ones that were passed over as well as the one that was read.
+        let listings = Array.isArray(result.prices) ? result.prices : null;
+        narrowToEligible(result, { mine: context == null ? null : context.mine, limit: limit });
+        return recordBranch(session, branch, result, listings, limitFormula, limit);
+    }
+
+    // Keep what a branch came to, and how, for the analytics popup; the result goes straight
+    // back to the caller untouched. `branch` is the formula as the setting spells it; after a
+    // bazaar fallback the result's own formula is the item-market one it was priced with.
+    function recordBranch(session, branch, result, listings, limitFormula, limit){
+        if (session == null){
+            return result;
+        }
+        let prices = result.prices;
+        let detail = {
+            formula: branch, source: sourceOf(result.formula), limitFormula: limitFormula, limit: limit,
+            fallback: sourceOf(branch) === SOURCE_BAZAAR && sourceOf(result.formula) !== SOURCE_BAZAAR,
+            listings: listings, price: null, basis: null, error: null, unmatched: null, nothing: prices == null
+        };
+        let status = getPricesStatus(prices);
+        if (prices == null){
+            // A bazaar branch weav3r had nothing for, left to the other branches.
+        } else if (status === 'unmatched'){
+            detail.unmatched = prices.why;
+        } else if (status !== 'ok'){
+            detail.error = String(prices.price);
+        } else {
+            detail.price = branchPrice(result);
+            if (!Array.isArray(prices)){
+                detail.basis = { value: prices.price };
+            } else {
+                let basisListing = isMedianFormula(result.formula) ? null : prices[Math.min(listingSlot(result.formula), prices.length - 1)];
+                detail.basis = basisListing != null
+                    ? { price: basisListing.price, amount: Number(basisListing.amount ?? 1), rank: listings.indexOf(basisListing) + 1, skipped: skippedBefore(listings, prices, basisListing) }
+                    : { median: getMedianPrice(prices), count: prices.length, skipped: listings.length - prices.length };
+            }
+        }
+        session.branches.set(branch, detail);
+        return result;
+    }
+
+    // How many listings the bracket passed over on its way to the one it read.
+    function skippedBefore(listings, eligible, basisListing){
+        return listings.slice(0, listings.indexOf(basisListing)).filter(function(listing){
+            return eligible.indexOf(listing) === -1;
+        }).length;
     }
 
     // A row the stack size or "above" limit left nothing to read from: the cell says why, and
@@ -1105,11 +1214,11 @@
         return result;
     }
 
-    async function priceBranchListings(branch, itemId, category, preloaded, allowFallback){
+    async function priceBranchListings(branch, itemId, category, preloaded, allowFallback, session){
         let source = sourceOf(branch);
         let data = preloadMatches(preloaded, branch, source)
             ? preloaded.data
-            : await fetchForSource(source, branch, itemId);
+            : await fetchForSource(source, branch, itemId, session);
         let error = mapApiError(data);
         if (error != null){
             return { prices: error, formula: branch, category: category };
@@ -1118,7 +1227,7 @@
         if (prices == null && !allowFallback){
             return { prices: null, formula: branch, category: category };
         }
-        return withBazaarFallback(prices, branch, source, itemId, category);
+        return withBazaarFallback(prices, branch, source, itemId, category, session);
     }
 
     // What a branch would actually fill, or null when it errored or priced nothing. A formula
@@ -1163,7 +1272,7 @@
         let root = parseSetting(setting);
         let formulas = collectFormulas(root);
         if (root.kind === 'formula'){
-            return priceBranch(root.formula, itemId, category, preloaded, true, context);
+            return noteFill(context, setting, root, root.formula, await priceBranch(root.formula, itemId, category, preloaded, true, context));
         }
         let priced = new Map();
         for (let i = 0; i < formulas.length; i++){
@@ -1175,12 +1284,26 @@
             if (price == null){
                 console.warn("[TornMarketFiller] '" + formulas[i] + "' priced nothing for item " + itemId + ".");
             }
-            priced.set(formulas[i], { result: result, price: price });
+            priced.set(formulas[i], { result: result, price: price, formula: formulas[i] });
         }
         let best = chooseBranch(root, priced);
+        if (best != null){
+            return noteFill(context, setting, root, best.formula, best.result);
+        }
         // Nothing priced: re-run the first formula the ordinary way, so the row reports the same
         // error — and gets the same item-market fallback — as a setting with no pipes at all.
-        return best != null ? best.result : priceBranch(formulas[0], itemId, category, preloaded, true, context);
+        return noteFill(context, setting, root, formulas[0], await priceBranch(formulas[0], itemId, category, preloaded, true, context));
+    }
+
+    // Remember how the row was priced, so the analytics popup can show the working.
+    function noteFill(context, setting, root, formula, result){
+        let session = context == null ? null : context.session;
+        if (session != null){
+            session.mine = context.mine ?? session.mine;
+            session.category = result.category ?? session.category;
+            session.trace = { setting: setting, root: root, winner: formula, resolved: session.branches.get(formula) ?? null };
+        }
+        return result;
     }
 
     // Fetch pricing for an item using the price source its (possibly per-category) formula needs.
@@ -1206,7 +1329,7 @@
             // Without a key that refresh can only fail, and failing it would take a bazaar-only
             // setup down with it — so there we price from the guess and re-learn the type later.
             let firstSource = (expired && hasUsableApiKey()) ? SOURCE_MARKET_VALUE : sourceOf(guessFormula);
-            let data = await fetchForSource(firstSource, guessFormula, itemId);
+            let data = await fetchForSource(firstSource, guessFormula, itemId, context == null ? null : context.session);
             let error = mapApiError(data);
             if (error != null){
                 return { prices: error, formula: guessFormula, category: guessCategory };
@@ -1228,7 +1351,7 @@
     // A bazaar source weav3r cannot answer for this item falls back to Torn's item market rather
     // than failing the row, so one thin item never stops a Fill All run. The delta, stack size
     // and "above" limit carry over; which bazaar listing it read cannot.
-    async function withBazaarFallback(prices, formula, source, itemId, category){
+    async function withBazaarFallback(prices, formula, source, itemId, category, session){
         if (prices != null){
             return { prices: prices, formula: formula, category: category };
         }
@@ -1241,7 +1364,7 @@
             weav3rError(0, "no price for item " + itemId + ", and no API key is set for the item-market fallback");
             return { prices: {"price": 'No bazaar price!', "amount": 0, "status": 'error'}, formula: fallbackFormula, category: category };
         }
-        let data = await fetchForSource(SOURCE_ITEM_MARKET, fallbackFormula, itemId);
+        let data = await fetchForSource(SOURCE_ITEM_MARKET, fallbackFormula, itemId, session);
         let error = mapApiError(data);
         if (error != null){
             return { prices: error, formula: fallbackFormula, category: category };
@@ -1500,7 +1623,7 @@
 
         let action = target.getAttribute('data-action-flag');
         let mine = action == 'fill' && settingsUseMine() ? await readStackForMine(target, itemId) : null;
-        let pricing = await fetchPricingForItem(itemId, { mine: mine });
+        let pricing = await fetchPricingForItem(itemId, { mine: mine, session: newSession(itemId) });
         let prices = pricing.prices;
         let status = getPricesStatus(prices);
 
@@ -2249,6 +2372,796 @@
         } catch (error) {
             // Ignore storage errors; the in-memory cache is cleared regardless.
         }
+    }
+
+    // ---- Item analytics popup -------------------------------------------------------------
+    // One floating panel, reused for every row. Overview: your price against market value and the
+    // cheapest of each source, how many units sit ahead of you, and listings by stack size.
+    // Listings: every item-market and bazaar listing on one price ladder with you slotted in.
+    // Formula: the setting worked out branch by branch. Opened right after a fill it reads what
+    // the fill read; opened cold it prices the row the same way without touching the inputs.
+    // The 5-cheapest prices popup that opens on Fill is a separate thing and stays as it is.
+
+    const ANALYTICS_GLYPH = '▂▅▇';
+    const analyticsPosKey = "silmaril-torn-market-filler-analytics-pos";
+    const ANALYTICS_LADDER_ROWS = 12;
+    const STACK_BANDS = [[1, 9, '1–9'], [10, 99, '10–99'], [100, 999, '100–999'], [1000, Infinity, '1,000+']];
+    let analyticsRow = null;       // the row the panel was opened from
+    let analyticsSession = null;   // the reads it is showing
+    let analyticsTab = 'overview';
+    let analyticsOpenSeq = 0;      // bumps on every open, so a slow read for an earlier row is dropped
+
+    function money(value){
+        return '$' + Math.round(value).toLocaleString('en-US');
+    }
+
+    function count(value){
+        return Math.round(value).toLocaleString('en-US');
+    }
+
+    function signedPercent(value, base){
+        if (!(base > 0)){
+            return '';
+        }
+        let percent = (value / base - 1) * 100;
+        return (percent >= 0 ? '+' : '−') + Math.abs(percent).toFixed(1) + '%';
+    }
+
+    function ordinal(n){
+        let suffixes = ['th', 'st', 'nd', 'rd'];
+        let v = n % 100;
+        return n + (suffixes[(v - 20) % 10] || suffixes[v] || suffixes[0]);
+    }
+
+    function ago(ts){
+        let seconds = Math.max(0, Math.round((Date.now() - ts) / 1000));
+        if (seconds < 5){
+            return 'just now';
+        }
+        if (seconds < 60){
+            return seconds + ' s ago';
+        }
+        let minutes = Math.round(seconds / 60);
+        return minutes < 60 ? minutes + ' min ago' : Math.round(minutes / 60) + ' h ago';
+    }
+
+    function capitalise(text){
+        return text.charAt(0).toUpperCase() + text.slice(1);
+    }
+
+    function describeError(data){
+        return data != null && data.error != null ? String(data.error.error ?? data.error) : 'no data';
+    }
+
+    function closestMatch(eventTarget, selector){
+        return eventTarget instanceof Element ? eventTarget.closest(selector) : null;
+    }
+
+    function ensureAnalyticsPanel(){
+        let panel = document.querySelector('.tmf-ana');
+        if (panel != null){
+            return panel;
+        }
+        panel = document.createElement('div');
+        panel.className = 'tmf-ana';
+        panel.innerHTML =
+            '<div class="tmf-ana-head">' +
+                '<img class="tmf-ana-img" alt="">' +
+                '<div class="tmf-ana-title"><b class="tmf-ana-name"></b><small class="tmf-ana-sub"></small></div>' +
+                '<span class="tmf-ana-hb tmf-ana-refresh" title="Read everything again">&#8635;</span>' +
+                '<span class="tmf-ana-hb tmf-ana-close" title="Close">&times;</span>' +
+            '</div>' +
+            '<div class="tmf-ana-tabs">' +
+                '<span class="tmf-ana-tab" data-tab="overview">Overview</span>' +
+                '<span class="tmf-ana-tab" data-tab="listings">Listings</span>' +
+                '<span class="tmf-ana-tab" data-tab="formula">Formula</span>' +
+            '</div>' +
+            '<div class="tmf-ana-body"></div>' +
+            '<div class="tmf-ana-foot"></div>';
+        document.body.appendChild(panel);
+        panel.querySelector('.tmf-ana-close').addEventListener('click', closeAnalytics);
+        panel.querySelector('.tmf-ana-refresh').addEventListener('click', function(){
+            if (analyticsRow != null){
+                forgetSession(analyticsRow.itemId);
+                openAnalytics(analyticsRow);
+            }
+        });
+        panel.querySelectorAll('.tmf-ana-tab').forEach(function(tab){
+            tab.addEventListener('click', function(){
+                analyticsTab = tab.dataset.tab;
+                renderAnalytics();
+            });
+        });
+        // The body is rebuilt on every tab change, so its clicks are handled here, once.
+        panel.querySelector('.tmf-ana-body').addEventListener('click', function(event){
+            let listing = closestMatch(event.target, '.tmf-ana-lr[data-price]');
+            if (listing != null && panel.contains(listing)){
+                applyAnalyticsPrice(parseInt(listing.dataset.price, 10) - 1, false);
+                return;
+            }
+            if (closestMatch(event.target, '.tmf-ana-showall') != null){
+                panel.classList.add('tmf-ana--all');
+                return;
+            }
+            let tabLink = closestMatch(event.target, '[data-goto]');
+            if (tabLink != null){
+                analyticsTab = tabLink.dataset.goto;
+                renderAnalytics();
+            }
+        });
+        panel.querySelector('.tmf-ana-foot').addEventListener('click', function(event){
+            if (closestMatch(event.target, '.tmf-ana-settings') != null){
+                openSettingsModal();
+                return;
+            }
+            let apply = closestMatch(event.target, '.tmf-ana-apply');
+            if (apply != null){
+                let price = parseInt(apply.dataset.price, 10);
+                if (!isNaN(price)){
+                    applyAnalyticsPrice(price, true);
+                }
+            }
+        });
+        attachAnalyticsDrag(panel);
+        return panel;
+    }
+
+    function loadAnalyticsPosition(){
+        try {
+            let parsed = JSON.parse(localStorage.getItem(analyticsPosKey) ?? 'null');
+            return parsed != null && typeof parsed.left === 'number' && typeof parsed.top === 'number' ? parsed : null;
+        } catch (error) {
+            return null;
+        }
+    }
+
+    // On a phone the panel is a bottom sheet and the stylesheet places it; elsewhere it opens
+    // where it was last dropped, or centred near the top the first time.
+    function applyAnalyticsPosition(panel){
+        if (isMobileView){
+            return;
+        }
+        let saved = loadAnalyticsPosition();
+        let left = saved != null ? saved.left : Math.max(8, (window.innerWidth - panel.offsetWidth) / 2);
+        let top = saved != null ? saved.top : 60;
+        setAnalyticsPosition(panel, left, top);
+    }
+
+    // Kept on screen: the header at least stays reachable however the window was resized.
+    function setAnalyticsPosition(panel, left, top){
+        let maxLeft = Math.max(0, window.innerWidth - panel.offsetWidth - 4);
+        let maxTop = Math.max(0, window.innerHeight - 60);
+        panel.style.left = Math.round(Math.min(Math.max(0, left), maxLeft)) + 'px';
+        panel.style.top = Math.round(Math.min(Math.max(0, top), maxTop)) + 'px';
+    }
+
+    function attachAnalyticsDrag(panel){
+        let head = panel.querySelector('.tmf-ana-head');
+        let dragging = null;
+        const start = function(event){
+            if (isMobileView || closestMatch(event.target, '.tmf-ana-hb') != null){
+                return;
+            }
+            let point = event.touches ? event.touches[0] : event;
+            dragging = { dx: point.clientX - panel.offsetLeft, dy: point.clientY - panel.offsetTop };
+            if (!event.touches){
+                event.preventDefault();
+            }
+        };
+        const move = function(event){
+            if (dragging == null){
+                return;
+            }
+            let point = event.touches ? event.touches[0] : event;
+            setAnalyticsPosition(panel, point.clientX - dragging.dx, point.clientY - dragging.dy);
+            if (event.cancelable){
+                event.preventDefault();
+            }
+        };
+        const end = function(){
+            if (dragging == null){
+                return;
+            }
+            dragging = null;
+            localStorage.setItem(analyticsPosKey, JSON.stringify({ left: panel.offsetLeft, top: panel.offsetTop }));
+        };
+        head.addEventListener('mousedown', start);
+        head.addEventListener('touchstart', start, { passive: true });
+        document.addEventListener('mousemove', move);
+        document.addEventListener('touchmove', move, { passive: false });
+        document.addEventListener('mouseup', end);
+        document.addEventListener('touchend', end);
+    }
+
+    function closeAnalytics(){
+        let panel = document.querySelector('.tmf-ana');
+        if (panel != null){
+            panel.classList.remove('tmf-ana--open');
+        }
+        analyticsRow = null;
+        analyticsSession = null;
+    }
+
+    // `row` is {itemId, host, target, pageType}: the row wrapper, the Fill square inside its price
+    // box (what every row lookup in this script hangs off), and which tab the row is on.
+    async function openAnalytics(row){
+        let panel = ensureAnalyticsPanel();
+        let seq = ++analyticsOpenSeq;
+        analyticsRow = row;
+        analyticsSession = recentSession(row.itemId);
+        analyticsTab = analyticsSession != null && analyticsSession.settled ? analyticsTab : 'overview';
+        panel.classList.add('tmf-ana--open');
+        panel.classList.remove('tmf-ana--all');
+        if (chatRelativeZBase != null){
+            panel.style.zIndex = chatRelativeZBase;
+        }
+        applyAnalyticsPosition(panel);
+        renderAnalytics();
+        checkApiKey();
+        let session = analyticsSession ?? newSession(row.itemId);
+        analyticsSession = session;
+        try {
+            session.failure = null;
+            if (session.mine == null){
+                // The stack you are listing: what you typed, else what the quantity mode would
+                // list. A fill only reads it when its setting needs it, so it is read here.
+                session.mine = await readStackForMine(row.target, row.itemId);
+            }
+            if (session.trace == null){
+                // A cold open prices the row exactly as Fill would, inputs untouched.
+                let pricing = await fetchPricingForItem(row.itemId, { mine: session.mine, session: session });
+                session.category = session.category ?? pricing.category;
+                if (session.trace == null && getPricesStatus(pricing.prices) !== 'ok'){
+                    // The first read failed before the setting was ever applied.
+                    session.failure = String(pricing.prices.price);
+                }
+            }
+            await readAllSources(session);
+        } catch (error) {
+            console.error("[TornMarketFiller] Analytics failed for item " + row.itemId + ":", error);
+            session.failure = error == null ? 'unknown error' : (error.message ?? String(error));
+        }
+        session.settled = true;
+        if (seq === analyticsOpenSeq){
+            renderAnalytics();
+        }
+    }
+
+    function rowImage(row){
+        return row.host.querySelector('[class*=viewInfoButton] img') ?? row.host.querySelector('img[src*="/items/"]');
+    }
+
+    // The item's name as the row shows it, with any "x567" count taken off the end.
+    function rowName(row){
+        let nameNode = row.host.querySelector('[class*="name___"], [class*="title___"]');
+        return nameNode == null ? '' : String(nameNode.textContent).replace(/\s*x\s?\d[\d,]*\s*$/i, '').trim();
+    }
+
+    // Whatever the setting reads, the popup shows both sources and the market value, so what the
+    // fill did not fetch is fetched now. Each read fails on its own without taking the others.
+    async function readAllSources(session){
+        let wanted = [[SOURCE_BAZAAR, '-1[bazaar]']];
+        if (hasUsableApiKey()){
+            wanted.push([SOURCE_ITEM_MARKET, '-1'], [SOURCE_MARKET_VALUE, '[market]']);
+        }
+        await Promise.all(wanted.map(function(pair){
+            return fetchForSource(pair[0], pair[1], session.itemId, session).catch(function(){ return null; });
+        }));
+    }
+
+    async function sessionData(session, key){
+        let pending = session.reads.get(key);
+        if (pending == null){
+            return null;
+        }
+        try {
+            return await pending;
+        } catch (error) {
+            return { error: { code: -1, error: error == null ? 'failed' : (error.message ?? String(error)) } };
+        }
+    }
+
+    // Everything the tabs draw from, in one shape: each source is either {listings…} or {error}.
+    async function analyticsModel(session, row){
+        let model = { itemId: row.itemId, name: null, type: session.category, mine: session.mine, you: null, market: null, value: null, bazaar: null, readAt: session.ts };
+        let marketData = await sessionData(session, SOURCE_ITEM_MARKET);
+        if (marketData != null){
+            if (marketData.error != null || marketData.itemmarket == null){
+                model.market = { error: describeError(marketData) };
+            } else {
+                let listings = (marketData.itemmarket.listings ?? []).map(function(listing){
+                    return { price: Number(listing.price), amount: Number(listing.amount ?? 1) };
+                }).filter(function(listing){
+                    return Number.isFinite(listing.price) && Number.isFinite(listing.amount);
+                }).sort(function(a, b){ return a.price - b.price; });
+                model.market = { listings: listings };
+                let item = marketData.itemmarket.item ?? {};
+                model.name = model.name ?? item.name ?? null;
+                model.type = model.type ?? item.type ?? null;
+            }
+        } else if (!hasUsableApiKey()){
+            model.market = { error: 'needs a Torn API key (Settings)' };
+        }
+        let itemsData = await sessionData(session, SOURCE_MARKET_VALUE);
+        if (itemsData != null){
+            let item = itemsData.error == null && itemsData.items != null ? itemsData.items[row.itemId] : null;
+            if (item == null){
+                model.value = { error: describeError(itemsData) };
+            } else {
+                model.value = { value: Number(item.market_value) };
+                model.name = item.name ?? model.name;
+                model.type = item.type ?? model.type;
+            }
+        } else if (!hasUsableApiKey()){
+            model.value = { error: 'needs a Torn API key' };
+        }
+        let bazaarData = await sessionData(session, SOURCE_BAZAAR);
+        if (bazaarData != null){
+            if (bazaarData.error != null){
+                model.bazaar = { error: describeError(bazaarData) };
+            } else {
+                let listings = normaliseBazaarListings(bazaarData).sort(function(a, b){ return a.price - b.price; });
+                let checked = (bazaarData.listings ?? []).map(function(listing){ return Number(listing.last_checked ?? 0); })
+                    .filter(function(ts){ return Number.isFinite(ts) && ts > 0; });
+                let average = Number(bazaarData.bazaar_average);
+                model.bazaar = {
+                    listings: listings,
+                    average: bazaarData.bazaar_average != null && Number.isFinite(average) ? average : null,
+                    ignored: (bazaarData.listings ?? []).length - listings.length,
+                    checked: checked.length > 0 ? Math.max.apply(null, checked) * 1000 : null
+                };
+                model.name = model.name ?? (typeof bazaarData.name === 'string' ? bazaarData.name : null);
+            }
+        }
+        let trace = session.trace;
+        if (trace != null && trace.resolved != null && typeof trace.resolved.price === 'number' && isFinite(trace.resolved.price)){
+            model.you = trace.resolved.price;
+        }
+        return model;
+    }
+
+    async function renderAnalytics(){
+        let panel = document.querySelector('.tmf-ana');
+        let row = analyticsRow;
+        let session = analyticsSession;
+        if (panel == null || row == null){
+            return;
+        }
+        let model = session == null ? null : await analyticsModel(session, row);
+        if (row !== analyticsRow || session !== analyticsSession){
+            return;
+        }
+        let image = rowImage(row);
+        panel.querySelector('.tmf-ana-img').src = image != null ? image.src : '';
+        panel.querySelector('.tmf-ana-name').textContent = (model != null && model.name) || rowName(row) || ('Item #' + row.itemId);
+        let sub = [];
+        if (model != null && model.type){
+            sub.push(model.type);
+        }
+        if (model != null && model.mine != null){
+            sub.push((row.pageType === pages.ViewItems ? 'listed ' : 'listing ') + count(model.mine));
+        }
+        panel.querySelector('.tmf-ana-sub').textContent = sub.join(' · ');
+        panel.querySelectorAll('.tmf-ana-tab').forEach(function(tab){
+            tab.classList.toggle('tmf-ana-tab--on', tab.dataset.tab === analyticsTab);
+        });
+        let body = panel.querySelector('.tmf-ana-body');
+        let foot = panel.querySelector('.tmf-ana-foot');
+        if (model == null || !session.settled){
+            body.innerHTML = renderSkeleton();
+            foot.innerHTML = '';
+            return;
+        }
+        if (analyticsTab === 'listings'){
+            body.innerHTML = renderListings(model, session);
+        } else if (analyticsTab === 'formula'){
+            body.innerHTML = renderFormula(model, session);
+        } else {
+            body.innerHTML = renderOverview(model, session);
+        }
+        foot.innerHTML = renderFoot(model, row);
+    }
+
+    function renderSkeleton(){
+        let tile = '<div class="tmf-ana-kpi"><span class="tmf-ana-skel" style="width:40%"></span><br><span class="tmf-ana-skel" style="width:70%;height:14px"></span><br><span class="tmf-ana-skel" style="width:60%"></span></div>';
+        let line = '<div class="tmf-ana-lr"><span class="tmf-ana-skel" style="width:16px;height:16px;border-radius:50%"></span><span class="tmf-ana-skel" style="width:30%"></span><span class="tmf-ana-skel" style="width:15%"></span></div>';
+        return '<div class="tmf-ana-kpis">' + tile.repeat(4) + '</div>' +
+            '<div class="tmf-ana-muted">Reading the item market, the market value and the bazaars…</div>' +
+            '<div class="tmf-ana-lad">' + line.repeat(6) + '</div>';
+    }
+
+    function renderAlert(html){
+        return '<div class="tmf-ana-alert">' + html + '</div>';
+    }
+
+    function renderKpi(label, value, detail, title){
+        return '<div class="tmf-ana-kpi"' + (title ? ' title="' + escapeHtml(title) + '"' : '') + '><div class="l">' + escapeHtml(label) + '</div><div class="v">' + escapeHtml(value) + '</div><div class="d">' + detail + '</div></div>';
+    }
+
+    function renderLegend(){
+        return '<div class="tmf-ana-legend"><span><i class="tmf-ana-sw tmf-ana-m"></i>Item market (Torn)</span><span><i class="tmf-ana-sw tmf-ana-b"></i>Player bazaars (weav3r)</span></div>';
+    }
+
+    function cheaperThan(listings, price){
+        return listings.filter(function(listing){ return listing.price < price; });
+    }
+
+    function unitsOf(listings){
+        return listings.reduce(function(sum, listing){ return sum + listing.amount; }, 0);
+    }
+
+    // The sentence a stack size or "above" limit left the row with, or null when it priced.
+    function traceUnmatched(session){
+        let resolved = session.trace == null ? null : session.trace.resolved;
+        return resolved != null && resolved.unmatched != null ? resolved.unmatched : null;
+    }
+
+    function traceError(session){
+        let resolved = session.trace == null ? null : session.trace.resolved;
+        return resolved != null && resolved.error != null ? resolved.error : null;
+    }
+
+    function renderOverview(model, session){
+        let html = '';
+        if (session.failure != null && session.trace != null){
+            html += renderAlert('Could not read everything: ' + escapeHtml(session.failure) + '.');
+        }
+        let unmatched = traceUnmatched(session);
+        if (unmatched != null){
+            html += renderAlert('<b>Price left as it is.</b> ' + escapeHtml(capitalise(unmatched)) + '. <a data-goto="formula">See the formula</a>');
+        } else if (session.trace == null || traceError(session) != null){
+            html += renderAlert('<b>Nothing priced.</b> ' + escapeHtml(traceError(session) ?? session.failure ?? 'the first read failed') + '. <a data-goto="formula">See the formula</a>');
+        }
+        let value = model.value != null && model.value.value != null ? model.value.value : null;
+        let market = model.market != null && model.market.listings != null ? model.market.listings : null;
+        let bazaar = model.bazaar != null && model.bazaar.listings != null ? model.bazaar.listings : null;
+        let yourDetail = model.you == null ? 'nothing filled' : (value != null ? signedPercent(model.you, value) + ' vs market value' : 'from your setting');
+        let valueDetail = 'Torn' + (model.bazaar != null && model.bazaar.average != null ? ' · bazaar avg ' + money(model.bazaar.average) : '');
+        let cheapest = function(listings, source, sourceError){
+            if (listings == null){
+                return renderKpi('Cheapest ' + source, '—', escapeHtml(sourceError ?? 'not read'), sourceError);
+            }
+            if (listings.length === 0){
+                return renderKpi('Cheapest ' + source, '—', 'no listings');
+            }
+            let detail = '×' + count(listings[0].amount) + ' · ' +
+                (model.you != null ? 'you are #' + count(cheaperThan(listings, model.you).length + 1) + ' of ' + count(listings.length + 1) : count(listings.length) + ' listings');
+            return renderKpi('Cheapest ' + source, money(listings[0].price), detail);
+        };
+        html += '<div class="tmf-ana-kpis">' +
+            renderKpi('Your price', model.you == null ? '—' : money(model.you), escapeHtml(yourDetail)) +
+            renderKpi('Market value', value == null ? '—' : money(value), escapeHtml(value == null ? (model.value != null ? model.value.error : 'not read') : valueDetail), value == null && model.value != null ? model.value.error : null) +
+            cheapest(market, 'market', model.market != null ? model.market.error : null) +
+            cheapest(bazaar, 'bazaar', model.bazaar != null ? model.bazaar.error : null) +
+            '</div>';
+        html += '<div class="tmf-ana-cols"><div>' + renderAhead(model, market, bazaar) + '</div><div>' + renderStacks(market, bazaar) + '</div></div>';
+        html += renderFreshness(model);
+        return html;
+    }
+
+    function renderFreshness(model){
+        let parts = ['Read ' + ago(model.readAt)];
+        if (model.bazaar != null && model.bazaar.checked != null){
+            parts.push('bazaar listings last checked ' + ago(model.bazaar.checked));
+        }
+        return '<div class="tmf-ana-hint">' + escapeHtml(parts.join(' · ')) + '</div>';
+    }
+
+    function renderBarRow(cls, width, text){
+        return '<div class="tmf-ana-brow"><i class="tmf-ana-bar ' + cls + '" style="width:' + width + '%"></i><span class="tmf-ana-bv">' + escapeHtml(text) + '</span></div>';
+    }
+
+    // Units priced below you, and just above you, per source: what has to sell before yours does.
+    function renderAhead(model, market, bazaar){
+        let html = '<div class="tmf-ana-sec">Ahead of you</div>';
+        if (model.you == null){
+            return html + '<div class="tmf-ana-muted">No price to measure from yet.</div>';
+        }
+        let you = model.you;
+        let bands = [
+            { label: 'Cheaper than you', keep: function(listing){ return listing.price < you; } },
+            { label: 'Up to 1% above you (≤ ' + money(you * 1.01) + ')', keep: function(listing){ return listing.price >= you && listing.price <= you * 1.01; } },
+            { label: 'Up to 3% above you (≤ ' + money(you * 1.03) + ')', keep: function(listing){ return listing.price >= you && listing.price <= you * 1.03; } }
+        ].map(function(band){
+            return { label: band.label, m: market == null ? null : market.filter(band.keep), b: bazaar == null ? null : bazaar.filter(band.keep) };
+        });
+        let max = Math.max(1, ...bands.map(function(band){ return Math.max(band.m == null ? 0 : unitsOf(band.m), band.b == null ? 0 : unitsOf(band.b)); }));
+        let bar = function(listings, cls, name){
+            if (listings == null){
+                return renderBarRow(cls, 0, name + ' not read');
+            }
+            let units = unitsOf(listings);
+            let width = units === 0 ? 0 : Math.max(2, Math.round(units / max * 100));
+            return renderBarRow(cls, width, units === 0 ? '0' : count(units) + ' units · ' + count(listings.length) + (listings.length === 1 ? ' listing' : ' listings'));
+        };
+        html += renderLegend();
+        bands.forEach(function(band){
+            html += '<div class="tmf-ana-band"><div class="tmf-ana-bl">' + escapeHtml(band.label) + '</div>' + bar(band.m, 'tmf-ana-m', 'market') + bar(band.b, 'tmf-ana-b', 'bazaars') + '</div>';
+        });
+        return html;
+    }
+
+    // How the listings split by stack size: what [100x+] and [mine+] choose between.
+    function renderStacks(market, bazaar){
+        let html = '<div class="tmf-ana-sec">Listings by stack size<small>count · cheapest in the band</small></div>';
+        let bands = STACK_BANDS.map(function(band){
+            let keep = function(listing){ return listing.amount >= band[0] && listing.amount <= band[1]; };
+            return { label: band[2], m: market == null ? null : market.filter(keep), b: bazaar == null ? null : bazaar.filter(keep) };
+        });
+        let max = Math.max(1, ...bands.map(function(band){ return Math.max(band.m == null ? 0 : band.m.length, band.b == null ? 0 : band.b.length); }));
+        let bar = function(listings, cls, name){
+            if (listings == null){
+                return renderBarRow(cls, 0, name + ' not read');
+            }
+            let cheapest = listings.length === 0 ? '—' : money(Math.min.apply(null, listings.map(function(listing){ return listing.price; })));
+            return renderBarRow(cls, listings.length === 0 ? 0 : Math.max(2, Math.round(listings.length / max * 100)), count(listings.length) + ' · from ' + cheapest);
+        };
+        bands.forEach(function(band){
+            html += '<div class="tmf-ana-band"><div class="tmf-ana-bl">' + escapeHtml(band.label) + '</div>' + bar(band.m, 'tmf-ana-m', 'market') + bar(band.b, 'tmf-ana-b', 'bazaars') + '</div>';
+        });
+        return html;
+    }
+
+    // The listing a branch read, so the ladder can point at it.
+    function basisKey(detail){
+        return detail != null && detail.basis != null && detail.basis.price != null
+            ? (detail.source === SOURCE_BAZAAR ? 'b' : 'm') + ':' + detail.basis.price + ':' + detail.basis.amount
+            : null;
+    }
+
+    function renderListings(model, session){
+        let market = model.market != null && model.market.listings != null ? model.market.listings : null;
+        let bazaar = model.bazaar != null && model.bazaar.listings != null ? model.bazaar.listings : null;
+        let rows = [];
+        (market ?? []).forEach(function(listing){ rows.push({ src: 'm', price: listing.price, amount: listing.amount }); });
+        (bazaar ?? []).forEach(function(listing){ rows.push({ src: 'b', price: listing.price, amount: listing.amount }); });
+        rows.sort(function(a, b){ return a.price - b.price || (a.src < b.src ? -1 : 1); });
+        let html = '';
+        if (market == null && bazaar == null){
+            return renderAlert('No listings could be read.' + (model.market != null && model.market.error ? ' ' + escapeHtml(model.market.error) + '.' : ''));
+        }
+        if (market == null){
+            html += '<div class="tmf-ana-muted">Item market not read: ' + escapeHtml(model.market != null ? model.market.error : 'no data') + '.</div>';
+        }
+        if (bazaar == null){
+            html += '<div class="tmf-ana-muted">Bazaars not read: ' + escapeHtml(model.bazaar != null ? model.bazaar.error : 'no data') + '.</div>';
+        }
+        // Tags: the listing the winning branch read, the ones its bracket skipped, and what the
+        // other branches read. A listing is tagged once, by the first branch to claim it.
+        let winner = session.trace != null ? session.branches.get(session.trace.winner) : null;
+        let tags = new Map();
+        let claim = function(key, tag){ if (key != null && !tags.has(key)){ tags.set(key, tag); } };
+        if (winner != null){
+            claim(basisKey(winner), '<span class="tmf-ana-tag">read by ' + escapeHtml(winner.formula) + '</span>');
+        }
+        session.branches.forEach(function(detail){
+            if (detail !== winner){
+                claim(basisKey(detail), '<span class="tmf-ana-tag tmf-ana-tag--blue">' + escapeHtml(detail.formula) + '</span>');
+            }
+        });
+        let skipped = function(listing){
+            if (winner == null || winner.price == null || (winner.source === SOURCE_BAZAAR ? 'b' : 'm') !== listing.src){
+                return null;
+            }
+            // "Skipped" only for listings the bracket passed over on its way to the one it read;
+            // the rest are just marked as ones it would never read.
+            let passedOver = winner.basis != null && winner.basis.price != null && listing.price < winner.basis.price ? 'skipped · ' : '';
+            let minimum = minimumStack(winner.formula, session.mine, winner.source);
+            if (typeof minimum === 'number' && listing.amount < minimum){
+                return passedOver + count(listing.amount) + ' under ' + count(minimum);
+            }
+            if (winner.limit != null && performOperation(listing.price, stripDeltaBracket(winner.formula)) < winner.limit){
+                return passedOver + 'under the limit';
+            }
+            return null;
+        };
+        let lines = [];
+        let youPlaced = model.you == null;
+        let ranks = [];
+        if (model.you != null){
+            if (bazaar != null){ ranks.push('#' + count(cheaperThan(bazaar, model.you).length + 1) + ' among bazaars'); }
+            if (market != null){ ranks.push('#' + count(cheaperThan(market, model.you).length + 1) + ' on the market'); }
+        }
+        let youLine = model.you == null ? '' :
+            '<div class="tmf-ana-lr tmf-ana-lr--you"><span class="tmf-ana-src tmf-ana-y">★</span><span class="p">' + money(model.you) + '</span><span class="q">' + (model.mine != null ? '×' + count(model.mine) : '') + '</span><span class="n">you' + (ranks.length ? ' · ' + escapeHtml(ranks.join(' · ')) : '') + '</span></div>';
+        rows.forEach(function(listing){
+            if (!youPlaced && listing.price > model.you){
+                lines.push(youLine);
+                youPlaced = true;
+            }
+            let key = listing.src + ':' + listing.price + ':' + listing.amount;
+            let tag = tags.get(key) ?? '';
+            if (tag !== ''){
+                tags.delete(key);
+            }
+            let why = skipped(listing);
+            let cls = 'tmf-ana-lr' + (why != null ? ' tmf-ana-lr--dim' : '');
+            let note = tag + (why != null ? '<span class="tmf-ana-tag tmf-ana-tag--gray">' + escapeHtml(why) + '</span>' : '');
+            lines.push('<div class="' + cls + '" data-price="' + listing.price + '" title="Click to price $1 under this listing">' +
+                '<span class="tmf-ana-src tmf-ana-' + listing.src + '">' + (listing.src === 'm' ? 'M' : 'B') + '</span>' +
+                '<span class="p">' + money(listing.price) + '</span><span class="q">×' + count(listing.amount) + '</span><span class="n">' + note + '</span></div>');
+        });
+        if (!youPlaced){
+            lines.push(youLine);
+        }
+        let shown = lines.map(function(line, index){
+            return index < ANALYTICS_LADDER_ROWS ? line : line.replace('class="tmf-ana-lr', 'class="tmf-ana-lr tmf-ana-lr--hidden');
+        });
+        let more = [];
+        if (lines.length > ANALYTICS_LADDER_ROWS){
+            more.push(count(lines.length - ANALYTICS_LADDER_ROWS) + ' more · <a class="tmf-ana-showall">show all</a>');
+        }
+        if (model.bazaar != null && model.bazaar.ignored > 0){
+            more.push(count(model.bazaar.ignored) + ' bazaar ' + (model.bazaar.ignored === 1 ? 'listing' : 'listings') + ' ignored (sponsored, stale or far under the average)');
+        }
+        html += renderLegend() + '<div class="tmf-ana-lad">' + shown.join('') +
+            (more.length ? '<div class="tmf-ana-lr tmf-ana-lr--more"><span class="n">' + more.join(' · ') + '</span></div>' : '') + '</div>' +
+            '<div class="tmf-ana-hint">Click a listing to price $1 under it.</div>';
+        return html;
+    }
+
+    function deltaPhrase(delta){
+        let match = String(delta ?? '').trim().match(/^([-+]?)(\d+(?:\.\d+)?)(%)?$/);
+        if (match == null){
+            return '';
+        }
+        return (match[1] === '-' ? 'minus ' : 'plus ') + (match[3] ? match[2] + '%' : '$' + Number(match[2]).toLocaleString('en-US'));
+    }
+
+    // One sentence on what a branch read and did with it.
+    function describeBranch(detail, session){
+        if (detail == null){
+            return 'not priced';
+        }
+        if (detail.error != null){
+            return 'failed: ' + detail.error;
+        }
+        if (detail.unmatched != null){
+            return capitalise(detail.unmatched);
+        }
+        if (detail.nothing || detail.basis == null){
+            return 'no usable bazaar price, so this branch sat out';
+        }
+        let sourceName = detail.source === SOURCE_BAZAAR ? 'bazaar' : 'item-market';
+        let basis = detail.basis;
+        let text;
+        if (basis.value != null){
+            text = (detail.source === SOURCE_MARKET_VALUE ? 'market value ' : 'bazaar average ') + money(basis.value);
+        } else if (basis.median != null){
+            text = 'median of ' + count(basis.count) + ' ' + sourceName + ' listings, ' + money(basis.median);
+        } else {
+            text = ordinal(basis.rank) + ' ' + sourceName + ' listing, ' + money(basis.price) + ' ×' + count(basis.amount);
+        }
+        if (basis.skipped > 0){
+            let minimum = minimumStack(detail.formula, session.mine, detail.source);
+            let under = typeof minimum === 'number' ? 'under ' + count(minimum) : 'under the limit';
+            if (typeof minimum === 'number' && detail.limit != null){
+                under += ' or the limit';
+            }
+            text += ', after skipping ' + count(basis.skipped) + ' ' + under;
+        }
+        if (detail.fallback){
+            text = 'no bazaar price, so the item market instead: ' + text;
+        }
+        let delta = deltaPhrase(stripDeltaBracket(detail.formula));
+        if (delta !== ''){
+            text += ', ' + delta;
+        }
+        if (detail.limitFormula != null && detail.limit != null){
+            text += ' · above ' + detail.limitFormula + ' = ' + money(detail.limit);
+        }
+        return text;
+    }
+
+    function traceNodeValue(node, session){
+        if (node.kind === 'formula'){
+            let detail = session.branches.get(node.formula);
+            return detail != null && typeof detail.price === 'number' && isFinite(detail.price) ? detail.price : null;
+        }
+        let best = null;
+        node.children.forEach(function(child){
+            let value = traceNodeValue(child, session);
+            if (value != null && (best == null || (node.combine === 'min' ? value < best : value > best))){
+                best = value;
+            }
+        });
+        return best;
+    }
+
+    // The setting as a tree: each formula with what it came to, the min()/max() around them
+    // with what they chose, the winning formula and the final answer marked.
+    function renderTraceNode(node, session, depth){
+        let indent = ' style="margin-left:' + (depth * 16) + 'px"';
+        if (node.kind === 'formula'){
+            let detail = session.branches.get(node.formula);
+            let win = node.formula === session.trace.winner;
+            let price = detail != null && typeof detail.price === 'number' ? money(detail.price) : '—';
+            return '<div class="tmf-ana-tr' + (win ? ' tmf-ana-tr--win' : '') + '"' + indent + '><code>' + escapeHtml(node.formula) + '</code><span class="r">' + price + '</span>' +
+                '<span class="why">' + escapeHtml(describeBranch(detail, session)) + (win && depth > 0 ? ' · filled' : '') + '</span></div>';
+        }
+        let value = traceNodeValue(node, session);
+        let html = '<div class="tmf-ana-tr"' + indent + '><span class="op">' + node.combine + '(</span></div>';
+        html += node.children.map(function(child){ return renderTraceNode(child, session, depth + 1); }).join('');
+        html += '<div class="tmf-ana-tr' + (depth === 0 && value != null ? ' tmf-ana-tr--win' : '') + '"' + indent + '><span class="op">) → <b>' + (value == null ? '—' : money(value)) + '</b></span>' +
+            '<span class="why">the ' + (node.combine === 'min' ? 'lowest' : 'highest') + ' of ' + node.children.length + (depth === 0 && value != null ? ' · filled' : '') + '</span></div>';
+        return html;
+    }
+
+    function renderFormula(model, session){
+        let trace = session.trace;
+        if (trace == null){
+            return renderAlert('<b>Nothing priced.</b> ' + escapeHtml(session.failure ?? 'The first read failed, so the setting was never applied') + '.');
+        }
+        let html = '';
+        let winner = session.branches.get(trace.winner);
+        let unmatched = traceUnmatched(session);
+        let error = traceError(session);
+        if (unmatched != null){
+            html += renderAlert('<b>Price left as it is.</b> ' + escapeHtml(capitalise(unmatched)) + '.');
+        } else if (error != null){
+            html += renderAlert('<b>Nothing priced.</b> ' + escapeHtml(error) + '.');
+        } else if (model.you != null){
+            let others = [];
+            session.branches.forEach(function(detail){
+                if (detail !== winner && collectFormulas(trace.root).indexOf(detail.formula) !== -1){
+                    others.push('<code>' + escapeHtml(detail.formula) + '</code> ' + (typeof detail.price === 'number' ? money(detail.price) : 'nothing'));
+                }
+            });
+            html += '<div class="tmf-ana-verdict"><b>Filled ' + money(model.you) + '</b> from <code>' + escapeHtml(trace.winner) + '</code>: ' + escapeHtml(describeBranch(winner, session)) + '.' +
+                (others.length ? ' The other ' + (others.length === 1 ? 'branch' : 'branches') + ': ' + others.join(', ') + '.' : '') + '</div>';
+        }
+        html += '<div class="tmf-ana-sec">Formula · <code>' + escapeHtml(trace.setting) + '</code></div>';
+        html += '<div class="tmf-ana-trace">' + renderTraceNode(trace.root, session, 0) + '</div>';
+        return html;
+    }
+
+    // The item market takes its tax off what you sell for, so the footer says what you keep.
+    function renderFoot(model, row){
+        let html = '<span class="tmf-ana-sum">';
+        if (model.you != null){
+            let taxPercent = Math.round((1 - marketTaxFactor) * 100);
+            let net = Math.round(model.you * marketTaxFactor);
+            let parts = ['After the ' + taxPercent + '% market tax: ' + money(net) + ' each'];
+            if (model.mine != null && model.mine > 0){
+                parts.push(money(net * model.mine) + ' for ' + count(model.mine));
+            }
+            html += escapeHtml(parts.join(' · '));
+        }
+        html += '</span><button type="button" class="tmf-ana-settings">Settings</button>';
+        if (model.you != null && row.target.isConnected){
+            html += '<button type="button" class="tmf-ana-apply" data-price="' + model.you + '">' + escapeHtml('Fill ' + money(model.you)) + '</button>';
+        }
+        return html;
+    }
+
+    // Put a price from the popup into the row it was opened from, the way Fill does: on Add Items
+    // the quantity goes in too and the square flips to Clear. A listing click sets the price only.
+    async function applyAnalyticsPrice(price, withQuantity){
+        let row = analyticsRow;
+        if (row == null || !row.target.isConnected){
+            showToast('That row is no longer on the page.');
+            return;
+        }
+        if (!(price > 0)){
+            return;
+        }
+        if (withQuantity && getCurrentPage() == pages.AddItems){
+            let category = analyticsSession != null ? analyticsSession.category : null;
+            if (await applyQuantity(row.target, 'fill', category, false) === 'skipped'){
+                return;
+            }
+        }
+        let priceInputs = row.target.parentNode.querySelectorAll('input.input-money');
+        if (priceInputs.length === 0){
+            showToast('Could not find the price box on this row.');
+            return;
+        }
+        priceInputs.forEach(function(input){ input.value = price; });
+        priceInputs[0].dispatchEvent(new Event("input", { bubbles: true }));
+        if (withQuantity && row.target.getAttribute('data-action-flag') == 'fill'){
+            switchActionFlag(row.target);
+        }
+        showToast('Price set to ' + money(price) + '.');
     }
 
     // ---- "What's new" popup ----------------------------------------------------------------
