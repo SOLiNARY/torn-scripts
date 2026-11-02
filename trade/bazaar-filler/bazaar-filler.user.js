@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Bazaar Filler
 // @namespace    https://github.com/SOLiNARY
-// @version      2.0.0
+// @version      2.1.0
 // @description  Adds a Fill button to every item on your bazaar's Add and Manage pages: one click sets the price and quantity. Price from the item market (cheapest minus $1 by default), market value or live bazaars via weav3r.dev, with your own formula and min/max ranges. Quantity modes, per-category settings, favourites with Fill All, and a bubble that warns when your price is far below the competition. A small chart icon next to Fill opens item analytics: item-market and bazaar listings on one price ladder, where your price lands, stack sizes, and what your formula picked. Open settings with the cog on the Fill All bar or by holding Fill for 3s.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT License
@@ -20,7 +20,7 @@
     'use strict';
 
     // Keep in sync with @version above — it keys the "What's new" popup.
-    const SCRIPT_VERSION = "2.0.0";
+    const SCRIPT_VERSION = "2.1.0";
 
     const marketUrl = "https://api.torn.com/v2/market?id={itemId}&selections=itemMarket&key={apiKey}&comment=BazaarFiller";
     const itemUrl = "https://api.torn.com/torn/{itemId}?selections=items&key={apiKey}&comment=BazaarFiller";
@@ -80,9 +80,11 @@
 
     GM_addStyle(`.btn-wrap.torn-bazaar-fill-qty-price{float:right;margin-left:auto;z-index:99999}.btn-wrap.torn-bazaar-clear-qty-price{z-index:99999}div.title-wrap div.name-wrap{display:flex;justify-content:flex-end}.tbf-wave-host{position:relative}.tbf-wave-clip{position:absolute;top:0;right:0;bottom:0;left:0;overflow:hidden;pointer-events:none}.wave{pointer-events:none;position:absolute;top:0;left:0;width:100%;height:33px;background-color:transparent;opacity:0;transform:translateX(-100%);animation:waveAnimation 1s cubic-bezier(0, 0, 0, 1)}@keyframes waveAnimation{0%{opacity:1;transform:translateX(-100%)}100%{opacity:0;transform:translateX(100%)}}.overlay-percentage{position:absolute;top:0;background-color:rgba(0, 0, 0, 0.9);padding:0 5px;border-radius:15px;font-size:10px;pointer-events:none}.overlay-percentage-add{right:-30px}@media (max-width:784px){.overlay-percentage-add{right:0}}.overlay-percentage-manage{right:0}.torn-bazaar-fill-qty-price input{-webkit-touch-callout:none;-webkit-user-select:none;user-select:none;transition:box-shadow 0s}.torn-bazaar-fill-qty-price input.tbf-holding{box-shadow:inset 0 0 0 40px rgba(0,180,255,.35);transition:box-shadow 3s linear}.tbf-fav{cursor:pointer;font-size:16px;line-height:1;margin-left:auto;margin-right:6px;width:16px;text-align:center;color:#888;align-self:center;user-select:none;-webkit-user-select:none;z-index:99999}.tbf-fav~.btn-wrap.torn-bazaar-fill-qty-price{margin-left:0}.tbf-fav.tbf-fav--on{color:gold;text-shadow:0 0 3px rgba(255,215,0,.7)}.tbf-fillall-bar{position:fixed;bottom:110px;right:16px;display:flex;align-items:center;gap:6px;padding:6px 8px;background:rgba(0,0,0,.55);border-radius:20px;z-index:999999;touch-action:none;transition:box-shadow .2s ease}.tbf-fillall-grip{cursor:grab;color:#bbb;font-size:14px;line-height:1;letter-spacing:-2px;min-width:12px;text-align:center;align-self:center;user-select:none;-webkit-user-select:none}.tbf-fillall-bar--dragging{cursor:grabbing;opacity:.92}.tbf-fillall-bar--dragging .tbf-fillall-grip{cursor:grabbing}.tbf-fillall-cog{cursor:pointer;flex:0 0 auto;display:flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:rgba(255,255,255,.12);color:#ddd;font-size:13px;line-height:1;user-select:none;-webkit-user-select:none}.tbf-fillall-cog:hover{background:rgba(255,255,255,.28);color:#fff}.tbf-fillall-bar--min{padding:5px 7px;gap:4px}.tbf-fillall-bar--min .tbf-fillall-btn,.tbf-fillall-bar--min .tbf-fillall-cog{display:none}.tbf-fillall-bar--min .tbf-fillall-grip{font-size:16px}.tbf-autofill-dot{display:none;width:10px;height:10px;border-radius:50%;background:gold;box-shadow:0 0 4px gold;animation:tbfPulse 1s ease-in-out infinite}.tbf-fillall-bar--active .tbf-autofill-dot{display:inline-block}.tbf-fillall-bar--active{box-shadow:0 0 10px 2px rgba(255,215,0,.75)}@keyframes tbfPulse{0%,100%{opacity:.3;transform:scale(.8)}50%{opacity:1;transform:scale(1.2)}}.tbf-viewport-border{display:none;position:fixed;top:0;right:0;bottom:0;left:0;border:3px solid gold;box-shadow:inset 0 0 12px rgba(255,215,0,.6);pointer-events:none;z-index:999998}.tbf-viewport-border--active{display:block}.tbf-toast{position:fixed;bottom:158px;right:16px;max-width:280px;background:rgba(0,0,0,.85);color:#fff;padding:10px 14px;border-radius:8px;border:1px solid gold;font-size:13px;line-height:1.4;z-index:1000000;opacity:0;visibility:hidden;transition:opacity .3s,visibility .3s}.tbf-toast--visible{opacity:1;visibility:visible}.tbf-fav.tbf-fav--off{color:#ff6b6b;text-shadow:none}`);
 
-    GM_addStyle(`.tbf-modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:2147483000;justify-content:center;align-items:flex-start;overflow:auto;padding:24px 12px;box-sizing:border-box}.tbf-modal-overlay--open{display:flex}.tbf-modal{background:#1f1f1f;color:#e6e6e6;width:100%;max-width:420px;border:1px solid #666;border-radius:10px;box-shadow:0 10px 40px rgba(0,0,0,.6);padding:16px 18px;box-sizing:border-box;font-size:13px;line-height:1.5}.tbf-modal h3{margin:0 0 12px;font-size:15px;display:flex;justify-content:space-between;align-items:center;color:#fff}.tbf-modal-close{cursor:pointer;color:#bbb;font-size:22px;line-height:1}.tbf-modal label{display:block;margin:10px 0 3px;font-weight:bold;color:#cfcfcf}.tbf-modal input[type=text],.tbf-modal input[type=password]{width:100%;box-sizing:border-box;padding:7px 9px;border-radius:5px;border:1px solid #666;background:#111;color:#eee;font-size:13px}.tbf-modal-key{position:relative;display:flex;align-items:center}.tbf-modal-key input[type=text],.tbf-modal-key input[type=password]{padding-right:52px}.tbf-modal-key-reveal{position:absolute;right:7px;cursor:pointer;color:#bbb;font-size:11px;line-height:1;padding:3px 4px;user-select:none;-webkit-user-select:none}.tbf-modal-key-reveal:hover{color:#fff}.tbf-modal-cats{margin-top:4px}.tbf-modal-cat-row{display:flex;gap:6px;margin-bottom:6px;align-items:center}.tbf-modal-cat-row .tbf-modal-cat-name{flex:1 1 55%}.tbf-modal-cat-row .tbf-modal-cat-formula{flex:1 1 45%}.tbf-modal-cat-del{cursor:pointer;color:#ff6b6b;font-size:20px;line-height:1;flex:0 0 auto;width:22px;text-align:center}.tbf-modal-addcat{margin-top:2px;cursor:pointer;background:#333;color:#eee;border:1px solid #666;border-radius:5px;padding:5px 10px;font-size:12px}.tbf-modal-resetcat{margin:2px 0 0 8px;cursor:pointer;background:#3a2a2a;color:#ddd;border:1px solid #774;border-radius:5px;padding:5px 10px;font-size:12px}.tbf-modal-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:16px}.tbf-modal-actions button{cursor:pointer;padding:7px 16px;border-radius:5px;border:1px solid #666;background:#333;color:#eee;font-size:13px}.tbf-modal-save{background:#2e7d32!important;border-color:#2e7d32!important;color:#fff!important}.tbf-modal-help{margin-top:12px;font-size:11px;color:#9a9a9a;line-height:1.5}.tbf-modal-help code{background:#000;padding:1px 4px;border-radius:3px;color:#cfc}.tbf-modal-cat-row input{min-width:0}.tbf-modal-cat-row .tbf-modal-cat-name{flex:1 1 38%}.tbf-modal-cat-row .tbf-modal-cat-formula{flex:1 1 32%}.tbf-modal-cat-row .tbf-modal-cat-qty{flex:1 1 30%}.tbf-modal-cat-head{display:flex;gap:6px;margin:0 0 4px;font-size:11px;color:#9a9a9a}.tbf-modal-cat-head span:nth-child(1){flex:1 1 38%}.tbf-modal-cat-head span:nth-child(2){flex:1 1 32%}.tbf-modal-cat-head span:nth-child(3){flex:1 1 30%}.tbf-modal-cat-head span:nth-child(4){flex:0 0 22px}.tbf-modal-clearexcl{margin:2px 0 0 8px;cursor:pointer;background:#3a2a2a;color:#ddd;border:1px solid #774;border-radius:5px;padding:5px 10px;font-size:12px}.tbf-modal-error{display:none;margin-top:12px;padding:8px 10px;border-radius:5px;background:#3a1f1f;border:1px solid #a34;color:#ffb3b3;font-size:12px;line-height:1.4}.tbf-modal input.tbf-modal-invalid{border-color:#ff6b6b;box-shadow:0 0 0 1px rgba(255,107,107,.45)}`);
+    GM_addStyle(`.tbf-modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:2147483000;justify-content:center;align-items:flex-start;overflow:auto;padding:24px 12px;box-sizing:border-box}.tbf-modal-overlay--open{display:flex}.tbf-modal{background:#1f1f1f;color:#e6e6e6;width:100%;max-width:420px;border:1px solid #666;border-radius:10px;box-shadow:0 10px 40px rgba(0,0,0,.6);padding:16px 18px;box-sizing:border-box;font-size:13px;line-height:1.5}.tbf-modal h3{margin:0 0 12px;font-size:15px;display:flex;justify-content:space-between;align-items:center;color:#fff}.tbf-modal-close{cursor:pointer;color:#bbb;font-size:22px;line-height:1}.tbf-modal label{display:block;margin:10px 0 3px;font-weight:bold;color:#cfcfcf}.tbf-modal input[type=text],.tbf-modal input[type=password]{width:100%;box-sizing:border-box;padding:7px 9px;border-radius:5px;border:1px solid #666;background:#111;color:#eee;font-size:13px}.tbf-modal-key{position:relative;display:flex;align-items:center}.tbf-modal-key input[type=text],.tbf-modal-key input[type=password]{padding-right:52px}.tbf-modal-key-reveal{position:absolute;right:7px;cursor:pointer;color:#bbb;font-size:11px;line-height:1;padding:3px 4px;user-select:none;-webkit-user-select:none}.tbf-modal-key-reveal:hover{color:#fff}.tbf-modal-cats{margin-top:4px}.tbf-modal-cat-row{display:flex;gap:6px;margin-bottom:6px;align-items:center}.tbf-modal-cat-row .tbf-modal-cat-name{flex:1 1 55%}.tbf-modal-cat-row .tbf-modal-cat-formula{flex:1 1 45%}.tbf-modal-cat-del{cursor:pointer;color:#ff6b6b;font-size:20px;line-height:1;flex:0 0 auto;width:22px;text-align:center}.tbf-modal-addcat{margin-top:2px;cursor:pointer;background:#333;color:#eee;border:1px solid #666;border-radius:5px;padding:5px 10px;font-size:12px}.tbf-modal-resetcat{margin:2px 0 0 8px;cursor:pointer;background:#3a2a2a;color:#ddd;border:1px solid #774;border-radius:5px;padding:5px 10px;font-size:12px}.tbf-modal-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:16px}.tbf-modal-actions button{cursor:pointer;padding:7px 16px;border-radius:5px;border:1px solid #666;background:#333;color:#eee;font-size:13px}.tbf-modal-save{background:#2e7d32!important;border-color:#2e7d32!important;color:#fff!important}.tbf-modal-cat-row input{min-width:0}.tbf-modal-cat-row .tbf-modal-cat-name{flex:1 1 38%}.tbf-modal-cat-row .tbf-modal-cat-formula{flex:1 1 32%}.tbf-modal-cat-row .tbf-modal-cat-qty{flex:1 1 30%}.tbf-modal-cat-head{display:flex;gap:6px;margin:0 0 4px;font-size:11px;color:#9a9a9a}.tbf-modal-cat-head span:nth-child(1){flex:1 1 38%}.tbf-modal-cat-head span:nth-child(2){flex:1 1 32%}.tbf-modal-cat-head span:nth-child(3){flex:1 1 30%}.tbf-modal-cat-head span:nth-child(4){flex:0 0 22px}.tbf-modal-clearexcl{margin:2px 0 0 8px;cursor:pointer;background:#3a2a2a;color:#ddd;border:1px solid #774;border-radius:5px;padding:5px 10px;font-size:12px}.tbf-modal-error{display:none;margin-top:12px;padding:8px 10px;border-radius:5px;background:#3a1f1f;border:1px solid #a34;color:#ffb3b3;font-size:12px;line-height:1.4}.tbf-modal input.tbf-modal-invalid{border-color:#ff6b6b;box-shadow:0 0 0 1px rgba(255,107,107,.45)}`);
 
     GM_addStyle(`.tbf-changelog-release{margin:0 0 14px}.tbf-changelog-release:last-of-type{margin-bottom:0}.tbf-changelog-ver{display:flex;align-items:baseline;gap:8px;margin:0 0 6px}.tbf-changelog-ver b{color:#fff;font-size:13px}.tbf-changelog-date{color:#8a8a8a;font-size:11px;margin-left:auto}.tbf-changelog-badge{background:#2e7d32;color:#fff;border-radius:10px;padding:1px 7px;font-size:10px;text-transform:uppercase;letter-spacing:.04em}.tbf-changelog-items{margin:0;padding-left:18px;color:#cfcfcf}.tbf-changelog-items li{margin:0 0 5px}.tbf-changelog-items code{background:#000;padding:1px 4px;border-radius:3px;color:#cfc}`);
+
+    GM_addStyle(`.tbf-settings-overlay [hidden]{display:none!important}.tbf-settings-overlay .tbf-modal code{background:#000;padding:1px 4px;border-radius:3px;color:#cfc;font-family:Consolas,Menlo,monospace;font-size:12px}.tbf-help-bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between;margin:0 0 8px;padding:6px 8px;background:#262626;border:1px solid #3a3a3a;border-radius:6px}.tbf-help-bar button,.tbf-wiz button,.tbf-sheet button{font-family:inherit;line-height:1.3;text-transform:none;box-shadow:none;height:auto;min-width:0;margin:0;cursor:pointer}.tbf-help-switch{display:inline-flex;align-items:center;gap:8px;background:none;border:0;padding:2px 0;color:#e6e6e6;font-size:12.5px}.tbf-help-track{position:relative;width:30px;height:17px;border-radius:9px;background:#555;flex:none;transition:background .15s}.tbf-help-track:after{content:"";position:absolute;top:2px;left:2px;width:13px;height:13px;border-radius:50%;background:#ddd;transition:transform .15s}.tbf-help-switch[aria-checked="true"] .tbf-help-track{background:#2e7d32}.tbf-help-switch[aria-checked="true"] .tbf-help-track:after{transform:translateX(13px);background:#fff}.tbf-help-write{background:#333;border:1px solid #666;color:#eee;border-radius:5px;padding:5px 10px;font-size:12px}.tbf-help-write:hover{border-color:#999}.tbf-help-write[aria-expanded="true"]{border-color:#b5d56a;color:#fff}.tbf-wiz{margin:0 0 8px;border:1px solid #b5d56a;border-radius:6px;background:#262626;padding:8px 10px 10px;display:grid;gap:8px}.tbf-wiz-h{display:flex;justify-content:space-between;align-items:center;gap:8px;font-weight:bold;color:#fff;font-size:12.5px}.tbf-wiz-h small{font-weight:normal;color:#9a9a9a;font-size:11px;margin-left:6px}.tbf-wiz-close{cursor:pointer;color:#bbb;font-size:20px;line-height:1}.tbf-wiz-qs{display:grid;gap:8px}.tbf-wiz-q{display:grid;gap:4px}.tbf-wiz-q>span{font-size:11.5px;color:#cfcfcf}.tbf-wiz-seg{display:flex;flex-wrap:wrap;gap:4px}.tbf-wiz-seg button{background:#333;border:1px solid #555;color:#ddd;border-radius:5px;padding:4px 8px;font-size:11.5px}.tbf-wiz-seg button:hover{border-color:#888}.tbf-wiz-seg button[aria-pressed="true"]{background:#2e7d32;border-color:#2e7d32;color:#fff}.tbf-wiz-out{display:grid;gap:5px;border-top:1px solid #333;padding-top:8px}.tbf-wiz-f{overflow-wrap:anywhere}.tbf-settings-overlay .tbf-wiz-f code{font-size:12.5px}.tbf-wiz-say{font-size:11.5px;color:#e6e6e6}.tbf-wiz-say b,.tbf-live-say b,.tbf-sheet-tried b{color:#b5d56a}.tbf-wiz-use{justify-self:start;background:#2e7d32;border:1px solid #2e7d32;color:#fff;border-radius:5px;padding:5px 12px;font-size:12px}.tbf-sheet{margin:0 0 4px;border:1px solid #3a3a3a;border-radius:6px;padding:6px 10px}.tbf-sheet>summary{cursor:pointer;font-weight:bold;color:#cfcfcf;font-size:12.5px;padding:2px 0}.tbf-sheet[open]>summary{margin-bottom:4px}.tbf-anat{display:flex;gap:6px;justify-content:center;margin:8px 0 4px;flex-wrap:wrap}.tbf-anat-part{display:grid;justify-items:center;gap:4px}.tbf-settings-overlay .tbf-anat-part code{font-size:17px;padding:3px 8px}.tbf-anat-brace{display:block;width:100%;height:7px;border:1px solid #9a9a9a;border-top:0;border-radius:0 0 4px 4px;box-sizing:border-box}.tbf-anat-part span{font-size:10.5px;color:#cfcfcf;text-align:center;max-width:150px;line-height:1.3}.tbf-anat-note{font-size:11px;color:#9a9a9a;text-align:center;margin:0 0 8px}.tbf-sheet-tabs{display:flex;flex-wrap:wrap;gap:2px;border-bottom:1px solid #444;margin-bottom:4px}.tbf-sheet-tabs button{background:none;border:0;border-bottom:2px solid transparent;margin-bottom:-1px;padding:5px 9px;font-size:12px;color:#aaa;border-radius:0}.tbf-sheet-tabs button:hover{color:#ddd}.tbf-sheet-tabs button[aria-selected="true"]{color:#fff;border-bottom-color:#b5d56a}.tbf-sheet-hint{font-size:10.5px;color:#9a9a9a;margin:4px 0 2px}.tbf-sheet-hint b{color:#cfcfcf;font-weight:normal}.tbf-sheet-row{display:grid;grid-template-columns:auto minmax(0,1fr);gap:2px 12px;align-items:baseline;width:100%;box-sizing:border-box;text-align:left;background:none;border:0;border-bottom:1px solid #2c2c2c;border-radius:0;padding:6px 4px;color:#e6e6e6;font-size:11.5px}.tbf-sheet-row:hover{background:#2a2a2a}.tbf-sheet-row code{overflow-wrap:anywhere}.tbf-sheet-row--wide{grid-template-columns:minmax(0,1fr)}.tbf-sheet-row--on{background:#2a2f1e;box-shadow:inset 3px 0 0 #b5d56a}.tbf-sheet-note{font-size:10.5px;color:#9a9a9a;margin:6px 0 0}.tbf-sheet-tried{margin-top:6px;font-size:11.5px;color:#e6e6e6;line-height:1.45}.tbf-sheet-tried:empty{display:none}.tbf-live{margin-top:6px;background:#262626;border:1px solid #3a3a3a;border-radius:6px;padding:8px 10px;display:grid;gap:6px;font-size:12px;line-height:1.4;text-align:left}.tbf-modal-cats .tbf-live{margin:0 0 6px}.tbf-live-h{display:flex;justify-content:space-between;gap:8px;font-size:10.5px;color:#9a9a9a;text-transform:uppercase;letter-spacing:.5px;font-weight:bold}.tbf-live-h span:last-child{text-transform:none;letter-spacing:0;font-weight:normal;text-align:right}.tbf-live-say{font-size:12.5px;color:#fff}.tbf-live-muted{font-size:11px;color:#9a9a9a}.tbf-live-foot{font-size:10.5px;color:#9a9a9a;border-top:1px solid #333;padding-top:5px}.tbf-live-err{padding:7px 9px;border-radius:5px;background:#3a1f1f;border:1px solid #a34;color:#ffb3b3;font-size:12px}.tbf-live-steps{display:grid;grid-template-columns:auto minmax(0,1fr);gap:3px 10px;font-size:11.5px;margin:0}.tbf-live-steps dt{color:#9a9a9a;margin:0;font-weight:normal}.tbf-live-steps dd{margin:0;color:#e6e6e6;min-width:0}.tbf-live-steps b{color:#fff}.tbf-live-steps b.tbf-live-win{color:#b5d56a;font-size:13px}.tbf-live-tree{display:grid;gap:2px;font-size:11.5px}.tbf-live-tr{display:flex;flex-wrap:wrap;gap:2px 8px;align-items:baseline;padding:3px 6px;border-radius:4px}.tbf-live-tr .p{font-weight:bold;color:#fff;white-space:nowrap}.tbf-live-tr .w{flex:1 1 100%;color:#9a9a9a;font-size:10.5px}.tbf-live-tr .op{color:#9a9a9a;font-family:monospace}.tbf-live-tr--win{background:#2a2f1e;box-shadow:inset 3px 0 0 #8fd08f}.tbf-live-tr--win .p{color:#b5d56a}.tbf-live-lad-h{font-size:10.5px;color:#bbb;text-transform:uppercase;letter-spacing:.5px;font-weight:bold}.tbf-live-lad{border-top:1px solid #333;font-size:11.5px}.tbf-live-lr{display:flex;gap:8px;align-items:center;padding:2px 6px;border-bottom:1px solid #2c2c2c;min-height:22px;box-sizing:border-box}.tbf-live-lr .p{width:78px;text-align:right;flex:none}.tbf-live-lr .q{width:52px;text-align:right;color:#bbb;flex:none}.tbf-live-lr .n{flex:1;min-width:0;color:#9a9a9a;font-size:10.5px}.tbf-live-lr--dim .p,.tbf-live-lr--dim .q{color:#777}.tbf-live-lr--pick{background:#24301c}.tbf-live-lr--pick .n{color:#b5d56a}.tbf-live-lr--you{background:#3a3414;border:1px solid #c9a227;border-radius:5px;color:#fff}.tbf-live-lr--you .n{color:#fff}.tbf-live-lr--gap{color:#777;font-size:10.5px;justify-content:center;min-height:18px}`);
 
     GM_addStyle(`.tbf-ana-btn{cursor:pointer;position:relative;display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;margin-right:6px;color:#888;align-self:center;user-select:none;-webkit-user-select:none;z-index:99999}.tbf-ana-btn:hover{color:#fff}.tbf-ana-btn svg{display:block;width:14px;height:12px;fill:currentColor;pointer-events:none}.tbf-wave-host[data-tbf-tone] .tbf-ana-btn:after{content:"";position:absolute;top:-3px;right:-4px;width:8px;height:8px;border-radius:50%;border:1px solid #1f1f1f;background:#4caf50;box-shadow:0 0 3px #4caf50;pointer-events:none;z-index:1}.tbf-wave-host[data-tbf-tone="yellow"] .tbf-ana-btn:after{background:#e6c200;box-shadow:0 0 3px #e6c200}.tbf-wave-host[data-tbf-tone="red"] .tbf-ana-btn:after{background:#e53935;box-shadow:0 0 3px #e53935}.tbf-wave-host[data-tbf-tone="orange"] .tbf-ana-btn:after{background:#fb8c00;box-shadow:0 0 3px #fb8c00}.tbf-wave-host[data-tbf-tone="grey"] .tbf-ana-btn:after{background:#9e9e9e;box-shadow:none}.tbf-ana{display:none;position:fixed;top:60px;left:40px;width:540px;max-width:calc(100vw - 16px);max-height:calc(100vh - 24px);overflow:auto;background:#1f1f1f;color:#e6e6e6;border:1px solid #666;border-radius:10px;box-shadow:0 10px 40px rgba(0,0,0,.6);padding:12px 14px;box-sizing:border-box;font-size:12px;line-height:1.45;z-index:999999;text-align:left}.tbf-ana--open{display:block}@media (max-width:784px){.tbf-ana{top:auto!important;left:0!important;right:0;bottom:0;width:auto;max-width:none;max-height:85vh;border-radius:14px 14px 0 0;border-bottom:0}}.tbf-ana-head{display:flex;align-items:center;gap:10px;margin-bottom:8px;cursor:move;user-select:none;-webkit-user-select:none}@media (max-width:784px){.tbf-ana-head{cursor:default}}.tbf-ana-img{width:34px;height:34px;border-radius:4px;background:#2a2a2a;flex:none;object-fit:contain}.tbf-ana-title{display:flex;flex-direction:column;line-height:1.3;min-width:0}.tbf-ana-title b{font-size:15px;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.tbf-ana-title small{font-size:11px;color:#a5a5a5}.tbf-ana-hb{margin-left:auto;color:#bbb;font-size:16px;line-height:1;cursor:pointer;width:22px;text-align:center;flex:none}.tbf-ana-hb:hover{color:#fff}.tbf-ana-hb.tbf-ana-close{margin-left:0;font-size:22px}.tbf-ana-tabs{display:flex;gap:2px;border-bottom:1px solid #444;margin:0 0 8px}.tbf-ana-tab{padding:5px 12px;font-size:12px;color:#aaa;border-bottom:2px solid transparent;margin-bottom:-1px;cursor:pointer}.tbf-ana-tab:hover{color:#ddd}.tbf-ana-tab--on,.tbf-ana-tab--on:hover{color:#fff;border-bottom-color:#b5d56a}.tbf-ana-kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:6px 0 8px}@media (max-width:784px){.tbf-ana-kpis{grid-template-columns:1fr 1fr}}.tbf-ana-kpi{background:#262626;border:1px solid #3a3a3a;border-radius:6px;padding:6px 8px;min-width:0}.tbf-ana-kpi .l{font-size:9.5px;color:#9a9a9a;text-transform:uppercase;letter-spacing:.5px;white-space:nowrap}.tbf-ana-kpi .v{font-size:15px;font-weight:bold;color:#fff;margin:2px 0 1px;white-space:nowrap}.tbf-ana-kpi .d{font-size:10.5px;color:#aaa;line-height:1.3}.tbf-ana-legend{display:flex;gap:14px;flex-wrap:wrap;font-size:10.5px;color:#bbb;margin:2px 0 4px}.tbf-ana-legend span{display:inline-flex;align-items:center;gap:5px;white-space:nowrap}.tbf-ana-sw{display:inline-block;width:9px;height:9px;border-radius:2px}.tbf-ana-m{background:#3987e5}.tbf-ana-b{background:#d95926}.tbf-ana-src{width:16px;height:16px;border-radius:50%;font-size:9px;font-weight:bold;display:inline-grid;place-items:center;color:#fff;flex:none}.tbf-ana-src.tbf-ana-y{background:#c9a227;color:#1f1f1f;font-size:10px}.tbf-ana-sec{font-size:10.5px;color:#bbb;text-transform:uppercase;letter-spacing:.5px;margin:8px 0 4px;font-weight:bold}.tbf-ana-sec code{text-transform:none;letter-spacing:0}.tbf-ana-sec small{text-transform:none;letter-spacing:0;font-weight:normal;color:#8a8a8a;margin-left:4px}.tbf-ana-cols{display:grid;grid-template-columns:1fr 1fr;gap:16px}@media (max-width:784px){.tbf-ana-cols{grid-template-columns:1fr}}.tbf-ana-band{margin:0 0 7px}.tbf-ana-bl{font-size:11px;color:#ddd;margin-bottom:2px}.tbf-ana-brow{display:flex;align-items:center;gap:6px;height:14px;margin:1px 0}.tbf-ana-bar{display:block;height:8px;border-radius:0 4px 4px 0;flex:none;max-width:46%}.tbf-ana-bv{font-size:10.5px;color:#aaa;white-space:nowrap}.tbf-ana-lad{margin:4px 0 2px;border-top:1px solid #333}.tbf-ana-lr{display:flex;align-items:center;gap:8px;padding:3px 6px;border-bottom:1px solid #2c2c2c;font-size:12px;min-height:25px;box-sizing:border-box}.tbf-ana-lr[data-price]{cursor:pointer}.tbf-ana-lr[data-price]:hover{background:#2a2a2a}.tbf-ana-lr .p{width:82px;text-align:right;color:#f0f0f0;flex:none}.tbf-ana-lr .q{width:56px;color:#bbb;text-align:right;flex:none}.tbf-ana-lr .n{flex:1;color:#999;font-size:10.5px;min-width:0;line-height:1.3}.tbf-ana-lr--you{background:#3a3414;border:1px solid #c9a227;border-radius:6px;margin:2px 0;color:#fff}.tbf-ana-lr--you .p,.tbf-ana-lr--you .n{color:#fff}.tbf-ana-lr--dim .p,.tbf-ana-lr--dim .q{color:#777}.tbf-ana-lr--more{min-height:22px;border-bottom:0}.tbf-ana-lr--hidden{display:none}.tbf-ana--all .tbf-ana-lr--hidden{display:flex}.tbf-ana--all .tbf-ana-showall{display:none}.tbf-ana-tag{display:inline-block;font-size:9.5px;padding:1px 6px;border-radius:8px;background:#2e7d32;color:#fff;white-space:nowrap;line-height:1.4;margin-right:4px}.tbf-ana-tag--gray{background:#444;color:#ccc}.tbf-ana-tag--blue{background:#1c5cab}.tbf-ana-hint{font-size:10.5px;color:#8a8a8a;margin:4px 0 2px}.tbf-ana-verdict{margin:8px 0 2px;padding:7px 9px;background:#262626;border-left:3px solid #c9a227;border-radius:0 6px 6px 0;font-size:11.5px;line-height:1.45;color:#ddd}.tbf-ana code{background:#000;padding:1px 4px;border-radius:3px;color:#cfc;font-size:10.5px}.tbf-ana a{color:#9cc25e;text-decoration:underline;cursor:pointer}.tbf-ana-foot{display:flex;align-items:center;gap:8px;margin-top:10px;padding-top:8px;border-top:1px solid #333}.tbf-ana-foot:empty{display:none}.tbf-ana-sum{flex:1;font-size:10.5px;color:#9a9a9a;line-height:1.3}.tbf-ana-foot button{cursor:pointer;padding:6px 12px;border-radius:5px;border:1px solid #666;background:#333;color:#eee;font-size:12px;white-space:nowrap}.tbf-ana-foot button.tbf-ana-apply{background:#2e7d32;border-color:#2e7d32;color:#fff}.tbf-ana-trace{margin:4px 0 0;font-size:11.5px}.tbf-ana-tr{display:flex;align-items:baseline;gap:8px;padding:3px 6px;border-radius:4px;flex-wrap:wrap;line-height:1.35}.tbf-ana-tr .op{color:#9a9a9a;font-family:monospace;font-size:12px}.tbf-ana-tr .r{font-weight:bold;color:#fff;white-space:nowrap}.tbf-ana-tr .why{color:#9a9a9a;font-size:10.5px;flex:1 1 100%;padding-left:2px}.tbf-ana-tr--win{background:#2a2f1e;border-left:3px solid #8fd08f}.tbf-ana-tr--win .r{color:#b5d56a}.tbf-ana-note{margin-top:6px;font-size:10.5px;color:#8a8a8a;border-top:1px solid #333;padding-top:6px}.tbf-ana-alert{margin:0 0 6px;padding:8px 10px;border-radius:6px;background:#3a2f1f;border:1px solid #a7792a;color:#ffd9a0;font-size:11.5px;line-height:1.4}.tbf-ana-skel{display:inline-block;height:8px;border-radius:4px;background:#333;margin:3px 0}.tbf-ana-muted{color:#8a8a8a;font-size:11px;margin:4px 0}`);
 
@@ -94,6 +96,15 @@
     // Write every line for a player, not a developer: one short sentence, plain words,
     // what changed for them rather than what changed in the code.
     const CHANGELOG = [
+        {
+            version: "2.1.0",
+            date: "2026-11-02",
+            changes: [
+                'New Cheatsheet at the top of Settings: every price code, sorted by topic, with what it means. Tap a row to put it in a field.',
+                'Live check explains whatever you type, in plain words and with the price it would fill on the last item you filled. Turn it off with the switch at the top.',
+                'New "Write it for me" button: answer four quick questions and it writes the price for you.'
+            ]
+        },
         {
             version: "2.0.0",
             date: "2026-11-01",
@@ -2127,10 +2138,13 @@
     // while it is this fresh.
     const SESSION_TTL_MS = 60 * 1000;
     let itemSessions = new Map();
+    // The newest one: what the settings live check prices against.
+    let liveCheckSession = null;
 
     function newSession(itemId){
         let session = { itemId: itemId, ts: Date.now(), reads: new Map(), branches: new Map(), trace: null, mine: null, category: null };
         itemSessions.set(itemId, session);
+        liveCheckSession = session;
         return session;
     }
 
@@ -3429,6 +3443,895 @@
         rememberChangelogSeen();
     }
 
+    // ---- Settings help: Cheatsheet, Live check, Write it for me -------------------------------
+    // Three ways into the price syntax, all inside the settings window. The Cheatsheet lists every
+    // code by topic and puts a tapped one into the field you were last in. The live check explains
+    // the field you are in, priced on the last item you filled, so it never makes a request of its
+    // own. "Write it for me" asks four questions and writes a formula for anyone who would rather
+    // not learn the syntax at all.
+
+    const liveCheckStorageKey = "silmaril-torn-bazaar-filler-live-check";
+    const cheatsheetOpenStorageKey = "silmaril-torn-bazaar-filler-cheatsheet-open";
+    const cheatsheetTabStorageKey = "silmaril-torn-bazaar-filler-cheatsheet-tab";
+    // How this script's help has always written "the cheapest item-market listing" after a delta.
+    const HELP_CHEAPEST = '';
+    const LIVE_LADDER_LEAD_ROWS = 3;
+
+    // While the settings window is open: the field the live check explains, the last price and
+    // quantity fields used (where the Cheatsheet and "Write it for me" put what they write), and
+    // the last item's prices once they have been read back out of its session.
+    let settingsHelp = { field: null, lastPrice: null, lastQuantity: null, wizardTarget: null, answers: null, tried: null, tab: 1, data: null, loading: false, seq: 0 };
+
+    function isLiveCheckOn(){
+        return localStorage.getItem(liveCheckStorageKey) !== '0';
+    }
+
+    function cheatsheetTabs(){
+        let cheapest = '-1' + HELP_CHEAPEST;
+        return [
+            { name: 'Change', kind: 'price', rows: [
+                ['-1', '$1 less'], ['-5%', '5% less'], ['+10%', '10% more'], ['[0]', 'nothing in front: the price as it is']
+            ], note: 'With no brackets, the change applies to the cheapest item-market listing.' },
+            { name: 'Start from', kind: 'price', rows: [
+                ['-1[0]', 'cheapest listing'], ['-1[1]', '2nd cheapest. Counting starts at 0'], ['-1[14]', '15th cheapest'],
+                ['-1[median]', 'middle price, by unit'], ['[market]', "Torn's market value"],
+                ['-1[bazaar]', 'cheapest player bazaar'], ['-1[bazaar:2]', '3rd cheapest bazaar'],
+                ['-5%[bazaar:avg]', 'bazaar average'], ['[bazaar:median]', 'middle bazaar price']
+            ], note: 'Bazaar prices come from weav3r.dev and need no API key.' },
+            { name: 'Stack size', kind: 'price', rows: [
+                ['-1[100x+]', 'only stacks of 100 or more'], ['-1[mine+]', 'only stacks at least as big as yours'],
+                ['-1[2xmine+]', 'only stacks twice yours or more'], ['-1[bazaar:100x+]', 'the same, for bazaars'],
+                ['-1[mine+ above +5%[market]]', 'and skip any that would put you under market value + 5%']
+            ], note: 'When no listing is big enough, Fill leaves the price as it is and says why.' },
+            { name: 'Combine', kind: 'price', wide: true, rows: [
+                ['-1[bazaar] | ' + cheapest, 'the higher of the two, so the second is a floor'],
+                ['max(-1[bazaar], ' + cheapest + ')', 'the same as |'],
+                ['min(-1[bazaar], ' + cheapest + ')', 'the lower of the two: undercut whichever is cheapest'],
+                ['min(max(' + cheapest + ', +10%[market]), -1[14])', 'keep the price between a floor and a ceiling']
+            ], note: 'Put min() and max() inside each other as deep as you need.' },
+            { name: 'Quantity', kind: 'quantity', rows: [
+                ['max', 'all of them'], ['max-1', 'keep one back'], ['max-3', 'keep three back'], ['1', 'always list one'], ['skip', 'never list']
+            ], note: 'Category rows take the same codes. Leave one blank to use the default.' }
+        ];
+    }
+
+    function wizardQuestions(){
+        return [
+            { key: 'who', ask: 'Who do you want to beat?', options: [['market', 'Item market'], ['bazaar', 'Bazaars'], ['cheaper', 'Whichever is cheaper'], ['floor', 'Bazaars, not below item market']] },
+            { key: 'size', ask: 'Which sellers count?', options: [['any', 'Everyone'], ['100', 'Stacks of 100+'], ['mine', 'Stacks as big as mine']] },
+            { key: 'gap', ask: 'How far under them?', options: [['1', '$1 under'], ['5', '5% under'], ['second', '2nd in line']] },
+            { key: 'net', ask: 'Safety net', options: [['none', 'None'], ['value', 'Not below market value'], ['value10', 'Not below market value + 10%']] }
+        ];
+    }
+
+    function wizardFirstAnswers(){
+        return { who: 'market', size: 'any', gap: '1', net: 'none' };
+    }
+
+    // The formula four answers add up to. Every combination is one Save accepts.
+    function wizardFormula(answers){
+        let delta = answers.gap === '5' ? '-5%' : '-1';
+        let parts = [];
+        if (answers.gap === 'second'){
+            parts.push('1');
+        }
+        if (answers.size === '100'){
+            parts.push('100x+');
+        } else if (answers.size === 'mine'){
+            parts.push('mine+');
+        }
+        let market = parts.length > 0 ? delta + '[' + parts.join(':') + ']' : delta + HELP_CHEAPEST;
+        let bazaar = delta + '[bazaar' + (parts.length > 0 ? ':' + parts.join(':') : '') + ']';
+        let terms;
+        if (answers.who === 'market'){
+            terms = [market];
+        } else if (answers.who === 'bazaar'){
+            terms = [bazaar];
+        } else if (answers.who === 'cheaper'){
+            terms = ['min(' + bazaar + ', ' + market + ')'];
+        } else {
+            terms = [bazaar, market];
+        }
+        let floor = answers.net === 'value' ? '[market]' : answers.net === 'value10' ? '+10%[market]' : null;
+        if (floor != null){
+            terms.push(floor);
+        }
+        if (terms.length === 1){
+            return terms[0];
+        }
+        return floor == null ? terms.join(' | ') : 'max(' + terms.join(', ') + ')';
+    }
+
+    // ---- Plain words for a formula --------------------------------------------------------------
+
+    function helpParts(formula){
+        let source = sourceOf(formula);
+        let selector = listingSelector(formula);
+        let scalar = source === SOURCE_MARKET_VALUE ? 'market' : (source === SOURCE_BAZAAR && selector.kind === 'avg' ? 'avg' : null);
+        return { kind: 'formula', formula: formula, source: source, sel: selector, delta: stripDeltaBracket(formula), limitFormula: aboveLimit(formula), scalar: scalar, price: null };
+    }
+
+    function helpSourceWord(source){
+        return source === SOURCE_BAZAAR ? 'bazaar' : 'item-market';
+    }
+
+    function helpWhich(selector){
+        if (selector.kind === 'median'){
+            return 'the median';
+        }
+        return selector.index === 0 ? 'the cheapest' : 'the ' + ordinal(selector.index + 1) + ' cheapest';
+    }
+
+    // "at least as big as yours", "of 100 or more", or null when any stack counts.
+    function helpStackTail(parts){
+        if (parts.sel.mineFactor != null){
+            return parts.sel.mineFactor === 1 ? 'at least as big as yours' : 'at least ' + parts.sel.mineFactor + '× yours';
+        }
+        if (parts.sel.minStack != null){
+            return 'of ' + count(minimumStack(parts.formula, null, parts.source)) + ' or more';
+        }
+        return null;
+    }
+
+    function helpDelta(delta){
+        let match = String(delta ?? '').trim().match(/^([-+]?)(\d+(?:\.\d+)?)(%)?$/);
+        if (match == null){
+            return null;
+        }
+        return { amount: match[3] ? match[2] + '%' : '$' + Number(match[2]).toLocaleString('en-US'), down: match[1] === '-' };
+    }
+
+    function formulaInWords(parts){
+        let noun;
+        let tail = helpStackTail(parts);
+        if (parts.scalar != null){
+            noun = parts.scalar === 'market' ? 'market value' : 'the bazaar average';
+        } else if (parts.sel.kind === 'median'){
+            noun = 'the median ' + helpSourceWord(parts.source) + ' price' + (tail != null ? ' across stacks ' + tail : '');
+        } else {
+            noun = helpWhich(parts.sel) + ' ' + helpSourceWord(parts.source) + (tail != null ? ' stack ' + tail : ' listing');
+        }
+        if (parts.limitFormula != null && parts.limitFormula !== ''){
+            noun += ' that keeps you at or above ' + formulaInWords(helpParts(parts.limitFormula));
+        }
+        let delta = helpDelta(parts.delta);
+        return delta != null ? delta.amount + (delta.down ? ' under ' : ' over ') + noun : 'exactly ' + noun;
+    }
+
+    // min(a, b) reads as "a, but never above b" and max(a, b) as "a, but never below b".
+    function settingInWords(node){
+        if (node.kind === 'formula'){
+            return formulaInWords(helpParts(node.formula));
+        }
+        let head = settingInWords(node.children[0]);
+        let rest = node.children.slice(1).map(settingInWords).join(' or ');
+        return head + (head.indexOf(', but never') !== -1 ? ', and never ' : ', but never ') + (node.combine === 'max' ? 'below ' : 'above ') + rest;
+    }
+
+    function quantityInWords(mode, data){
+        let normalised = String(mode ?? '').trim().toLowerCase();
+        if (normalised === ''){
+            normalised = 'max';
+        }
+        if (data != null && data.mine != null){
+            let listed = resolveQuantity(data.mine, normalised);
+            if (listed == null){
+                return 'Leaves this item alone: nothing is listed.';
+            }
+            return 'Lists ' + count(listed) + ' of your ' + count(data.mine) + (listed === data.mine ? ', all of them.' : '.');
+        }
+        let minus = normalised.match(/^max\s*-\s*(\d+)$/);
+        if (normalised === 'max'){
+            return 'Lists all of them.';
+        }
+        if (normalised === 'skip' || normalised === 'none' || /^0+$/.test(normalised)){
+            return 'Leaves this item alone: nothing is listed.';
+        }
+        if (minus != null){
+            return 'Lists all but ' + (minus[1] === '1' ? 'one' : minus[1]) + ', and nothing when you have that many or fewer.';
+        }
+        return 'Lists ' + count(Number(normalised)) + ', or all of them when you have fewer.';
+    }
+
+    // ---- Pricing a setting on the last item filled --------------------------------------------
+    // The same reads, filters and rounding a Fill uses, run on what the last fill (or analytics
+    // popup) already read. A source that was never read leaves the check in words only.
+
+    async function loadLiveCheckData(){
+        let session = liveCheckSession;
+        if (session == null){
+            return null;
+        }
+        let model = await analyticsModel(session, { itemId: session.itemId });
+        let average = model.bazaar != null && model.bazaar.average != null ? model.bazaar.average : null;
+        if (average == null){
+            let snapshot = await sessionData(session, 'bazaar:avg');
+            let value = snapshot == null || snapshot.error != null ? NaN : Number(snapshot.bazaar_average);
+            average = snapshot != null && snapshot.bazaar_average != null && Number.isFinite(value) ? value : null;
+        }
+        let mine = Number(model.mine);
+        let value = model.value != null ? Number(model.value.value) : NaN;
+        return {
+            name: model.name || ('item #' + session.itemId),
+            mine: Number.isFinite(mine) && mine > 0 ? mine : null,
+            market: model.market != null && Array.isArray(model.market.listings) ? model.market.listings : null,
+            value: Number.isFinite(value) ? value : null,
+            bazaar: model.bazaar != null && Array.isArray(model.bazaar.listings) ? model.bazaar.listings : null,
+            average: average
+        };
+    }
+
+    // One formula, the way a Fill prices it. `alone` is true when it is the whole setting: only
+    // then does a bazaar with no listings fall back to the item market, as it does on a Fill.
+    function liveBranch(formula, data, alone){
+        let d = helpParts(formula);
+        if (d.scalar != null){
+            d.base = d.scalar === 'market' ? data.value : data.average;
+            if (d.base == null){
+                d.missing = d.scalar === 'market' ? 'the market value' : 'the bazaar average';
+                return d;
+            }
+            d.price = Math.round(performOperation(d.base, d.delta));
+            return d;
+        }
+        let limit = null;
+        if (d.limitFormula != null){
+            let limitBranch = liveBranch(d.limitFormula, data, false);
+            if (limitBranch.missing != null){
+                d.missing = limitBranch.missing;
+                return d;
+            }
+            if (limitBranch.price == null){
+                d.unmatched = "the price after 'above' (" + d.limitFormula + ") could not be worked out";
+                return d;
+            }
+            limit = d.limit = limitBranch.price;
+        }
+        let used = formula;
+        let listings = null;
+        if (d.source === SOURCE_BAZAAR){
+            if (data.bazaar == null){
+                d.missing = 'the bazaar listings';
+                return d;
+            }
+            if (data.bazaar.length > 0){
+                listings = data.bazaar;
+            } else if (!alone){
+                d.nothing = true;
+                return d;
+            } else {
+                used = itemMarketFallbackFormula(formula);
+                d.fallback = true;
+                d.source = SOURCE_ITEM_MARKET;
+                d.sel = listingSelector(used);
+            }
+        }
+        if (listings == null){
+            if (data.market == null){
+                d.missing = 'the item-market listings';
+                return d;
+            }
+            if (data.market.length === 0){
+                d.error = 'there are no item-market listings';
+                return d;
+            }
+            listings = data.market;
+        }
+        if (usesMine(used) && data.mine == null){
+            d.missing = 'your stack size';
+            return d;
+        }
+        d.all = listings;
+        d.minimum = minimumStack(used, data.mine, d.source);
+        let eligible = eligibleListings(listings, used, d.source, { mine: data.mine, limit: limit });
+        if (eligible.unmatched != null){
+            d.unmatched = eligible.unmatched;
+            d.kept = [];
+            return d;
+        }
+        d.kept = eligible.listings;
+        if (d.sel.kind === 'median'){
+            d.base = getMedianPrice(d.kept);
+        } else {
+            let index = Math.min(d.sel.index, d.kept.length - 1);
+            d.pick = d.kept[index];
+            d.clamped = d.sel.index > index;
+            d.base = d.pick.price;
+            // Only the ones passed over on the way to it, as the analytics popup counts them.
+            d.skipped = listings.slice(0, listings.indexOf(d.pick)).filter(function(listing){
+                return d.kept.indexOf(listing) === -1;
+            }).length;
+        }
+        d.price = Math.round(performOperation(d.base, d.delta));
+        return d;
+    }
+
+    function liveNode(node, data, alone){
+        if (node.kind === 'formula'){
+            return liveBranch(node.formula, data, alone);
+        }
+        let children = node.children.map(function(child){ return liveNode(child, data, false); });
+        let price = null;
+        let win = -1;
+        children.forEach(function(child, index){
+            if (typeof child.price === 'number' && isFinite(child.price) &&
+                (price == null || (node.combine === 'min' ? child.price < price : child.price > price))){
+                price = child.price;
+                win = index;
+            }
+        });
+        return { kind: 'combine', combine: node.combine, children: children, price: price, win: win };
+    }
+
+    function liveMissing(result, found){
+        found = found ?? [];
+        if (result.kind === 'formula'){
+            if (result.missing != null && found.indexOf(result.missing) === -1){
+                found.push(result.missing);
+            }
+        } else {
+            result.children.forEach(function(child){ liveMissing(child, found); });
+        }
+        return found;
+    }
+
+    function wordsNode(node){
+        if (node.kind === 'formula'){
+            return helpParts(node.formula);
+        }
+        return { kind: 'combine', combine: node.combine, children: node.children.map(wordsNode), price: null, win: -1 };
+    }
+
+    function winningBranch(result){
+        if (result == null || result.kind === 'formula'){
+            return result;
+        }
+        return result.win >= 0 ? winningBranch(result.children[result.win]) : null;
+    }
+
+    // What a setting does: {problem} when Save would refuse it, otherwise its words and, when
+    // the last item's reads cover it, its priced tree.
+    function liveEvaluate(setting){
+        let problem = settingProblem(setting);
+        if (problem != null){
+            return { problem: problem };
+        }
+        let root = parseSetting(setting);
+        let check = { root: root, words: capitalise(settingInWords(root)), result: null, missing: [], price: null };
+        let data = settingsHelp.data;
+        if (data == null){
+            return check;
+        }
+        let result = liveNode(root, data, true);
+        if (root.kind !== 'formula' && result.price == null && liveMissing(result).length === 0){
+            // Nothing priced: a Fill then runs the first formula on its own, fallback and all.
+            result.rerun = liveBranch(collectFormulas(root)[0], data, true);
+            result.price = result.rerun.price;
+        }
+        check.missing = liveMissing(result);
+        if (check.missing.length === 0){
+            check.result = result;
+            check.price = result.price;
+        }
+        return check;
+    }
+
+    // ---- Live check rendering ---------------------------------------------------------------
+
+    function liveStepsHtml(rows){
+        return '<dl class="tbf-live-steps">' + rows.map(function(row){ return '<dt>' + row[0] + '</dt><dd>' + row[1] + '</dd>'; }).join('') + '</dl>';
+    }
+
+    function liveSteps(d, priced){
+        let rows = [];
+        if (d.scalar != null){
+            rows.push(['Start from', (d.scalar === 'market' ? 'Torn market value' : 'the bazaar average') + (priced ? ' <b>' + money(d.base) + '</b>' : '')]);
+        } else {
+            let tail = helpStackTail(d);
+            let look = capitalise(helpSourceWord(d.source)) + ' listings';
+            if (tail != null){
+                look += ', stacks ' + tail + (priced && d.sel.mineFactor != null && typeof d.minimum === 'number' ? ' (' + count(d.minimum) + '+)' : '');
+            }
+            if (d.limitFormula != null){
+                look += ', only ones that keep you at or above <code>' + escapeHtml(d.limitFormula) + '</code>' + (priced && d.limit != null ? ' = ' + money(d.limit) : '');
+            }
+            if (priced && d.fallback){
+                look = 'No bazaar listings, so the item market: ' + look.charAt(0).toLowerCase() + look.slice(1);
+            }
+            rows.push(['Look at', look]);
+            if (priced && d.error != null){
+                rows.push(['Found', escapeHtml(capitalise(d.error)) + '.']);
+                return liveStepsHtml(rows);
+            }
+            if (priced && d.nothing){
+                rows.push(['Found', 'no usable bazaar price, so this one sits out.']);
+                return liveStepsHtml(rows);
+            }
+            if (priced && d.unmatched != null){
+                rows.push(['Found', 'nothing: ' + escapeHtml(d.unmatched) + '. Fill leaves the price as it is.']);
+                return liveStepsHtml(rows);
+            }
+            let pick;
+            if (d.sel.kind === 'median'){
+                pick = priced ? 'median of ' + count(d.kept.length) + ' listings, by unit: <b>' + money(d.base) + '</b>' : 'the median price, by unit';
+            } else {
+                pick = helpWhich(d.sel);
+                if (priced){
+                    pick += ': <b>' + money(d.pick.price) + '</b> ×' + count(d.pick.amount);
+                    if (d.clamped){
+                        pick += ' (there are only ' + count(d.kept.length) + ', so the last one)';
+                    }
+                    if (d.skipped > 0){
+                        pick += ', after skipping ' + count(d.skipped);
+                    }
+                }
+            }
+            rows.push(['Pick', capitalise(pick)]);
+        }
+        let delta = helpDelta(d.delta);
+        rows.push(['Change', delta != null ? (delta.down ? 'minus ' : 'plus ') + delta.amount : 'nothing']);
+        if (priced){
+            rows.push(['Price', '<b class="tbf-live-win">' + money(d.price) + '</b>']);
+        }
+        return liveStepsHtml(rows);
+    }
+
+    function liveTree(node, depth, onWinningPath, priced){
+        let indent = ' style="margin-left:' + (depth * 14) + 'px"';
+        if (node.kind === 'formula'){
+            let why = formulaInWords(node);
+            if (priced && node.unmatched != null){
+                why = capitalise(node.unmatched);
+            } else if (priced && node.nothing){
+                why = 'No usable bazaar price, so this one sits out';
+            } else if (priced && node.error != null){
+                why = capitalise(node.error);
+            } else {
+                why = capitalise(why);
+            }
+            let price = priced ? '<span class="p">' + (typeof node.price === 'number' ? money(node.price) : '—') + '</span>' : '';
+            return '<div class="tbf-live-tr' + (priced && onWinningPath ? ' tbf-live-tr--win' : '') + '"' + indent + '><code>' + escapeHtml(node.formula) + '</code>' + price + '<span class="w">' + escapeHtml(why) + '</span></div>';
+        }
+        let html = '<div class="tbf-live-tr"' + indent + '><span class="op">' + node.combine + '(</span></div>';
+        node.children.forEach(function(child, index){
+            html += liveTree(child, depth + 1, onWinningPath && index === node.win, priced);
+        });
+        html += '<div class="tbf-live-tr' + (priced && depth === 0 && node.win >= 0 ? ' tbf-live-tr--win' : '') + '"' + indent + '><span class="op">)</span>' +
+            (priced ? '<span class="p">' + (node.win >= 0 ? money(node.children[node.win].price) : '—') + '</span>' : '') +
+            '<span class="w">keeps the ' + (node.combine === 'min' ? 'lowest' : 'highest') + ' of ' + node.children.length + '</span></div>';
+        return html;
+    }
+
+    // The listings the winning formula read, with the one it picked, the ones it skipped, and
+    // where your price would sit among them. Only the rows that tell the story are shown.
+    function liveLadder(d, you, mine){
+        if (d == null || !Array.isArray(d.all) || typeof you !== 'number'){
+            return '';
+        }
+        let kept = d.kept ?? d.all;
+        let rows = d.all.map(function(listing){ return { listing: listing }; });
+        let ahead = d.all.filter(function(listing){ return listing.price <= you; }).length;
+        rows.splice(ahead, 0, { you: true });
+        let shown = new Set();
+        rows.forEach(function(row, index){
+            if (index < LIVE_LADDER_LEAD_ROWS || row.you || (row.listing != null && row.listing === d.pick)){
+                shown.add(index - 1);
+                shown.add(index);
+                shown.add(index + 1);
+            }
+        });
+        let html = '<div class="tbf-live-lad-h">' + (d.source === SOURCE_BAZAAR ? 'Bazaar' : 'Item-market') + ' listings</div><div class="tbf-live-lad">';
+        let hidden = 0;
+        rows.forEach(function(row, index){
+            if (!shown.has(index)){
+                hidden++;
+                return;
+            }
+            if (hidden > 0){
+                html += '<div class="tbf-live-lr tbf-live-lr--gap">' + count(hidden) + ' more</div>';
+                hidden = 0;
+            }
+            if (row.you){
+                html += '<div class="tbf-live-lr tbf-live-lr--you"><span class="p">' + money(you) + '</span><span class="q">' + (mine != null ? '×' + count(mine) : '') + '</span><span class="n">you · ' + ordinal(ahead + 1) + ' in line</span></div>';
+                return;
+            }
+            let listing = row.listing;
+            let picked = listing === d.pick;
+            let counted = kept.indexOf(listing) !== -1;
+            let note = picked ? 'picked' : '';
+            if (!counted){
+                note = typeof d.minimum === 'number' && Number(listing.amount ?? 1) < d.minimum ? 'skipped · under ' + count(d.minimum) : 'skipped · below the limit';
+            }
+            html += '<div class="tbf-live-lr' + (picked ? ' tbf-live-lr--pick' : '') + (!counted ? ' tbf-live-lr--dim' : '') + '"><span class="p">' + money(listing.price) + '</span><span class="q">×' + count(listing.amount ?? 1) + '</span><span class="n">' + note + '</span></div>';
+        });
+        if (hidden > 0){
+            html += '<div class="tbf-live-lr tbf-live-lr--gap">' + count(hidden) + ' more</div>';
+        }
+        return html + '</div>';
+    }
+
+    function liveExplain(check){
+        let priced = check.result != null;
+        let node = priced ? check.result : wordsNode(check.root);
+        let say = '<div class="tbf-live-say">' + escapeHtml(check.words) + (priced && check.price != null ? ' → <b>' + money(check.price) + '</b>' : '') + '.</div>';
+        if (node.kind === 'formula'){
+            return say + liveSteps(node, priced) + (priced ? liveLadder(node, node.price, settingsHelp.data.mine) : '');
+        }
+        let html = say + '<div class="tbf-live-tree">' + liveTree(node, 0, true, priced) + '</div>';
+        if (priced && node.rerun != null){
+            html += '<div class="tbf-live-muted">None of these priced, so a Fill runs <code>' + escapeHtml(node.rerun.formula) + '</code> on its own: ' +
+                (node.rerun.price != null ? money(node.rerun.price) : 'nothing') + '.</div>';
+        }
+        if (priced && check.price != null){
+            html += liveLadder(node.rerun ?? winningBranch(node), check.price, settingsHelp.data.mine);
+        }
+        return html;
+    }
+
+    function liveFoot(check){
+        let data = settingsHelp.data;
+        if (data == null){
+            return settingsHelp.loading ? '' : '<div class="tbf-live-foot">Fill an item, or open its analytics, to see prices here.</div>';
+        }
+        if (check != null && check.missing.length > 0){
+            return '<div class="tbf-live-foot">Your last fill, ' + escapeHtml(data.name) + ', did not read ' + escapeHtml(check.missing.join(' or ')) +
+                '. Opening that item\'s analytics reads them all.</div>';
+        }
+        return '<div class="tbf-live-foot">From your last fill. Nothing here calls the API.</div>';
+    }
+
+    function helpFieldKind(input){
+        if (input == null || input.classList == null){
+            return null;
+        }
+        if (input.classList.contains('tbf-modal-delta') || input.classList.contains('tbf-modal-cat-formula')){
+            return 'price';
+        }
+        if (input.classList.contains('tbf-modal-qty') || input.classList.contains('tbf-modal-cat-qty')){
+            return 'quantity';
+        }
+        return null;
+    }
+
+    function helpFieldName(input){
+        let kind = helpFieldKind(input);
+        let row = input.closest('.tbf-modal-cat-row');
+        if (row == null){
+            return kind === 'quantity' ? 'Default quantity' : 'Default price';
+        }
+        let name = row.querySelector('.tbf-modal-cat-name').value.trim();
+        return (name === '' ? 'New category' : name) + (kind === 'quantity' ? ' quantity' : ' price');
+    }
+
+    // A field that has since been removed with its category row hands over to the default one.
+    function helpInput(overlay, which){
+        let input = settingsHelp[which];
+        if (input == null || !input.isConnected){
+            input = overlay.querySelector(which === 'lastQuantity' ? '.tbf-modal-qty' : '.tbf-modal-delta');
+            settingsHelp[which] = input;
+        }
+        return input;
+    }
+
+    function renderLiveCheck(overlay){
+        let box = overlay.querySelector('.tbf-live');
+        let on = isLiveCheckOn();
+        overlay.querySelector('.tbf-help-switch').setAttribute('aria-checked', String(on));
+        if (!on){
+            box.hidden = true;
+            return;
+        }
+        let field = helpInput(overlay, 'field');
+        let anchor = field.closest('.tbf-modal-cat-row') ?? field;
+        if (anchor.nextElementSibling !== box){
+            anchor.insertAdjacentElement('afterend', box);
+        }
+        box.hidden = false;
+        let kind = helpFieldKind(field);
+        let text = field.value.trim();
+        let blank = '';
+        if (text === ''){
+            let row = field.closest('.tbf-modal-cat-row');
+            if (kind === 'quantity'){
+                text = row == null ? 'max' : (overlay.querySelector('.tbf-modal-qty').value.trim() || 'max');
+                blank = row == null ? 'Blank means <code>max</code>.' : 'Blank, so it uses the default quantity, <code>' + escapeHtml(text) + '</code>.';
+            } else {
+                text = row == null ? priceDeltaRaw : (overlay.querySelector('.tbf-modal-delta').value.trim() || priceDeltaRaw);
+                blank = row == null ? 'Blank keeps your saved price, <code>' + escapeHtml(text) + '</code>.' : 'Blank, so it uses the default price, <code>' + escapeHtml(text) + '</code>.';
+            }
+            blank = '<div class="tbf-live-muted">' + blank + '</div>';
+        }
+        let data = settingsHelp.data;
+        let where = data != null ? escapeHtml(data.name) + (data.mine != null ? ' · stack ' + count(data.mine) : '') : (settingsHelp.loading ? 'reading…' : 'no prices yet');
+        let html = '<div class="tbf-live-h"><span>Live check · ' + escapeHtml(helpFieldName(field)) + '</span><span>' + where + '</span></div>' + blank;
+        let bad = false;
+        if (kind === 'quantity'){
+            if (!isKnownQuantityMode(text)){
+                bad = true;
+                html += '<div class="tbf-live-err">Can\'t save this yet: use max, max-1, a plain number, or skip.</div>';
+            } else {
+                html += '<div class="tbf-live-say">' + escapeHtml(quantityInWords(text, data)) + '</div>';
+                if (data == null){
+                    html += liveFoot(null);
+                } else if (data.mine == null){
+                    html += liveFoot({ missing: ['your stack size'] });
+                }
+            }
+        } else {
+            let check = liveEvaluate(text);
+            if (check.problem != null){
+                bad = true;
+                html += '<div class="tbf-live-err">Can\'t save this yet: ' + escapeHtml(check.problem) + '</div>';
+            } else {
+                html += liveExplain(check) + liveFoot(check);
+            }
+        }
+        field.classList.toggle('tbf-modal-invalid', bad);
+        box.innerHTML = html;
+    }
+
+    // ---- Cheatsheet -----------------------------------------------------------------------------
+
+    function cheatsheetTarget(overlay){
+        let tab = cheatsheetTabs()[settingsHelp.tab];
+        return helpInput(overlay, tab.kind === 'quantity' ? 'lastQuantity' : 'lastPrice');
+    }
+
+    function renderCheatsheet(overlay){
+        let tabs = cheatsheetTabs();
+        let tab = tabs[settingsHelp.tab];
+        overlay.querySelector('.tbf-sheet-tabs').innerHTML = tabs.map(function(each, index){
+            return '<button type="button" role="tab" data-tab="' + index + '" aria-selected="' + (index === settingsHelp.tab) + '">' + each.name + '</button>';
+        }).join('');
+        overlay.querySelector('.tbf-sheet-rows').innerHTML = tab.rows.map(function(row){
+            return '<button type="button" class="tbf-sheet-row' + (tab.wide ? ' tbf-sheet-row--wide' : '') + '" data-value="' + escapeHtml(row[0]) + '">' +
+                '<code>' + escapeHtml(row[0]) + '</code><span>' + escapeHtml(row[1]) + '</span></button>';
+        }).join('');
+        overlay.querySelector('.tbf-sheet-note').textContent = tab.note;
+        renderCheatsheetHint(overlay);
+    }
+
+    function renderCheatsheetHint(overlay){
+        let target = cheatsheetTarget(overlay);
+        overlay.querySelector('.tbf-sheet-hint').innerHTML = 'Tap a row to put it in <b>' + escapeHtml(helpFieldName(target)) + '</b>.';
+        let value = target.value.trim();
+        overlay.querySelectorAll('.tbf-sheet-row').forEach(function(row){
+            row.classList.toggle('tbf-sheet-row--on', row.dataset.value === value);
+        });
+    }
+
+    function renderCheatsheetTried(overlay){
+        let box = overlay.querySelector('.tbf-sheet-tried');
+        let tried = settingsHelp.tried;
+        if (tried == null || !tried.input.isConnected){
+            box.innerHTML = '';
+            return;
+        }
+        let html = 'Now in ' + escapeHtml(helpFieldName(tried.input)) + ': <code>' + escapeHtml(tried.value) + '</code>. ';
+        if (!isLiveCheckOn()){
+            html += 'Turn on Live check to see what it does.';
+        } else if (helpFieldKind(tried.input) === 'quantity'){
+            html += escapeHtml(quantityInWords(tried.value, settingsHelp.data));
+        } else {
+            let check = liveEvaluate(tried.value);
+            html += check.problem != null ? escapeHtml(check.problem) : escapeHtml(check.words) + (check.price != null ? ' → <b>' + money(check.price) + '</b>.' : '.');
+        }
+        box.innerHTML = html;
+    }
+
+    // ---- Write it for me ------------------------------------------------------------------------
+
+    function openWizard(overlay){
+        settingsHelp.wizardTarget = helpInput(overlay, 'lastPrice');
+        settingsHelp.answers = wizardFirstAnswers();
+        overlay.querySelector('.tbf-wiz-qs').innerHTML = wizardQuestions().map(function(question){
+            return '<div class="tbf-wiz-q"><span>' + question.ask + '</span><div class="tbf-wiz-seg" data-key="' + question.key + '">' +
+                question.options.map(function(option){
+                    return '<button type="button" data-value="' + option[0] + '" aria-pressed="' + (settingsHelp.answers[question.key] === option[0]) + '">' + option[1] + '</button>';
+                }).join('') + '</div></div>';
+        }).join('');
+        overlay.querySelector('.tbf-wiz').hidden = false;
+        overlay.querySelector('.tbf-help-write').setAttribute('aria-expanded', 'true');
+        renderWizard(overlay);
+    }
+
+    function closeWizard(overlay){
+        overlay.querySelector('.tbf-wiz').hidden = true;
+        overlay.querySelector('.tbf-help-write').setAttribute('aria-expanded', 'false');
+    }
+
+    function renderWizard(overlay){
+        let panel = overlay.querySelector('.tbf-wiz');
+        if (panel.hidden){
+            return;
+        }
+        let target = settingsHelp.wizardTarget;
+        if (target == null || !target.isConnected){
+            target = settingsHelp.wizardTarget = overlay.querySelector('.tbf-modal-delta');
+        }
+        overlay.querySelector('.tbf-wiz-for').textContent = 'for ' + helpFieldName(target);
+        let formula = wizardFormula(settingsHelp.answers);
+        let check = liveEvaluate(formula);
+        overlay.querySelector('.tbf-wiz-out').innerHTML =
+            '<div class="tbf-wiz-f"><code>' + escapeHtml(formula) + '</code></div>' +
+            '<div class="tbf-wiz-say">' + escapeHtml(check.words ?? check.problem) + (check.price != null ? ' → <b>' + money(check.price) + '</b> on ' + escapeHtml(settingsHelp.data.name) : '') + '.</div>' +
+            '<button type="button" class="tbf-wiz-use" data-value="' + escapeHtml(formula) + '">Use this in ' + escapeHtml(helpFieldName(target)) + '</button>';
+    }
+
+    // ---- Wiring ---------------------------------------------------------------------------------
+
+    function settingsHelpMarkup(){
+        return '<div class="tbf-help-bar">' +
+                '<button type="button" class="tbf-help-switch" role="switch" aria-checked="true"><span class="tbf-help-track"></span>Live check</button>' +
+                '<button type="button" class="tbf-help-write" aria-expanded="false">Write it for me</button>' +
+            '</div>' +
+            '<div class="tbf-wiz" hidden>' +
+                '<div class="tbf-wiz-h"><span>Write it for me<small class="tbf-wiz-for"></small></span><span class="tbf-wiz-close" title="Close">&times;</span></div>' +
+                '<div class="tbf-wiz-qs"></div>' +
+                '<div class="tbf-wiz-out"></div>' +
+            '</div>' +
+            '<details class="tbf-sheet">' +
+                '<summary>Cheatsheet</summary>' +
+                '<div class="tbf-anat">' +
+                    '<div class="tbf-anat-part"><code>-5%</code><i class="tbf-anat-brace"></i><span>how much to change it</span></div>' +
+                    '<div class="tbf-anat-part"><code>[bazaar:2]</code><i class="tbf-anat-brace"></i><span>which price to start from</span></div>' +
+                '</div>' +
+                '<p class="tbf-anat-note">Leave out the brackets to start from the cheapest item-market listing.</p>' +
+                '<div class="tbf-sheet-tabs" role="tablist"></div>' +
+                '<p class="tbf-sheet-hint"></p>' +
+                '<div class="tbf-sheet-rows" role="tabpanel"></div>' +
+                '<p class="tbf-sheet-note"></p>' +
+                '<div class="tbf-sheet-tried"></div>' +
+            '</details>';
+    }
+
+    // Put a value into a settings field for the player, without focusing it: on a phone that
+    // would pop the keyboard up over the very thing they are reading.
+    function helpPut(overlay, input, value){
+        input.value = value;
+        input.classList.remove('tbf-modal-invalid');
+        settingsHelp.field = input;
+        settingsHelp[helpFieldKind(input) === 'quantity' ? 'lastQuantity' : 'lastPrice'] = input;
+        renderLiveCheck(overlay);
+        renderCheatsheetHint(overlay);
+    }
+
+    function attachSettingsHelp(overlay){
+        overlay.addEventListener('focusin', function(event){
+            let input = event.target;
+            if (input.classList != null && input.classList.contains('tbf-modal-cat-name')){
+                input = input.closest('.tbf-modal-cat-row').querySelector('.tbf-modal-cat-formula');
+            }
+            let kind = helpFieldKind(input);
+            if (kind == null){
+                return;
+            }
+            settingsHelp.field = input;
+            settingsHelp[kind === 'quantity' ? 'lastQuantity' : 'lastPrice'] = input;
+            renderLiveCheck(overlay);
+            renderCheatsheetHint(overlay);
+        });
+        overlay.addEventListener('input', function(event){
+            if (event.target.classList.contains('tbf-modal-apikey')){
+                return;
+            }
+            renderLiveCheck(overlay);
+            renderCheatsheetHint(overlay);
+            renderWizard(overlay);
+        });
+        overlay.querySelector('.tbf-help-switch').addEventListener('click', function(){
+            localStorage.setItem(liveCheckStorageKey, isLiveCheckOn() ? '0' : '1');
+            renderLiveCheck(overlay);
+            renderCheatsheetTried(overlay);
+        });
+        overlay.querySelector('.tbf-help-write').addEventListener('click', function(){
+            if (overlay.querySelector('.tbf-wiz').hidden){
+                openWizard(overlay);
+            } else {
+                closeWizard(overlay);
+            }
+        });
+        overlay.querySelector('.tbf-wiz-close').addEventListener('click', function(){ closeWizard(overlay); });
+        overlay.querySelector('.tbf-wiz').addEventListener('click', function(event){
+            let use = event.target.closest('.tbf-wiz-use');
+            if (use != null){
+                let target = settingsHelp.wizardTarget;
+                helpPut(overlay, target, use.dataset.value);
+                closeWizard(overlay);
+                if (typeof target.scrollIntoView === 'function'){
+                    target.scrollIntoView({ block: 'nearest' });
+                }
+                return;
+            }
+            let option = event.target.closest('.tbf-wiz-seg button');
+            if (option == null){
+                return;
+            }
+            let segment = option.parentElement;
+            settingsHelp.answers[segment.dataset.key] = option.dataset.value;
+            segment.querySelectorAll('button').forEach(function(button){
+                button.setAttribute('aria-pressed', String(button === option));
+            });
+            renderWizard(overlay);
+        });
+        let sheet = overlay.querySelector('.tbf-sheet');
+        sheet.addEventListener('toggle', function(){
+            localStorage.setItem(cheatsheetOpenStorageKey, sheet.open ? '1' : '0');
+        });
+        overlay.querySelector('.tbf-sheet-tabs').addEventListener('click', function(event){
+            let button = event.target.closest('button[data-tab]');
+            if (button == null){
+                return;
+            }
+            settingsHelp.tab = parseInt(button.dataset.tab, 10);
+            localStorage.setItem(cheatsheetTabStorageKey, String(settingsHelp.tab));
+            renderCheatsheet(overlay);
+        });
+        overlay.querySelector('.tbf-sheet-rows').addEventListener('click', function(event){
+            let row = event.target.closest('.tbf-sheet-row');
+            if (row == null){
+                return;
+            }
+            let target = cheatsheetTarget(overlay);
+            helpPut(overlay, target, row.dataset.value);
+            settingsHelp.tried = { input: target, value: row.dataset.value };
+            renderCheatsheetTried(overlay);
+        });
+    }
+
+    // Before the fields are refilled: park the live check under the default price, where
+    // clearing the category list cannot take it with it, and forget the last window's state.
+    function resetSettingsHelp(overlay){
+        let box = overlay.querySelector('.tbf-live');
+        overlay.querySelector('.tbf-modal-delta').insertAdjacentElement('afterend', box);
+        settingsHelp.field = settingsHelp.lastPrice = overlay.querySelector('.tbf-modal-delta');
+        settingsHelp.lastQuantity = overlay.querySelector('.tbf-modal-qty');
+        settingsHelp.tried = null;
+        settingsHelp.data = null;
+        settingsHelp.loading = liveCheckSession != null;
+        settingsHelp.seq++;
+        closeWizard(overlay);
+        let tab = parseInt(localStorage.getItem(cheatsheetTabStorageKey) ?? '1', 10);
+        settingsHelp.tab = Number.isInteger(tab) && tab >= 0 && tab < cheatsheetTabs().length ? tab : 1;
+        overlay.querySelector('.tbf-sheet').open = localStorage.getItem(cheatsheetOpenStorageKey) === '1';
+    }
+
+    // Once the fields hold their values: draw everything, then price it on the last item.
+    function startSettingsHelp(overlay){
+        renderCheatsheet(overlay);
+        renderCheatsheetTried(overlay);
+        renderLiveCheck(overlay);
+        if (!settingsHelp.loading){
+            return;
+        }
+        let seq = settingsHelp.seq;
+        loadLiveCheckData().catch(function(error){
+            console.warn("[TornBazaarFiller] Live check could not read the last fill:", error);
+            return null;
+        }).then(function(data){
+            if (seq !== settingsHelp.seq){
+                return;
+            }
+            settingsHelp.data = data;
+            settingsHelp.loading = false;
+            renderLiveCheck(overlay);
+            renderCheatsheetTried(overlay);
+            renderWizard(overlay);
+        });
+    }
+
+    // A category row was removed: whatever pointed at it moves back to the defaults.
+    function settingsHelpRowRemoved(){
+        let overlay = document.querySelector('.tbf-settings-overlay');
+        if (overlay == null){
+            return;
+        }
+        renderLiveCheck(overlay);
+        renderCheatsheetHint(overlay);
+        renderCheatsheetTried(overlay);
+        renderWizard(overlay);
+    }
+
     function ensureSettingsModal(){
         if (document.querySelector('.tbf-settings-overlay') != null){
             return;
@@ -3438,8 +4341,10 @@
         overlay.innerHTML =
             '<div class="tbf-modal">' +
                 '<h3>Bazaar Filler Settings<span class="tbf-modal-close" title="Close">&times;</span></h3>' +
-                '<label>Default price delta</label>' +
+                settingsHelpMarkup() +
+                '<label>Default price</label>' +
                 '<input type="text" class="tbf-modal-delta" placeholder="-1">' +
+                '<div class="tbf-live" hidden></div>' +
                 '<label>Default quantity</label>' +
                 '<input type="text" class="tbf-modal-qty" placeholder="max">' +
                 '<label>Public API key</label>' +
@@ -3458,13 +4363,6 @@
                     '<button type="button" class="tbf-modal-cancel">Cancel</button>' +
                     '<button type="button" class="tbf-modal-save">Save</button>' +
                 '</div>' +
-                '<div class="tbf-modal-help">Item market: <code>-1</code> (lowest listing − $1), <code>-5%</code>, <code>-1[1]</code> (2nd lowest listing), <code>[market]</code> (Torn market value).<br>' +
-                'Stack size: <code>-1[100x+]</code> undercuts the cheapest listing of 100 or more, <code>-1[mine+]</code> the cheapest at least as big as your stack, <code>-1[2xmine+]</code> at least twice as big. <code>-1[mine+ above +5%[market]]</code> also skips any listing that would put you under 5% over market value.<br>' +
-                'Player bazaars, via weav3r.dev, no API key: <code>-1[bazaar]</code> (cheapest bazaar − $1), <code>-1[bazaar:2]</code> (3rd cheapest), <code>-5%[bazaar:avg]</code> (bazaar average), <code>[bazaar:median]</code>.<br>' +
-                'Combine sources: <code>-1[bazaar] | -1</code> prices both and fills the higher one, so the second is a floor under the first. <code>max(-1[bazaar], -1)</code> is the same; <code>min(-1[bazaar], -1)</code> fills the lower one, to undercut whichever source is cheapest.<br>' +
-                'Price range: put one inside the other to keep a price between a floor and a ceiling. <code>min(max(-1, +10%[market]), -1[14])</code> never fills below 10% over market value, and never above the 15th listing &minus; $1.<br>' +
-                'Quantity examples: <code>max</code> (all of them), <code>max-1</code> (keep one back), <code>max-3</code>, <code>1</code> (always list one), <code>skip</code> (never list this category).<br>' +
-                'Category rows accept the same syntax and fall back to the defaults above when blank.</div>' +
             '</div>' +
             '<datalist id="tbf-modal-cat-list">' + SETTINGS_CATEGORIES.map(c => '<option value="' + c + '"></option>').join('') + '</datalist>';
         document.body.appendChild(overlay);
@@ -3499,6 +4397,7 @@
             event.target.title = hidden ? 'Hide the key' : 'Show the key';
         });
         overlay.querySelector('.tbf-modal-save').addEventListener('click', saveSettingsModal);
+        attachSettingsHelp(overlay);
     }
 
     function addCategoryRow(name, formula, quantity){
@@ -3516,7 +4415,7 @@
         row.querySelector('.tbf-modal-cat-name').value = name;
         row.querySelector('.tbf-modal-cat-formula').value = formula;
         row.querySelector('.tbf-modal-cat-qty').value = quantity;
-        row.querySelector('.tbf-modal-cat-del').addEventListener('click', function(){ row.remove(); });
+        row.querySelector('.tbf-modal-cat-del').addEventListener('click', function(){ row.remove(); settingsHelpRowRemoved(); });
         list.appendChild(row);
     }
 
@@ -3524,6 +4423,7 @@
         ensureSettingsModal();
         const overlay = document.querySelector('.tbf-settings-overlay');
         clearSettingsError(overlay);
+        resetSettingsHelp(overlay);
         overlay.querySelector('.tbf-modal-delta').value = priceDeltaRaw;
         overlay.querySelector('.tbf-modal-qty').value = quantityModeRaw;
         const keyInput = overlay.querySelector('.tbf-modal-apikey');
@@ -3540,6 +4440,7 @@
         let names = [...new Set(Object.keys(categoryDeltas).concat(Object.keys(categoryQuantities)))];
         names.forEach(function(key){ addCategoryRow(key, categoryDeltas[key] ?? '', categoryQuantities[key] ?? ''); });
         overlay.classList.add('tbf-modal-overlay--open');
+        startSettingsHelp(overlay);
     }
 
     function closeSettingsModal(){
@@ -3669,7 +4570,7 @@
         let deltaInput = overlay.querySelector('.tbf-modal-delta');
         let deltaProblem = settingProblem(deltaInput.value);
         if (deltaProblem != null){
-            return reportSettingsError(overlay, deltaInput, 'Default price delta: ' + deltaProblem);
+            return reportSettingsError(overlay, deltaInput, 'Default price: ' + deltaProblem);
         }
         let qtyInput = overlay.querySelector('.tbf-modal-qty');
         if (qtyInput.value.trim() !== '' && !isKnownQuantityMode(qtyInput.value)){
