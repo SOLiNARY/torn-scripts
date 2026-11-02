@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Torn Bazaar Filler
 // @namespace    https://github.com/SOLiNARY
-// @version      2.0.0
-// @description  Adds a Fill button to every item on your bazaar's Add and Manage pages: one click sets the price and quantity. Price from the item market (cheapest minus $1 by default), market value or live bazaars via weav3r.dev, with your own formula and min/max ranges. Quantity modes, per-category settings, favourites with Fill All, and a bubble that warns when your price is far below the competition. A small chart icon next to Fill opens item analytics: item-market and bazaar listings on one price ladder, where your price lands, stack sizes, and what your formula picked. Open settings with the cog on the Fill All bar or by holding Fill for 3s.
+// @version      2.1.0
+// @description  Adds a Fill button to every item on your bazaar's Add and Manage pages: one click sets the price and quantity. Price from the item market (cheapest minus $1 by default), market value or live bazaars via weav3r.dev, with your own formula and min/max ranges. Quantity modes, per-category settings, favourites with Fill All, and a bubble that warns when your price is far below the competition. A small chart icon next to Fill opens item analytics: item-market and bazaar listings on one price ladder (or just one of them), what each keeps after the item-market fee, whether the item market or a bazaar pays more, where your price lands, stack sizes, and what your formula picked. Open settings with the cog on the Fill All bar or by holding Fill for 3s.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT License
 // @match        https://www.torn.com/bazaar.php*
@@ -20,7 +20,7 @@
     'use strict';
 
     // Keep in sync with @version above — it keys the "What's new" popup.
-    const SCRIPT_VERSION = "2.0.0";
+    const SCRIPT_VERSION = "2.1.0";
 
     const marketUrl = "https://api.torn.com/v2/market?id={itemId}&selections=itemMarket&key={apiKey}&comment=BazaarFiller";
     const itemUrl = "https://api.torn.com/torn/{itemId}?selections=items&key={apiKey}&comment=BazaarFiller";
@@ -86,6 +86,8 @@
 
     GM_addStyle(`.tbf-ana-btn{cursor:pointer;position:relative;display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;margin-right:6px;color:#888;align-self:center;user-select:none;-webkit-user-select:none;z-index:99999}.tbf-ana-btn:hover{color:#fff}.tbf-ana-btn svg{display:block;width:14px;height:12px;fill:currentColor;pointer-events:none}.tbf-wave-host[data-tbf-tone] .tbf-ana-btn:after{content:"";position:absolute;top:-3px;right:-4px;width:8px;height:8px;border-radius:50%;border:1px solid #1f1f1f;background:#4caf50;box-shadow:0 0 3px #4caf50;pointer-events:none;z-index:1}.tbf-wave-host[data-tbf-tone="yellow"] .tbf-ana-btn:after{background:#e6c200;box-shadow:0 0 3px #e6c200}.tbf-wave-host[data-tbf-tone="red"] .tbf-ana-btn:after{background:#e53935;box-shadow:0 0 3px #e53935}.tbf-wave-host[data-tbf-tone="orange"] .tbf-ana-btn:after{background:#fb8c00;box-shadow:0 0 3px #fb8c00}.tbf-wave-host[data-tbf-tone="grey"] .tbf-ana-btn:after{background:#9e9e9e;box-shadow:none}.tbf-ana{display:none;position:fixed;top:60px;left:40px;width:540px;max-width:calc(100vw - 16px);max-height:calc(100vh - 24px);overflow:auto;background:#1f1f1f;color:#e6e6e6;border:1px solid #666;border-radius:10px;box-shadow:0 10px 40px rgba(0,0,0,.6);padding:12px 14px;box-sizing:border-box;font-size:12px;line-height:1.45;z-index:999999;text-align:left}.tbf-ana--open{display:block}@media (max-width:784px){.tbf-ana{top:auto!important;left:0!important;right:0;bottom:0;width:auto;max-width:none;max-height:85vh;border-radius:14px 14px 0 0;border-bottom:0}}.tbf-ana-head{display:flex;align-items:center;gap:10px;margin-bottom:8px;cursor:move;user-select:none;-webkit-user-select:none}@media (max-width:784px){.tbf-ana-head{cursor:default}}.tbf-ana-img{width:34px;height:34px;border-radius:4px;background:#2a2a2a;flex:none;object-fit:contain}.tbf-ana-title{display:flex;flex-direction:column;line-height:1.3;min-width:0}.tbf-ana-title b{font-size:15px;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.tbf-ana-title small{font-size:11px;color:#a5a5a5}.tbf-ana-hb{margin-left:auto;color:#bbb;font-size:16px;line-height:1;cursor:pointer;width:22px;text-align:center;flex:none}.tbf-ana-hb:hover{color:#fff}.tbf-ana-hb.tbf-ana-close{margin-left:0;font-size:22px}.tbf-ana-tabs{display:flex;gap:2px;border-bottom:1px solid #444;margin:0 0 8px}.tbf-ana-tab{padding:5px 12px;font-size:12px;color:#aaa;border-bottom:2px solid transparent;margin-bottom:-1px;cursor:pointer}.tbf-ana-tab:hover{color:#ddd}.tbf-ana-tab--on,.tbf-ana-tab--on:hover{color:#fff;border-bottom-color:#b5d56a}.tbf-ana-kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:6px 0 8px}@media (max-width:784px){.tbf-ana-kpis{grid-template-columns:1fr 1fr}}.tbf-ana-kpi{background:#262626;border:1px solid #3a3a3a;border-radius:6px;padding:6px 8px;min-width:0}.tbf-ana-kpi .l{font-size:9.5px;color:#9a9a9a;text-transform:uppercase;letter-spacing:.5px;white-space:nowrap}.tbf-ana-kpi .v{font-size:15px;font-weight:bold;color:#fff;margin:2px 0 1px;white-space:nowrap}.tbf-ana-kpi .d{font-size:10.5px;color:#aaa;line-height:1.3}.tbf-ana-legend{display:flex;gap:14px;flex-wrap:wrap;font-size:10.5px;color:#bbb;margin:2px 0 4px}.tbf-ana-legend span{display:inline-flex;align-items:center;gap:5px;white-space:nowrap}.tbf-ana-sw{display:inline-block;width:9px;height:9px;border-radius:2px}.tbf-ana-m{background:#3987e5}.tbf-ana-b{background:#d95926}.tbf-ana-src{width:16px;height:16px;border-radius:50%;font-size:9px;font-weight:bold;display:inline-grid;place-items:center;color:#fff;flex:none}.tbf-ana-src.tbf-ana-y{background:#c9a227;color:#1f1f1f;font-size:10px}.tbf-ana-sec{font-size:10.5px;color:#bbb;text-transform:uppercase;letter-spacing:.5px;margin:8px 0 4px;font-weight:bold}.tbf-ana-sec code{text-transform:none;letter-spacing:0}.tbf-ana-sec small{text-transform:none;letter-spacing:0;font-weight:normal;color:#8a8a8a;margin-left:4px}.tbf-ana-cols{display:grid;grid-template-columns:1fr 1fr;gap:16px}@media (max-width:784px){.tbf-ana-cols{grid-template-columns:1fr}}.tbf-ana-band{margin:0 0 7px}.tbf-ana-bl{font-size:11px;color:#ddd;margin-bottom:2px}.tbf-ana-brow{display:flex;align-items:center;gap:6px;height:14px;margin:1px 0}.tbf-ana-bar{display:block;height:8px;border-radius:0 4px 4px 0;flex:none;max-width:46%}.tbf-ana-bv{font-size:10.5px;color:#aaa;white-space:nowrap}.tbf-ana-lad{margin:4px 0 2px;border-top:1px solid #333}.tbf-ana-lr{display:flex;align-items:center;gap:8px;padding:3px 6px;border-bottom:1px solid #2c2c2c;font-size:12px;min-height:25px;box-sizing:border-box}.tbf-ana-lr[data-price]{cursor:pointer}.tbf-ana-lr[data-price]:hover{background:#2a2a2a}.tbf-ana-lr .p{width:82px;text-align:right;color:#f0f0f0;flex:none}.tbf-ana-lr .q{width:56px;color:#bbb;text-align:right;flex:none}.tbf-ana-lr .n{flex:1;color:#999;font-size:10.5px;min-width:0;line-height:1.3}.tbf-ana-lr--you{background:#3a3414;border:1px solid #c9a227;border-radius:6px;margin:2px 0;color:#fff}.tbf-ana-lr--you .p,.tbf-ana-lr--you .n{color:#fff}.tbf-ana-lr--dim .p,.tbf-ana-lr--dim .q{color:#777}.tbf-ana-lr--more{min-height:22px;border-bottom:0}.tbf-ana-lr--hidden{display:none}.tbf-ana--all .tbf-ana-lr--hidden{display:flex}.tbf-ana--all .tbf-ana-showall{display:none}.tbf-ana-tag{display:inline-block;font-size:9.5px;padding:1px 6px;border-radius:8px;background:#2e7d32;color:#fff;white-space:nowrap;line-height:1.4;margin-right:4px}.tbf-ana-tag--gray{background:#444;color:#ccc}.tbf-ana-tag--blue{background:#1c5cab}.tbf-ana-hint{font-size:10.5px;color:#8a8a8a;margin:4px 0 2px}.tbf-ana-verdict{margin:8px 0 2px;padding:7px 9px;background:#262626;border-left:3px solid #c9a227;border-radius:0 6px 6px 0;font-size:11.5px;line-height:1.45;color:#ddd}.tbf-ana code{background:#000;padding:1px 4px;border-radius:3px;color:#cfc;font-size:10.5px}.tbf-ana a{color:#9cc25e;text-decoration:underline;cursor:pointer}.tbf-ana-foot{display:flex;align-items:center;gap:8px;margin-top:10px;padding-top:8px;border-top:1px solid #333}.tbf-ana-foot:empty{display:none}.tbf-ana-sum{flex:1;font-size:10.5px;color:#9a9a9a;line-height:1.3}.tbf-ana-foot button{cursor:pointer;padding:6px 12px;border-radius:5px;border:1px solid #666;background:#333;color:#eee;font-size:12px;white-space:nowrap}.tbf-ana-foot button.tbf-ana-apply{background:#2e7d32;border-color:#2e7d32;color:#fff}.tbf-ana-trace{margin:4px 0 0;font-size:11.5px}.tbf-ana-tr{display:flex;align-items:baseline;gap:8px;padding:3px 6px;border-radius:4px;flex-wrap:wrap;line-height:1.35}.tbf-ana-tr .op{color:#9a9a9a;font-family:monospace;font-size:12px}.tbf-ana-tr .r{font-weight:bold;color:#fff;white-space:nowrap}.tbf-ana-tr .why{color:#9a9a9a;font-size:10.5px;flex:1 1 100%;padding-left:2px}.tbf-ana-tr--win{background:#2a2f1e;border-left:3px solid #8fd08f}.tbf-ana-tr--win .r{color:#b5d56a}.tbf-ana-note{margin-top:6px;font-size:10.5px;color:#8a8a8a;border-top:1px solid #333;padding-top:6px}.tbf-ana-alert{margin:0 0 6px;padding:8px 10px;border-radius:6px;background:#3a2f1f;border:1px solid #a7792a;color:#ffd9a0;font-size:11.5px;line-height:1.4}.tbf-ana-skel{display:inline-block;height:8px;border-radius:4px;background:#333;margin:3px 0}.tbf-ana-muted{color:#8a8a8a;font-size:11px;margin:4px 0}`);
 
+    GM_addStyle(`.tbf-ana-ctl{display:flex;flex-wrap:wrap;gap:6px 16px;align-items:center;margin:0 0 8px}.tbf-ana-ctlg{display:inline-flex;align-items:center;gap:6px}.tbf-ana-ctll{font-size:10.5px;color:#9a9a9a;text-transform:uppercase;letter-spacing:.5px}.tbf-ana-seg{display:inline-flex;border:1px solid #444;border-radius:12px;overflow:hidden}.tbf-ana-opt{padding:3px 10px;font-size:11px;line-height:1.5;color:#aaa;cursor:pointer;white-space:nowrap;user-select:none;-webkit-user-select:none}.tbf-ana-opt+.tbf-ana-opt{border-left:1px solid #444}.tbf-ana-opt:hover{color:#fff}.tbf-ana-opt--on,.tbf-ana-opt--on:hover{background:#b5d56a;color:#1f1f1f;font-weight:bold}.tbf-ana-opt em{font-style:normal;opacity:.65;margin-left:4px}.tbf-ana-lr .k{width:84px;text-align:right;color:#c9d8a6;flex:none}.tbf-ana-lr .k.tbf-ana-k0{color:#a8a8a8}.tbf-ana-lad--keep .tbf-ana-lr .k{font-weight:bold;color:#b5d56a}.tbf-ana-lad--keep .tbf-ana-lr .k.tbf-ana-k0{color:#f0f0f0}.tbf-ana-lad--keep .tbf-ana-lr .p{color:#9a9a9a}.tbf-ana-lad--keep .tbf-ana-lr--you .p{color:#e6d9a8}.tbf-ana-lr.tbf-ana-lh{min-height:20px;font-size:9.5px;text-transform:uppercase;letter-spacing:.5px}.tbf-ana-lad .tbf-ana-lh .p,.tbf-ana-lad .tbf-ana-lh .q,.tbf-ana-lad .tbf-ana-lh .k{color:#8a8a8a;font-weight:normal}.tbf-ana-lh .tbf-ana-src{visibility:hidden}.tbf-ana-where{margin:0 0 10px;padding:6px 9px 8px;background:#262626;border:1px solid #3a3a3a;border-radius:6px}.tbf-ana-where .tbf-ana-sec{margin:0 0 4px}.tbf-ana-wr{display:flex;flex-wrap:wrap;align-items:center;gap:2px 8px;padding:3px 5px;border-radius:4px;font-size:12px}.tbf-ana-wr--win{background:#2a2f1e}.tbf-ana-wn{width:74px;color:#ddd}.tbf-ana-wl{color:#9a9a9a;min-width:92px}.tbf-ana-wa{color:#666}.tbf-ana-wk{font-weight:bold;color:#f0f0f0;min-width:100px}.tbf-ana-wr--win .tbf-ana-wk{color:#b5d56a}.tbf-ana-ws{margin-top:5px;font-size:11.5px;color:#ddd;line-height:1.45}@media (max-width:560px){.tbf-ana-lad .tbf-ana-lr{flex-wrap:wrap;row-gap:2px}.tbf-ana-lr .p{width:74px}.tbf-ana-lr .q{width:46px}.tbf-ana-lr .k{width:78px}.tbf-ana-lad .tbf-ana-lr .n{flex:1 1 100%;padding-left:24px}.tbf-ana-lad .tbf-ana-lr .n:empty{display:none}.tbf-ana-lad .tbf-ana-lr--more .n{padding-left:0}.tbf-ana-wa,.tbf-ana-wr .tbf-ana-tag{display:none}.tbf-ana-wn{width:66px}.tbf-ana-wl{min-width:0}.tbf-ana-wk{min-width:0;margin-left:auto}}`);
+
     const lastSeenVersionKey = "silmaril-torn-bazaar-filler-last-seen-version";
     // Newest release first. Everything a user could have skipped over is listed, so updating
     // across several versions still shows the whole gap in one popup. A release marked
@@ -94,6 +96,16 @@
     // Write every line for a player, not a developer: one short sentence, plain words,
     // what changed for them rather than what changed in the code.
     const CHANGELOG = [
+        {
+            version: "2.1.0",
+            date: "2026-11-02",
+            silent: true,
+            changes: [
+                'Item analytics: buttons above the price ladder show every listing, only the item market, or only bazaars.',
+                'Item-market listings now show what the seller keeps after the 5% fee, so they compare fairly with bazaar prices. Sort the ladder by that or by the listed price.',
+                'A new "Where to sell" box says whether the item market or a bazaar leaves you more right now, and by how much.'
+            ]
+        },
         {
             version: "2.0.0",
             date: "2026-11-01",
@@ -2488,18 +2500,38 @@
     // ---- Item analytics popup -------------------------------------------------------------
     // One floating panel, reused for every row. Overview: your price against market value and the
     // cheapest of each source, how many units sit ahead of you, and listings by stack size.
-    // Listings: every item-market and bazaar listing on one price ladder with you slotted in.
+    // Listings: every item-market and bazaar listing on one price ladder with you slotted in,
+    // filtered to one source if you like, with what each sale keeps after the item-market fee.
+    // Both tabs open with "Where to sell": which place leaves you more for the same undercut.
     // Formula: the setting worked out branch by branch. Opened right after a fill it reads what
     // the fill read; opened cold it prices the row the same way without touching the inputs.
 
     const ANALYTICS_ICON = '<svg viewBox="0 0 14 12" aria-hidden="true"><rect x="0" y="7" width="3.6" height="5" rx=".6"/><rect x="5.2" y="3.5" width="3.6" height="8.5" rx=".6"/><rect x="10.4" y="0" width="3.6" height="12" rx=".6"/></svg>';
     const analyticsPosKey = "silmaril-torn-bazaar-filler-analytics-pos";
+    const analyticsFilterKey = "silmaril-torn-bazaar-filler-analytics-filter";
+    const analyticsOrderKey = "silmaril-torn-bazaar-filler-analytics-order";
     const ANALYTICS_LADDER_ROWS = 12;
     const STACK_BANDS = [[1, 9, '1–9'], [10, 99, '10–99'], [100, 999, '100–999'], [1000, Infinity, '1,000+']];
+    // The item market keeps 5% of every sale and a bazaar keeps nothing, so an item-market price
+    // only compares with a bazaar price once the fee is off. This script sells in a bazaar.
+    const ITEM_MARKET_FEE = 0.05;
+    const ANALYTICS_SOLD_ON = 'b';
     let analyticsRow = null;       // the row the panel was opened from
     let analyticsSession = null;   // the reads it is showing
     let analyticsTab = 'overview';
     let analyticsOpenSeq = 0;      // bumps on every open, so a slow read for an earlier row is dropped
+    // The Listings tab's source filter ('all', 'm', 'b') and ladder order ('keep', 'listed').
+    let analyticsFilter = ['all', 'm', 'b'].indexOf(localStorage.getItem(analyticsFilterKey)) !== -1 ? localStorage.getItem(analyticsFilterKey) : 'all';
+    let analyticsOrder = localStorage.getItem(analyticsOrderKey) === 'listed' ? 'listed' : 'keep';
+
+    // What a sale at this price leaves the seller: the item market takes its fee, a bazaar nothing.
+    function keptAfterSale(price, src){
+        return src === 'm' ? Math.round(price * (1 - ITEM_MARKET_FEE)) : price;
+    }
+
+    function feePercent(){
+        return Math.round(ITEM_MARKET_FEE * 100);
+    }
 
     function escapeHtml(text){
         return String(text ?? '').replace(/[&<>"']/g, function(character){
@@ -2586,6 +2618,18 @@
         });
         // The body is rebuilt on every tab change, so its clicks are handled here, once.
         panel.querySelector('.tbf-ana-body').addEventListener('click', function(event){
+            let option = closestMatch(event.target, '.tbf-ana-opt');
+            if (option != null && panel.contains(option)){
+                if (option.dataset.anaFilter != null){
+                    analyticsFilter = option.dataset.anaFilter;
+                    localStorage.setItem(analyticsFilterKey, analyticsFilter);
+                } else if (option.dataset.anaOrder != null){
+                    analyticsOrder = option.dataset.anaOrder;
+                    localStorage.setItem(analyticsOrderKey, analyticsOrder);
+                }
+                renderAnalytics();
+                return;
+            }
             let listing = closestMatch(event.target, '.tbf-ana-lr[data-price]');
             if (listing != null && panel.contains(listing)){
                 applyAnalyticsPrice(parseInt(listing.dataset.price, 10) - 1, false);
@@ -2914,8 +2958,50 @@
         return '<div class="tbf-ana-kpi"' + (title ? ' title="' + escapeHtml(title) + '"' : '') + '><div class="l">' + escapeHtml(label) + '</div><div class="v">' + escapeHtml(value) + '</div><div class="d">' + detail + '</div></div>';
     }
 
-    function renderLegend(){
-        return '<div class="tbf-ana-legend"><span><i class="tbf-ana-sw tbf-ana-m"></i>Item market (Torn)</span><span><i class="tbf-ana-sw tbf-ana-b"></i>Player bazaars (weav3r)</span></div>';
+    // `filter` is the Listings tab's source filter; left out, both sources are named.
+    function renderLegend(filter){
+        return '<div class="tbf-ana-legend">' +
+            (filter !== 'b' ? '<span><i class="tbf-ana-sw tbf-ana-m"></i>Item market (Torn)</span>' : '') +
+            (filter !== 'm' ? '<span><i class="tbf-ana-sw tbf-ana-b"></i>Player bazaars (weav3r)</span>' : '') +
+            '</div>';
+    }
+
+    // Where to sell: the cheapest listing in each place undercut by $1, the item-market fee taken
+    // off, and which of the two leaves you more. Empty when either place has nothing to compare.
+    function renderWhere(model){
+        let market = model.market != null && model.market.listings != null ? model.market.listings : null;
+        let bazaar = model.bazaar != null && model.bazaar.listings != null ? model.bazaar.listings : null;
+        if (market == null || bazaar == null || market.length === 0 || bazaar.length === 0){
+            return '';
+        }
+        let undercut = function(price){ return price > 1 ? price - 1 : price; };
+        let places = [
+            { src: 'm', name: 'Item market', list: undercut(market[0].price) },
+            { src: 'b', name: 'Bazaar', list: undercut(bazaar[0].price) }
+        ];
+        places.forEach(function(place){ place.keep = keptAfterSale(place.list, place.src); });
+        let gap = places[0].keep - places[1].keep;
+        let best = gap > 0 ? 'm' : gap < 0 ? 'b' : null;
+        let line = function(place){
+            let win = place.src === best;
+            return '<div class="tbf-ana-wr' + (win ? ' tbf-ana-wr--win' : '') + '">' +
+                '<span class="tbf-ana-src tbf-ana-' + place.src + '">' + (place.src === 'm' ? 'M' : 'B') + '</span>' +
+                '<span class="tbf-ana-wn">' + place.name + '</span><span class="tbf-ana-wl">list ' + money(place.list) + '</span>' +
+                '<span class="tbf-ana-wa">→</span><span class="tbf-ana-wk">keep ' + money(place.keep) + '</span>' +
+                (win ? '<span class="tbf-ana-tag">pays more</span>' : '') + '</div>';
+        };
+        let say;
+        if (best == null){
+            say = 'Both leave you the same after the ' + feePercent() + '% item-market fee.';
+        } else {
+            say = (best === 'm' ? 'The item market' : 'A bazaar') + ' leaves you <b>' + money(Math.abs(gap)) + ' more</b> each after the ' + feePercent() + '% item-market fee' +
+                (model.mine != null && model.mine > 1 ? ', ' + money(Math.abs(gap) * model.mine) + ' for ' + count(model.mine) : '') + '. ' +
+                (best === ANALYTICS_SOLD_ON ? 'You are already listing where it pays more.'
+                    : ANALYTICS_SOLD_ON === 'b' ? 'You are filling a bazaar, so these would pay more on the item market right now.'
+                    : 'You are on the item market, so these would pay more in a bazaar right now.');
+        }
+        return '<div class="tbf-ana-where"><div class="tbf-ana-sec">Where to sell<small>the cheapest in each place, undercut by $1</small></div>' +
+            line(places[0]) + line(places[1]) + '<div class="tbf-ana-ws">' + say + '</div></div>';
     }
 
     function cheaperThan(listings, price){
@@ -2948,6 +3034,7 @@
         } else if (session.trace == null || traceError(session) != null){
             html += renderAlert('<b>Nothing priced.</b> ' + escapeHtml(traceError(session) ?? session.failure ?? 'the first read failed') + '. <a data-goto="formula">See the formula</a>');
         }
+        html += renderWhere(model);
         let value = model.value != null && model.value.value != null ? model.value.value : null;
         let market = model.market != null && model.market.listings != null ? model.market.listings : null;
         let bazaar = model.bazaar != null && model.bazaar.listings != null ? model.bazaar.listings : null;
@@ -2962,6 +3049,9 @@
             }
             let detail = '×' + count(listings[0].amount) + ' · ' +
                 (model.you != null ? 'you are #' + count(cheaperThan(listings, model.you).length + 1) + ' of ' + count(listings.length + 1) : count(listings.length) + ' listings');
+            if (source === 'market'){
+                detail += '<br>seller keeps ' + money(keptAfterSale(listings[0].price, 'm'));
+            }
             return renderKpi('Cheapest ' + source, money(listings[0].price), detail);
         };
         html += '<div class="tbf-ana-kpis">' +
@@ -3045,23 +3135,54 @@
             : null;
     }
 
+    // A row of options the Listings tab switches between. `key` names the setting it changes.
+    function renderOptions(key, options, current){
+        return '<span class="tbf-ana-seg">' + options.map(function(option){
+            return '<span class="tbf-ana-opt' + (option[0] === current ? ' tbf-ana-opt--on' : '') + '" data-ana-' + key + '="' + option[0] + '">' +
+                option[1] + (option[2] != null ? '<em>' + count(option[2]) + '</em>' : '') + '</span>';
+        }).join('') + '</span>';
+    }
+
     function renderListings(model, session){
         let market = model.market != null && model.market.listings != null ? model.market.listings : null;
         let bazaar = model.bazaar != null && model.bazaar.listings != null ? model.bazaar.listings : null;
-        let rows = [];
-        (market ?? []).forEach(function(listing){ rows.push({ src: 'm', price: listing.price, amount: listing.amount }); });
-        (bazaar ?? []).forEach(function(listing){ rows.push({ src: 'b', price: listing.price, amount: listing.amount }); });
-        rows.sort(function(a, b){ return a.price - b.price || (a.src < b.src ? -1 : 1); });
-        let html = '';
         if (market == null && bazaar == null){
             return renderAlert('No listings could be read.' + (model.market != null && model.market.error ? ' ' + escapeHtml(model.market.error) + '.' : ''));
         }
-        if (market == null){
+        let filter = analyticsFilter;
+        let showMarket = filter !== 'b';
+        let showBazaar = filter !== 'm';
+        // The You keep column, and ordering by it, only earn their place when something on show
+        // pays the fee: an item-market listing, or your own price when this script sells there.
+        let fee = (showMarket && market != null && market.length > 0) || ANALYTICS_SOLD_ON === 'm';
+        let byKeep = fee && analyticsOrder === 'keep';
+        let html = '<div class="tbf-ana-ctl"><span class="tbf-ana-ctlg"><span class="tbf-ana-ctll">Show</span>' +
+            renderOptions('filter', [
+                ['all', 'All', (market ?? []).length + (bazaar ?? []).length],
+                ['m', 'Item market', market != null ? market.length : null],
+                ['b', 'Bazaar', bazaar != null ? bazaar.length : null]
+            ], filter) + '</span>' +
+            (fee ? '<span class="tbf-ana-ctlg"><span class="tbf-ana-ctll">Order by</span>' + renderOptions('order', [['keep', 'You keep'], ['listed', 'Listed price']], byKeep ? 'keep' : 'listed') + '</span>' : '') +
+            '</div>';
+        if (filter === 'all'){
+            html += renderWhere(model);
+        }
+        if (showMarket && market == null){
             html += '<div class="tbf-ana-muted">Item market not read: ' + escapeHtml(model.market != null ? model.market.error : 'no data') + '.</div>';
         }
-        if (bazaar == null){
+        if (showBazaar && bazaar == null){
             html += '<div class="tbf-ana-muted">Bazaars not read: ' + escapeHtml(model.bazaar != null ? model.bazaar.error : 'no data') + '.</div>';
         }
+        let rows = [];
+        if (showMarket){
+            (market ?? []).forEach(function(listing){ rows.push({ src: 'm', price: listing.price, amount: listing.amount }); });
+        }
+        if (showBazaar){
+            (bazaar ?? []).forEach(function(listing){ rows.push({ src: 'b', price: listing.price, amount: listing.amount }); });
+        }
+        rows.forEach(function(listing){ listing.keep = keptAfterSale(listing.price, listing.src); });
+        let rank = function(listing){ return byKeep ? listing.keep : listing.price; };
+        rows.sort(function(a, b){ return rank(a) - rank(b) || (a.src < b.src ? -1 : 1); });
         // Tags: the listing the winning branch read, the ones its bracket skipped, and what the
         // other branches read. A listing is tagged once, by the first branch to claim it.
         let winner = session.trace != null ? session.branches.get(session.trace.winner) : null;
@@ -3091,17 +3212,28 @@
             }
             return null;
         };
+        let keepCell = function(value, src){
+            if (!fee){
+                return '';
+            }
+            let title = src === 'm' ? 'What the seller keeps after the ' + feePercent() + '% item-market fee' : 'A bazaar takes no fee';
+            return '<span class="k' + (src === 'm' ? '' : ' tbf-ana-k0') + '" title="' + title + '">' + money(value) + '</span>';
+        };
         let lines = [];
         let youPlaced = model.you == null;
+        let youKeep = model.you == null ? null : keptAfterSale(model.you, ANALYTICS_SOLD_ON);
+        let youRank = byKeep ? youKeep : model.you;
+        // Your rank counts listed prices on both sides: that is what a buyer compares.
         let ranks = [];
         if (model.you != null){
-            if (bazaar != null){ ranks.push('#' + count(cheaperThan(bazaar, model.you).length + 1) + ' among bazaars'); }
-            if (market != null){ ranks.push('#' + count(cheaperThan(market, model.you).length + 1) + ' on the market'); }
+            if (showBazaar && bazaar != null){ ranks.push('#' + count(cheaperThan(bazaar, model.you).length + 1) + ' among bazaars'); }
+            if (showMarket && market != null){ ranks.push('#' + count(cheaperThan(market, model.you).length + 1) + ' on the market'); }
         }
         let youLine = model.you == null ? '' :
-            '<div class="tbf-ana-lr tbf-ana-lr--you"><span class="tbf-ana-src tbf-ana-y">★</span><span class="p">' + money(model.you) + '</span><span class="q">' + (model.mine != null ? '×' + count(model.mine) : '') + '</span><span class="n">you' + (ranks.length ? ' · ' + escapeHtml(ranks.join(' · ')) : '') + '</span></div>';
+            '<div class="tbf-ana-lr tbf-ana-lr--you"><span class="tbf-ana-src tbf-ana-y">★</span><span class="p">' + money(model.you) + '</span><span class="q">' + (model.mine != null ? '×' + count(model.mine) : '') + '</span>' +
+            keepCell(youKeep, ANALYTICS_SOLD_ON) + '<span class="n">you' + (ranks.length ? ' · ' + escapeHtml(ranks.join(' · ')) : '') + '</span></div>';
         rows.forEach(function(listing){
-            if (!youPlaced && listing.price > model.you){
+            if (!youPlaced && rank(listing) > youRank){
                 lines.push(youLine);
                 youPlaced = true;
             }
@@ -3115,7 +3247,8 @@
             let note = tag + (why != null ? '<span class="tbf-ana-tag tbf-ana-tag--gray">' + escapeHtml(why) + '</span>' : '');
             lines.push('<div class="' + cls + '" data-price="' + listing.price + '" title="Click to price $1 under this listing">' +
                 '<span class="tbf-ana-src tbf-ana-' + listing.src + '">' + (listing.src === 'm' ? 'M' : 'B') + '</span>' +
-                '<span class="p">' + money(listing.price) + '</span><span class="q">×' + count(listing.amount) + '</span><span class="n">' + note + '</span></div>');
+                '<span class="p">' + money(listing.price) + '</span><span class="q">×' + count(listing.amount) + '</span>' +
+                keepCell(listing.keep, listing.src) + '<span class="n">' + note + '</span></div>');
         });
         if (!youPlaced){
             lines.push(youLine);
@@ -3124,15 +3257,19 @@
             return index < ANALYTICS_LADDER_ROWS ? line : line.replace('class="tbf-ana-lr', 'class="tbf-ana-lr tbf-ana-lr--hidden');
         });
         let more = [];
+        if (rows.length === 0){
+            more.push(filter === 'm' ? 'No item-market listings' : filter === 'b' ? 'No bazaar listings' : 'No listings');
+        }
         if (lines.length > ANALYTICS_LADDER_ROWS){
             more.push(count(lines.length - ANALYTICS_LADDER_ROWS) + ' more · <a class="tbf-ana-showall">show all</a>');
         }
-        if (model.bazaar != null && model.bazaar.ignored > 0){
+        if (showBazaar && model.bazaar != null && model.bazaar.ignored > 0){
             more.push(count(model.bazaar.ignored) + ' bazaar ' + (model.bazaar.ignored === 1 ? 'listing' : 'listings') + ' ignored (sponsored, stale or far under the average)');
         }
-        html += renderLegend() + '<div class="tbf-ana-lad">' + shown.join('') +
+        let head = fee ? '<div class="tbf-ana-lr tbf-ana-lh"><span class="tbf-ana-src"></span><span class="p">Listed</span><span class="q">Qty</span><span class="k">You keep</span><span class="n"></span></div>' : '';
+        html += renderLegend(filter) + '<div class="tbf-ana-lad' + (byKeep ? ' tbf-ana-lad--keep' : '') + '">' + head + shown.join('') +
             (more.length ? '<div class="tbf-ana-lr tbf-ana-lr--more"><span class="n">' + more.join(' · ') + '</span></div>' : '') + '</div>' +
-            '<div class="tbf-ana-hint">Click a listing to price $1 under it.</div>';
+            '<div class="tbf-ana-hint">Click a listing to price $1 under it.' + (fee ? ' You keep is the listed price minus the ' + feePercent() + '% item-market fee; a bazaar takes no fee.' : '') + '</div>';
         return html;
     }
 
