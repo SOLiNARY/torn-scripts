@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Market Filler
 // @namespace    https://github.com/SOLiNARY
-// @version      3.0.0
+// @version      3.0.1
 // @description  Adds a Fill button to every row when you list on the Item Market: one click sets the price and quantity. Price from listings (cheapest minus $1 by default), market value or live bazaars via weav3r.dev, with your own formula and min/max ranges. A popup shows the 5 cheapest listings; click one to undercut it. Quantity modes, per-category settings, per-item formulas from the ƒ by the star, favourites with Fill All. Open settings with the cog on the Fill All bar or by holding Fill for 2s. A small chart icon by the star opens item analytics: item-market and bazaar listings on one price ladder (or just one of them), what each keeps after the market fee, whether a bazaar would pay more, where your price lands, stack sizes, and what your formula picked.
 // @author       Silmaril [2665762]
 // @license      MIT License
@@ -19,7 +19,7 @@
     'use strict';
 
     // Keep in sync with @version above — it keys the "What's new" popup.
-    const SCRIPT_VERSION = "3.0.0";
+    const SCRIPT_VERSION = "3.0.1";
 
     const itemUrl = "https://api.torn.com/torn/{itemId}?selections=items&key={apiKey}&comment=MarketFiller";
     const marketUrl = "https://api.torn.com/v2/market/{itemId}?selections=itemMarket&key={apiKey}&comment=MarketFiller";
@@ -79,7 +79,7 @@
     GM_addStyle(`#item-market-root [class^=addListingWrapper___] [class^=panels___] [class^=priceInputWrapper___]>.input-money-group>.input-money,#item-market-root [class^=viewListingWrapper___] [class^=priceInputWrapper___]>.input-money-group>.input-money{font-size:smaller!important;border-bottom-left-radius:0!important;border-top-left-radius:0!important}.silmaril-market-filler-popup{background:var(--tooltip-bg-color);padding:12px 18px;border-radius:8px;border:1px solid #888;box-shadow:0 4px 18px 0 #0009;color:var(--info-msg-font-color);z-index:99999;position:fixed;font-size:1em!important;line-height:1.5;pointer-events:auto}.silmaril-market-filler-popup-close{position:absolute;top:4px;right:7px;font-size:1em;color:#aaa;cursor:pointer}.silmaril-market-filler-popup-draggable{user-select:none;cursor:move}.silmaril-torn-market-filler-popup-price{cursor:pointer}.tmf-fav{cursor:pointer;display:inline-flex;align-items:center;justify-content:center;width:18px;font-size:16px;line-height:1;color:#888;align-self:center;margin-right:2px;user-select:none;-webkit-user-select:none}.tmf-fav.tmf-fav--on{color:gold;text-shadow:0 0 3px rgba(255,215,0,.7)}.tmf-fillall-bar{position:fixed;bottom:110px;right:16px;display:flex;align-items:center;gap:6px;padding:6px 8px;background:rgba(0,0,0,.55);border-radius:20px;z-index:999999;touch-action:none;transition:box-shadow .2s ease}.tmf-fillall-grip{cursor:grab;color:#bbb;font-size:14px;line-height:1;letter-spacing:-2px;min-width:12px;text-align:center;align-self:center;user-select:none;-webkit-user-select:none}.tmf-fillall-bar--dragging{cursor:grabbing;opacity:.92}.tmf-fillall-bar--dragging .tmf-fillall-grip{cursor:grabbing}.tmf-fillall-cog{cursor:pointer;flex:0 0 auto;display:flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:rgba(255,255,255,.12);color:#ddd;font-size:13px;line-height:1;user-select:none;-webkit-user-select:none}.tmf-fillall-cog:hover{background:rgba(255,255,255,.28);color:#fff}.tmf-fillall-bar--min{padding:5px 7px;gap:4px}.tmf-fillall-bar--min .tmf-fillall-btn,.tmf-fillall-bar--min .tmf-fillall-cog{display:none}.tmf-fillall-bar--min .tmf-fillall-grip{font-size:16px}.tmf-autofill-dot{display:none;width:10px;height:10px;border-radius:50%;background:gold;box-shadow:0 0 4px gold;animation:tmfPulse 1s ease-in-out infinite}.tmf-fillall-bar--active .tmf-autofill-dot{display:inline-block}.tmf-fillall-bar--active{box-shadow:0 0 10px 2px rgba(255,215,0,.75)}@keyframes tmfPulse{0%,100%{opacity:.3;transform:scale(.8)}50%{opacity:1;transform:scale(1.2)}}.tmf-viewport-border{display:none;position:fixed;top:0;right:0;bottom:0;left:0;border:3px solid gold;box-shadow:inset 0 0 12px rgba(255,215,0,.6);pointer-events:none;z-index:999998}.tmf-viewport-border--active{display:block}.tmf-toast{position:fixed;bottom:158px;right:16px;max-width:280px;background:rgba(0,0,0,.85);color:#fff;padding:10px 14px;border-radius:8px;border:1px solid gold;font-size:13px;line-height:1.4;z-index:1000000;opacity:0;visibility:hidden;transition:opacity .3s,visibility .3s}.tmf-toast--visible{opacity:1;visibility:visible}.tmf-fav.tmf-fav--off{color:#ff6b6b;text-shadow:none}`);
 
     // The settings tabs, the Display tab's switches, and the controls those switches hide.
-    GM_addStyle(`.tmf-sq-ico{position:absolute;left:50%;top:50%;width:11px;height:14px;margin:-7px 0 0 -5.5px;pointer-events:none;filter:drop-shadow(0 1px 0 #000)}.silmaril-market-filler-button:not([data-action-flag="clear"]) .tmf-sq-clear,.silmaril-market-filler-button[data-action-flag="clear"] .tmf-sq-fill{display:none}`);
+    GM_addStyle(`.input-money-group>.silmaril-market-filler-button+input.input-money{border-top-left-radius:0!important;border-bottom-left-radius:0!important}.input-money-group>.silmaril-market-filler-button{flex:none;align-self:flex-start}.tmf-sq-ico{position:absolute;left:50%;top:50%;width:11px;height:14px;margin:-7px 0 0 -5.5px;pointer-events:none;filter:drop-shadow(0 1px 0 #000)}.silmaril-market-filler-button:not([data-action-flag="clear"]) .tmf-sq-clear,.silmaril-market-filler-button[data-action-flag="clear"] .tmf-sq-fill{display:none}`);
     GM_addStyle(`html.tmf-hide-fillall .tmf-fillall-bar,html.tmf-hide-fillall .tmf-viewport-border,html.tmf-hide-fav .tmf-fav,html.tmf-hide-own .tmf-own,html.tmf-hide-ana .tmf-ana-btn,html.tmf-hide-fav.tmf-hide-own.tmf-hide-ana .tmf-icons{display:none!important}.tmf-modal-tabs{display:flex;gap:2px;border-bottom:1px solid #444;margin:0 0 4px}.tmf-modal-tabs button{background:none;border:0;border-bottom:2px solid transparent;margin:0 0 -1px;padding:5px 12px;color:#aaa;font:inherit;font-weight:bold;cursor:pointer;box-shadow:none;height:auto;min-width:0}.tmf-modal-tabs button:hover{color:#ddd}.tmf-modal-tabs button[aria-selected=true]{color:#fff;border-bottom-color:#b5d56a}.tmf-modal-pane[hidden]{display:none!important}.tmf-modal-note{margin:8px 0 2px;font-size:12px;color:#9a9a9a}.tmf-modal .tmf-modal-toggle{display:flex;align-items:center;gap:8px;margin:12px 0 0;font-weight:bold;color:#cfcfcf;cursor:pointer}.tmf-modal-toggle input{width:auto;margin:0}.tmf-modal-hint{margin:2px 0 0 22px;font-size:11.5px;line-height:1.4;color:#9a9a9a}`);
     GM_addStyle(`.tmf-modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:2147483000;justify-content:center;align-items:flex-start;overflow:auto;padding:24px 12px;box-sizing:border-box}.tmf-modal-overlay--open{display:flex}.tmf-modal{background:#1f1f1f;color:#e6e6e6;width:100%;max-width:420px;border:1px solid #666;border-radius:10px;box-shadow:0 10px 40px rgba(0,0,0,.6);padding:16px 18px;box-sizing:border-box;font-size:13px;line-height:1.5}.tmf-modal h3{margin:0 0 12px;font-size:15px;display:flex;justify-content:space-between;align-items:center;color:#fff}.tmf-modal-close{cursor:pointer;color:#bbb;font-size:22px;line-height:1}.tmf-modal label{display:block;margin:10px 0 3px;font-weight:bold;color:#cfcfcf}.tmf-modal input[type=text],.tmf-modal input[type=password]{width:100%;box-sizing:border-box;padding:7px 9px;border-radius:5px;border:1px solid #666;background:#111;color:#eee;font-size:13px}.tmf-modal-key{position:relative;display:flex;align-items:center}.tmf-modal-key input[type=text],.tmf-modal-key input[type=password]{padding-right:52px}.tmf-modal-key-reveal{position:absolute;right:7px;cursor:pointer;color:#bbb;font-size:11px;line-height:1;padding:3px 4px;user-select:none;-webkit-user-select:none}.tmf-modal-key-reveal:hover{color:#fff}.tmf-modal-toggle{display:flex;align-items:center;gap:8px;margin-top:10px;font-weight:bold;color:#cfcfcf}.tmf-modal-toggle input{width:auto}.tmf-modal-cats{margin-top:4px}.tmf-modal-cat-row{display:flex;gap:6px;margin-bottom:6px;align-items:center}.tmf-modal-cat-row .tmf-modal-cat-name{flex:1 1 55%}.tmf-modal-cat-row .tmf-modal-cat-formula{flex:1 1 45%}.tmf-modal-cat-del{cursor:pointer;color:#ff6b6b;font-size:20px;line-height:1;flex:0 0 auto;width:22px;text-align:center}.tmf-modal-addcat{margin-top:2px;cursor:pointer;background:#333;color:#eee;border:1px solid #666;border-radius:5px;padding:5px 10px;font-size:12px}.tmf-modal-resetcat{margin:2px 0 0 8px;cursor:pointer;background:#3a2a2a;color:#ddd;border:1px solid #774;border-radius:5px;padding:5px 10px;font-size:12px}.tmf-modal-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:16px}.tmf-modal-actions button{cursor:pointer;padding:7px 16px;border-radius:5px;border:1px solid #666;background:#333;color:#eee;font-size:13px}.tmf-modal-save{background:#2e7d32!important;border-color:#2e7d32!important;color:#fff!important}.tmf-modal-cat-row input{min-width:0}.tmf-modal-cat-row .tmf-modal-cat-name{flex:1 1 38%}.tmf-modal-cat-row .tmf-modal-cat-formula{flex:1 1 32%}.tmf-modal-cat-row .tmf-modal-cat-qty{flex:1 1 30%}.tmf-modal-cat-head{display:flex;gap:6px;margin:0 0 4px;font-size:11px;color:#9a9a9a}.tmf-modal-cat-head span:nth-child(1){flex:1 1 38%}.tmf-modal-cat-head span:nth-child(2){flex:1 1 32%}.tmf-modal-cat-head span:nth-child(3){flex:1 1 30%}.tmf-modal-cat-head span:nth-child(4){flex:0 0 22px}.tmf-modal-clearexcl{margin:2px 0 0 8px;cursor:pointer;background:#3a2a2a;color:#ddd;border:1px solid #774;border-radius:5px;padding:5px 10px;font-size:12px}.tmf-modal-error{display:none;margin-top:12px;padding:8px 10px;border-radius:5px;background:#3a1f1f;border:1px solid #a34;color:#ffb3b3;font-size:12px;line-height:1.4}.tmf-modal input.tmf-modal-invalid{border-color:#ff6b6b;box-shadow:0 0 0 1px rgba(255,107,107,.45)}`);
 
@@ -102,6 +102,14 @@
     // Write every line for a player, not a developer: one short sentence, plain words,
     // what changed for them rather than what changed in the code.
     const CHANGELOG = [
+        {
+            version: "3.0.1",
+            date: "2026-11-05",
+            silent: true,
+            changes: [
+                'The Fill button and the price box now line up at the corners, as in Bazaar Filler.'
+            ]
+        },
         {
             version: "3.0.0",
             date: "2026-11-05",
@@ -496,12 +504,41 @@
                 }
             }
             moneyGroup.prepend(span);
+            fitFillSquare(span, moneyGroup);
             if (autoFillActive){
                 enqueueFavouriteRow(wrapperParent);
             }
         } else {
             moneyGroup.prepend(span);
+            fitFillSquare(span, moneyGroup);
         }
+    }
+
+    // Torn sizes a money square for its own taller inputs, so on the item market the square and
+    // the price box would end at different heights. Give the square the price box's height and
+    // top offset, as Bazaar Filler does, so their corners meet. A row that isn't laid out yet is
+    // measured again on a later frame.
+    function fitFillSquare(square, group, tries){
+        const attempt = tries ?? 0;
+        const priceInput = group.querySelector(':scope > input.input-money:not([type=hidden])');
+        if (priceInput == null || !square.isConnected){
+            return;
+        }
+        const height = priceInput.getBoundingClientRect().height;
+        if (height === 0){
+            if (attempt < 30){
+                requestAnimationFrame(function(){ fitFillSquare(square, group, attempt + 1); });
+            }
+            return;
+        }
+        square.style.boxSizing = 'border-box';
+        square.style.height = height + 'px';
+        square.style.marginBottom = '0px';
+        // Then move it down or up by whatever still separates the two tops, whether Torn lays the
+        // group out with floats, flex or margins.
+        const shift = priceInput.getBoundingClientRect().top - square.getBoundingClientRect().top;
+        const marginTop = parseFloat(window.getComputedStyle(square).marginTop) || 0;
+        square.style.marginTop = Math.round((marginTop + shift) * 100) / 100 + 'px';
     }
 
     // Resolve a row's item id from whichever source the page provides: the info button's
