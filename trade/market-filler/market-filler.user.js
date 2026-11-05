@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Torn Market Filler
 // @namespace    https://github.com/SOLiNARY
-// @version      2.2.0
-// @description  Adds a Fill button to every row when you list on the Item Market: one click sets the price and quantity. Price from listings (cheapest minus $1 by default), market value or live bazaars via weav3r.dev, with your own formula and min/max ranges. A popup shows the 5 cheapest listings; click one to undercut it. Quantity modes, per-category settings, favourites with Fill All. Open settings with the cog on the Fill All bar or by holding Fill for 2s. A small chart icon by the star opens item analytics: item-market and bazaar listings on one price ladder (or just one of them), what each keeps after the market fee, whether a bazaar would pay more, where your price lands, stack sizes, and what your formula picked.
+// @version      2.3.0
+// @description  Adds a Fill button to every row when you list on the Item Market: one click sets the price and quantity. Price from listings (cheapest minus $1 by default), market value or live bazaars via weav3r.dev, with your own formula and min/max ranges. A popup shows the 5 cheapest listings; click one to undercut it. Quantity modes, per-category settings, per-item formulas from the ƒ by the star, favourites with Fill All. Open settings with the cog on the Fill All bar or by holding Fill for 2s. A small chart icon by the star opens item analytics: item-market and bazaar listings on one price ladder (or just one of them), what each keeps after the market fee, whether a bazaar would pay more, where your price lands, stack sizes, and what your formula picked.
 // @author       Silmaril [2665762]
 // @license      MIT License
 // @match        https://www.torn.com/page.php?sid=ItemMarket*
@@ -19,7 +19,7 @@
     'use strict';
 
     // Keep in sync with @version above — it keys the "What's new" popup.
-    const SCRIPT_VERSION = "2.2.0";
+    const SCRIPT_VERSION = "2.3.0";
 
     const itemUrl = "https://api.torn.com/torn/{itemId}?selections=items&key={apiKey}&comment=MarketFiller";
     const marketUrl = "https://api.torn.com/v2/market/{itemId}?selections=itemMarket&key={apiKey}&comment=MarketFiller";
@@ -83,6 +83,7 @@
     GM_addStyle(`.tmf-changelog-release{margin:0 0 14px}.tmf-changelog-release:last-of-type{margin-bottom:0}.tmf-changelog-ver{display:flex;align-items:baseline;gap:8px;margin:0 0 6px}.tmf-changelog-ver b{color:#fff;font-size:13px}.tmf-changelog-date{color:#8a8a8a;font-size:11px;margin-left:auto}.tmf-changelog-badge{background:#2e7d32;color:#fff;border-radius:10px;padding:1px 7px;font-size:10px;text-transform:uppercase;letter-spacing:.04em}.tmf-changelog-items{margin:0;padding-left:18px;color:#cfcfcf}.tmf-changelog-items li{margin:0 0 5px}.tmf-changelog-items code{background:#000;padding:1px 4px;border-radius:3px;color:#cfc}`);
 
     GM_addStyle(`.tmf-settings-overlay [hidden]{display:none!important}.tmf-settings-overlay .tmf-modal code{background:#000;padding:1px 4px;border-radius:3px;color:#cfc;font-family:Consolas,Menlo,monospace;font-size:12px}.tmf-help-bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between;margin:0 0 8px;padding:6px 8px;background:#262626;border:1px solid #3a3a3a;border-radius:6px}.tmf-help-bar button,.tmf-wiz button,.tmf-sheet button{font-family:inherit;line-height:1.3;text-transform:none;box-shadow:none;height:auto;min-width:0;margin:0;cursor:pointer}.tmf-help-switch{display:inline-flex;align-items:center;gap:8px;background:none;border:0;padding:2px 0;color:#e6e6e6;font-size:12.5px}.tmf-help-track{position:relative;width:30px;height:17px;border-radius:9px;background:#555;flex:none;transition:background .15s}.tmf-help-track:after{content:"";position:absolute;top:2px;left:2px;width:13px;height:13px;border-radius:50%;background:#ddd;transition:transform .15s}.tmf-help-switch[aria-checked="true"] .tmf-help-track{background:#2e7d32}.tmf-help-switch[aria-checked="true"] .tmf-help-track:after{transform:translateX(13px);background:#fff}.tmf-help-write{background:#333;border:1px solid #666;color:#eee;border-radius:5px;padding:5px 10px;font-size:12px}.tmf-help-write:hover{border-color:#999}.tmf-help-write[aria-expanded="true"]{border-color:#b5d56a;color:#fff}.tmf-wiz{margin:0 0 8px;border:1px solid #b5d56a;border-radius:6px;background:#262626;padding:8px 10px 10px;display:grid;gap:8px}.tmf-wiz-h{display:flex;justify-content:space-between;align-items:center;gap:8px;font-weight:bold;color:#fff;font-size:12.5px}.tmf-wiz-h small{font-weight:normal;color:#9a9a9a;font-size:11px;margin-left:6px}.tmf-wiz-close{cursor:pointer;color:#bbb;font-size:20px;line-height:1}.tmf-wiz-qs{display:grid;gap:8px}.tmf-wiz-q{display:grid;gap:4px}.tmf-wiz-q>span{font-size:11.5px;color:#cfcfcf}.tmf-wiz-seg{display:flex;flex-wrap:wrap;gap:4px}.tmf-wiz-seg button{background:#333;border:1px solid #555;color:#ddd;border-radius:5px;padding:4px 8px;font-size:11.5px}.tmf-wiz-seg button:hover{border-color:#888}.tmf-wiz-seg button[aria-pressed="true"]{background:#2e7d32;border-color:#2e7d32;color:#fff}.tmf-wiz-out{display:grid;gap:5px;border-top:1px solid #333;padding-top:8px}.tmf-wiz-f{overflow-wrap:anywhere}.tmf-settings-overlay .tmf-wiz-f code{font-size:12.5px}.tmf-wiz-say{font-size:11.5px;color:#e6e6e6}.tmf-wiz-say b,.tmf-live-say b,.tmf-sheet-tried b{color:#b5d56a}.tmf-wiz-use{justify-self:start;background:#2e7d32;border:1px solid #2e7d32;color:#fff;border-radius:5px;padding:5px 12px;font-size:12px}.tmf-sheet{margin:0 0 4px;border:1px solid #3a3a3a;border-radius:6px;padding:6px 10px}.tmf-sheet>summary{cursor:pointer;font-weight:bold;color:#cfcfcf;font-size:12.5px;padding:2px 0}.tmf-sheet[open]>summary{margin-bottom:4px}.tmf-anat{display:flex;gap:6px;justify-content:center;margin:8px 0 4px;flex-wrap:wrap}.tmf-anat-part{display:grid;justify-items:center;gap:4px}.tmf-settings-overlay .tmf-anat-part code{font-size:17px;padding:3px 8px}.tmf-anat-brace{display:block;width:100%;height:7px;border:1px solid #9a9a9a;border-top:0;border-radius:0 0 4px 4px;box-sizing:border-box}.tmf-anat-part span{font-size:10.5px;color:#cfcfcf;text-align:center;max-width:150px;line-height:1.3}.tmf-anat-note{font-size:11px;color:#9a9a9a;text-align:center;margin:0 0 8px}.tmf-sheet-tabs{display:flex;flex-wrap:wrap;gap:2px;border-bottom:1px solid #444;margin-bottom:4px}.tmf-sheet-tabs button{background:none;border:0;border-bottom:2px solid transparent;margin-bottom:-1px;padding:5px 9px;font-size:12px;color:#aaa;border-radius:0}.tmf-sheet-tabs button:hover{color:#ddd}.tmf-sheet-tabs button[aria-selected="true"]{color:#fff;border-bottom-color:#b5d56a}.tmf-sheet-hint{font-size:10.5px;color:#9a9a9a;margin:4px 0 2px}.tmf-sheet-hint b{color:#cfcfcf;font-weight:normal}.tmf-sheet-row{display:grid;grid-template-columns:auto minmax(0,1fr);gap:2px 12px;align-items:baseline;width:100%;box-sizing:border-box;text-align:left;background:none;border:0;border-bottom:1px solid #2c2c2c;border-radius:0;padding:6px 4px;color:#e6e6e6;font-size:11.5px}.tmf-sheet-row:hover{background:#2a2a2a}.tmf-sheet-row code{overflow-wrap:anywhere}.tmf-sheet-row--wide{grid-template-columns:minmax(0,1fr)}.tmf-sheet-row--on{background:#2a2f1e;box-shadow:inset 3px 0 0 #b5d56a}.tmf-sheet-note{font-size:10.5px;color:#9a9a9a;margin:6px 0 0}.tmf-sheet-tried{margin-top:6px;font-size:11.5px;color:#e6e6e6;line-height:1.45}.tmf-sheet-tried:empty{display:none}.tmf-live{margin-top:6px;background:#262626;border:1px solid #3a3a3a;border-radius:6px;padding:8px 10px;display:grid;gap:6px;font-size:12px;line-height:1.4;text-align:left}.tmf-modal-cats .tmf-live{margin:0 0 6px}.tmf-live-h{display:flex;justify-content:space-between;gap:8px;font-size:10.5px;color:#9a9a9a;text-transform:uppercase;letter-spacing:.5px;font-weight:bold}.tmf-live-h span:last-child{text-transform:none;letter-spacing:0;font-weight:normal;text-align:right}.tmf-live-say{font-size:12.5px;color:#fff}.tmf-live-muted{font-size:11px;color:#9a9a9a}.tmf-live-foot{font-size:10.5px;color:#9a9a9a;border-top:1px solid #333;padding-top:5px}.tmf-live-err{padding:7px 9px;border-radius:5px;background:#3a1f1f;border:1px solid #a34;color:#ffb3b3;font-size:12px}.tmf-live-steps{display:grid;grid-template-columns:auto minmax(0,1fr);gap:3px 10px;font-size:11.5px;margin:0}.tmf-live-steps dt{color:#9a9a9a;margin:0;font-weight:normal}.tmf-live-steps dd{margin:0;color:#e6e6e6;min-width:0}.tmf-live-steps b{color:#fff}.tmf-live-steps b.tmf-live-win{color:#b5d56a;font-size:13px}.tmf-live-tree{display:grid;gap:2px;font-size:11.5px}.tmf-live-tr{display:flex;flex-wrap:wrap;gap:2px 8px;align-items:baseline;padding:3px 6px;border-radius:4px}.tmf-live-tr .p{font-weight:bold;color:#fff;white-space:nowrap}.tmf-live-tr .w{flex:1 1 100%;color:#9a9a9a;font-size:10.5px}.tmf-live-tr .op{color:#9a9a9a;font-family:monospace}.tmf-live-tr--win{background:#2a2f1e;box-shadow:inset 3px 0 0 #8fd08f}.tmf-live-tr--win .p{color:#b5d56a}.tmf-live-lad-h{font-size:10.5px;color:#bbb;text-transform:uppercase;letter-spacing:.5px;font-weight:bold}.tmf-live-lad{border-top:1px solid #333;font-size:11.5px}.tmf-live-lr{display:flex;gap:8px;align-items:center;padding:2px 6px;border-bottom:1px solid #2c2c2c;min-height:22px;box-sizing:border-box}.tmf-live-lr .p{width:78px;text-align:right;flex:none}.tmf-live-lr .q{width:52px;text-align:right;color:#bbb;flex:none}.tmf-live-lr .n{flex:1;min-width:0;color:#9a9a9a;font-size:10.5px}.tmf-live-lr--dim .p,.tmf-live-lr--dim .q{color:#777}.tmf-live-lr--pick{background:#24301c}.tmf-live-lr--pick .n{color:#b5d56a}.tmf-live-lr--you{background:#3a3414;border:1px solid #c9a227;border-radius:5px;color:#fff}.tmf-live-lr--you .n{color:#fff}.tmf-live-lr--gap{color:#777;font-size:10.5px;justify-content:center;min-height:18px}`);
+    GM_addStyle(`.tmf-own{cursor:pointer;position:relative;display:inline-flex;align-items:center;justify-content:center;width:18px;height:16px;margin-right:2px;color:#888;font:italic bold 14px/1 Georgia,"Times New Roman",serif;align-self:center;user-select:none;-webkit-user-select:none;z-index:99999}.tmf-own:hover{color:#fff}.tmf-own--on,.tmf-own--on:hover{color:#8fd08f}.tmf-own--on:after{content:"";position:absolute;top:-1px;right:-1px;width:5px;height:5px;border-radius:50%;background:#8fd08f;pointer-events:none}.tmf-own-box{position:absolute;z-index:2147482000;width:290px;max-width:calc(100vw - 16px);box-sizing:border-box;background:#1f1f1f;color:#e6e6e6;border:1px solid #888;border-radius:8px;box-shadow:0 8px 26px rgba(0,0,0,.8);padding:9px 11px 10px;font:12px/1.45 Arial,Helvetica,sans-serif;text-align:left}.tmf-own-box:before{content:"";position:absolute;top:-6px;left:var(--tmf-own-arrow,24px);width:10px;height:10px;background:#1f1f1f;border-left:1px solid #888;border-top:1px solid #888;transform:rotate(45deg)}.tmf-own-box [hidden]{display:none!important}.tmf-own-t{display:flex;justify-content:space-between;align-items:center;gap:8px;font-weight:bold;color:#fff;font-size:12.5px;margin-bottom:6px}.tmf-own-t span:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.tmf-own-x{cursor:pointer;color:#bbb;font-size:20px;line-height:1;font-weight:normal;flex:none}.tmf-own-x:hover{color:#fff}.tmf-own-two{display:grid;grid-template-columns:minmax(0,1fr) 86px;gap:6px}.tmf-own-two label{display:block;margin:0;font-size:10px;font-weight:normal;color:#9a9a9a}.tmf-own-two input{display:block;width:100%;box-sizing:border-box;margin:2px 0 0;padding:6px 8px;height:auto;border-radius:5px;border:1px solid #666;background:#111;color:#eee;font:13px Consolas,Menlo,monospace}.tmf-own-two input::placeholder{color:#666}.tmf-own-two input.tmf-own-bad{border-color:#ff6b6b;box-shadow:0 0 0 1px rgba(255,107,107,.45)}.tmf-own-from{margin-top:5px;font-size:10.5px;color:#9a9a9a;line-height:1.4}.tmf-own-from code{background:#000;padding:1px 4px;border-radius:3px;color:#cfc;font:10.5px Consolas,Menlo,monospace}.tmf-own-err{margin-top:6px;padding:6px 8px;border-radius:5px;background:#3a1f1f;border:1px solid #a34;color:#ffb3b3;font-size:11px}.tmf-own-acts{display:flex;gap:6px;justify-content:flex-end;margin-top:8px}.tmf-own-acts button{cursor:pointer;padding:5px 12px;border-radius:5px;border:1px solid #666;background:#333;color:#eee;font:12px/1.3 Arial,Helvetica,sans-serif;height:auto;min-width:0;margin:0;box-shadow:none;text-transform:none}.tmf-own-acts .tmf-own-save{background:#2e7d32;border-color:#2e7d32;color:#fff}`);
 
     GM_addStyle(`.tmf-ana-btn{cursor:pointer;display:inline-flex;align-items:center;justify-content:center;width:18px;color:#888;align-self:center;margin-right:2px;user-select:none;-webkit-user-select:none}.tmf-ana-btn:hover{color:#ddd}.tmf-ana-btn svg{display:block;width:14px;height:12px;fill:currentColor;pointer-events:none}.tmf-ana{display:none;position:fixed;top:60px;left:40px;width:540px;max-width:calc(100vw - 16px);max-height:calc(100vh - 24px);overflow:auto;background:#1f1f1f;color:#e6e6e6;border:1px solid #666;border-radius:10px;box-shadow:0 10px 40px rgba(0,0,0,.6);padding:12px 14px;box-sizing:border-box;font-size:12px;line-height:1.45;z-index:999999;text-align:left}.tmf-ana--open{display:block}@media (max-width:784px){.tmf-ana{top:auto!important;left:0!important;right:0;bottom:0;width:auto;max-width:none;max-height:85vh;border-radius:14px 14px 0 0;border-bottom:0}}.tmf-ana-head{display:flex;align-items:center;gap:10px;margin-bottom:8px;cursor:move;user-select:none;-webkit-user-select:none}@media (max-width:784px){.tmf-ana-head{cursor:default}}.tmf-ana-img{width:34px;height:34px;border-radius:4px;background:#2a2a2a;flex:none;object-fit:contain}.tmf-ana-title{display:flex;flex-direction:column;line-height:1.3;min-width:0}.tmf-ana-title b{font-size:15px;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.tmf-ana-title small{font-size:11px;color:#a5a5a5}.tmf-ana-hb{margin-left:auto;color:#bbb;font-size:16px;line-height:1;cursor:pointer;width:22px;text-align:center;flex:none}.tmf-ana-hb:hover{color:#fff}.tmf-ana-hb.tmf-ana-close{margin-left:0;font-size:22px}.tmf-ana-tabs{display:flex;gap:2px;border-bottom:1px solid #444;margin:0 0 8px}.tmf-ana-tab{padding:5px 12px;font-size:12px;color:#aaa;border-bottom:2px solid transparent;margin-bottom:-1px;cursor:pointer}.tmf-ana-tab:hover{color:#ddd}.tmf-ana-tab--on,.tmf-ana-tab--on:hover{color:#fff;border-bottom-color:#b5d56a}.tmf-ana-kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:6px 0 8px}@media (max-width:784px){.tmf-ana-kpis{grid-template-columns:1fr 1fr}}.tmf-ana-kpi{background:#262626;border:1px solid #3a3a3a;border-radius:6px;padding:6px 8px;min-width:0}.tmf-ana-kpi .l{font-size:9.5px;color:#9a9a9a;text-transform:uppercase;letter-spacing:.5px;white-space:nowrap}.tmf-ana-kpi .v{font-size:15px;font-weight:bold;color:#fff;margin:2px 0 1px;white-space:nowrap}.tmf-ana-kpi .d{font-size:10.5px;color:#aaa;line-height:1.3}.tmf-ana-legend{display:flex;gap:14px;flex-wrap:wrap;font-size:10.5px;color:#bbb;margin:2px 0 4px}.tmf-ana-legend span{display:inline-flex;align-items:center;gap:5px;white-space:nowrap}.tmf-ana-sw{display:inline-block;width:9px;height:9px;border-radius:2px}.tmf-ana-m{background:#3987e5}.tmf-ana-b{background:#d95926}.tmf-ana-src{width:16px;height:16px;border-radius:50%;font-size:9px;font-weight:bold;display:inline-grid;place-items:center;color:#fff;flex:none}.tmf-ana-src.tmf-ana-y{background:#c9a227;color:#1f1f1f;font-size:10px}.tmf-ana-sec{font-size:10.5px;color:#bbb;text-transform:uppercase;letter-spacing:.5px;margin:8px 0 4px;font-weight:bold}.tmf-ana-sec code{text-transform:none;letter-spacing:0}.tmf-ana-sec small{text-transform:none;letter-spacing:0;font-weight:normal;color:#8a8a8a;margin-left:4px}.tmf-ana-cols{display:grid;grid-template-columns:1fr 1fr;gap:16px}@media (max-width:784px){.tmf-ana-cols{grid-template-columns:1fr}}.tmf-ana-band{margin:0 0 7px}.tmf-ana-bl{font-size:11px;color:#ddd;margin-bottom:2px}.tmf-ana-brow{display:flex;align-items:center;gap:6px;height:14px;margin:1px 0}.tmf-ana-bar{display:block;height:8px;border-radius:0 4px 4px 0;flex:none;max-width:46%}.tmf-ana-bv{font-size:10.5px;color:#aaa;white-space:nowrap}.tmf-ana-lad{margin:4px 0 2px;border-top:1px solid #333}.tmf-ana-lr{display:flex;align-items:center;gap:8px;padding:3px 6px;border-bottom:1px solid #2c2c2c;font-size:12px;min-height:25px;box-sizing:border-box}.tmf-ana-lr[data-price]{cursor:pointer}.tmf-ana-lr[data-price]:hover{background:#2a2a2a}.tmf-ana-lr .p{width:82px;text-align:right;color:#f0f0f0;flex:none}.tmf-ana-lr .q{width:56px;color:#bbb;text-align:right;flex:none}.tmf-ana-lr .n{flex:1;color:#999;font-size:10.5px;min-width:0;line-height:1.3}.tmf-ana-lr--you{background:#3a3414;border:1px solid #c9a227;border-radius:6px;margin:2px 0;color:#fff}.tmf-ana-lr--you .p,.tmf-ana-lr--you .n{color:#fff}.tmf-ana-lr--dim .p,.tmf-ana-lr--dim .q{color:#777}.tmf-ana-lr--more{min-height:22px;border-bottom:0}.tmf-ana-lr--hidden{display:none}.tmf-ana--all .tmf-ana-lr--hidden{display:flex}.tmf-ana--all .tmf-ana-showall{display:none}.tmf-ana-tag{display:inline-block;font-size:9.5px;padding:1px 6px;border-radius:8px;background:#2e7d32;color:#fff;white-space:nowrap;line-height:1.4;margin-right:4px}.tmf-ana-tag--gray{background:#444;color:#ccc}.tmf-ana-tag--blue{background:#1c5cab}.tmf-ana-hint{font-size:10.5px;color:#8a8a8a;margin:4px 0 2px}.tmf-ana-verdict{margin:8px 0 2px;padding:7px 9px;background:#262626;border-left:3px solid #c9a227;border-radius:0 6px 6px 0;font-size:11.5px;line-height:1.45;color:#ddd}.tmf-ana code{background:#000;padding:1px 4px;border-radius:3px;color:#cfc;font-size:10.5px}.tmf-ana a{color:#9cc25e;text-decoration:underline;cursor:pointer}.tmf-ana-foot{display:flex;align-items:center;gap:8px;margin-top:10px;padding-top:8px;border-top:1px solid #333}.tmf-ana-foot:empty{display:none}.tmf-ana-sum{flex:1;font-size:10.5px;color:#9a9a9a;line-height:1.3}.tmf-ana-foot button{cursor:pointer;padding:6px 12px;border-radius:5px;border:1px solid #666;background:#333;color:#eee;font-size:12px;white-space:nowrap}.tmf-ana-foot button.tmf-ana-apply{background:#2e7d32;border-color:#2e7d32;color:#fff}.tmf-ana-trace{margin:4px 0 0;font-size:11.5px}.tmf-ana-tr{display:flex;align-items:baseline;gap:8px;padding:3px 6px;border-radius:4px;flex-wrap:wrap;line-height:1.35}.tmf-ana-tr .op{color:#9a9a9a;font-family:monospace;font-size:12px}.tmf-ana-tr .r{font-weight:bold;color:#fff;white-space:nowrap}.tmf-ana-tr .why{color:#9a9a9a;font-size:10.5px;flex:1 1 100%;padding-left:2px}.tmf-ana-tr--win{background:#2a2f1e;border-left:3px solid #8fd08f}.tmf-ana-tr--win .r{color:#b5d56a}.tmf-ana-note{margin-top:6px;font-size:10.5px;color:#8a8a8a;border-top:1px solid #333;padding-top:6px}.tmf-ana-alert{margin:0 0 6px;padding:8px 10px;border-radius:6px;background:#3a2f1f;border:1px solid #a7792a;color:#ffd9a0;font-size:11.5px;line-height:1.4}.tmf-ana-skel{display:inline-block;height:8px;border-radius:4px;background:#333;margin:3px 0}.tmf-ana-muted{color:#8a8a8a;font-size:11px;margin:4px 0}`);
 
@@ -96,6 +97,21 @@
     // Write every line for a player, not a developer: one short sentence, plain words,
     // what changed for them rather than what changed in the code.
     const CHANGELOG = [
+        {
+            version: "2.3.0",
+            date: "2026-11-05",
+            changes: [
+                'New ƒ beside the star: give one item its own price and quantity formula, ahead of its category and your default. It turns green on items that have one.'
+            ]
+        },
+        {
+            version: "2.2.1",
+            date: "2026-11-05",
+            silent: true,
+            changes: [
+                'Settings: on phones, tapping a box such as Default quantity no longer opens the keyboard and closes it again.'
+            ]
+        },
         {
             version: "2.2.0",
             date: "2026-11-02",
@@ -210,6 +226,10 @@
     // categories are re-verified from each response and forcibly refreshed once past this TTL.
     const CATEGORY_TTL_MS = 14 * 24 * 60 * 60 * 1000;
     const SETTINGS_CATEGORIES = ["Melee","Primary","Secondary","Defensive","Temporary","Drug","Medical","Booster","Energy Drink","Alcohol","Candy","Enhancer","Clothing","Jewelry","Material","Flower","Plushie","Car","Supply Pack","Special","Collectible","Artifact","Tool","Other"];
+    // One item's own price and quantity, set from the ƒ icon on its row, keyed by item id. They
+    // win over the item's category and the defaults; a blank one falls through as before.
+    const itemFormulasKey = "silmaril-torn-market-filler-item-formulas";
+    let itemFormulas = loadItemFormulas();
     let categoryDeltas = loadCategoryDeltas();
     let categoryQuantities = loadCategoryQuantities();
     let itemCategoryCache = loadItemCategoryCache();
@@ -351,6 +371,16 @@
                 });
                 favHost.prepend(favBtn);
             }
+            // The ƒ icon, for this item's own formula, goes right after the star.
+            if (favHost.querySelector('.tmf-own') == null){
+                const ownBtn = ownFormulaIcon(itemIdNum, wrapperParent);
+                const star = favHost.querySelector('.tmf-fav');
+                if (star != null){
+                    star.after(ownBtn);
+                } else {
+                    favHost.prepend(ownBtn);
+                }
+            }
             // The item analytics icon sits beside the star, outside the price box, so the price
             // input keeps its width. Same re-scan guard as the star.
             if (favHost.querySelector('.tmf-ana-btn') == null){
@@ -365,7 +395,7 @@
                     let fillSquare = wrapperParent.querySelector('.silmaril-market-filler-button') ?? span;
                     openAnalytics({ itemId: itemId, host: wrapperParent, target: fillSquare, pageType: getCurrentPage() });
                 });
-                const star = favHost.querySelector('.tmf-fav');
+                const star = favHost.querySelector('.tmf-own') ?? favHost.querySelector('.tmf-fav');
                 if (star != null){
                     star.after(anaBtn);
                 } else {
@@ -385,6 +415,191 @@
     // aria-controls id on Add Items rows, otherwise any item image in the row. The Your Items
     // (view listings) rows don't reliably carry the aria-controls id, and dereferencing the
     // missing button used to throw — killing button injection for the whole row.
+    // ---- An item's own formula ----------------------------------------------------------------
+    // The ƒ beside the star opens a small box under it with the item's own price and quantity.
+    // They win over the item's category and the defaults. The ƒ turns green while it has one.
+
+    let ownFormulaBox = null;
+
+    function ownFormulaIcon(itemId, row){
+        const icon = document.createElement('span');
+        icon.className = 'tmf-own';
+        icon.textContent = 'ƒ';
+        icon.dataset.tmfItemId = itemId;
+        renderOwnFormulaIcon(icon, itemId);
+        icon.addEventListener('click', function(event){
+            event.preventDefault();
+            event.stopPropagation();
+            if (ownFormulaBox != null && ownFormulaBox.icon === icon){
+                closeOwnFormula();
+            } else {
+                openOwnFormula(itemId, icon, row);
+            }
+        });
+        return icon;
+    }
+
+    function renderOwnFormulaIcon(icon, itemId){
+        let price = itemOwnPrice(itemId);
+        let quantity = itemOwnQuantity(itemId);
+        let on = price != null || quantity != null;
+        icon.classList.toggle('tmf-own--on', on);
+        icon.title = on
+            ? 'Own formula: ' + [price, quantity != null ? 'quantity ' + quantity : null].filter(Boolean).join(', ') + '. It wins over its category and the default'
+            : 'Give this item its own formula, ahead of its category and the default';
+    }
+
+    function renderOwnFormulaIcons(itemId){
+        document.querySelectorAll('.tmf-own[data-tmf-item-id="' + parseInt(itemId, 10) + '"]').forEach(function(icon){
+            renderOwnFormulaIcon(icon, itemId);
+        });
+    }
+
+    function rowItemName(row){
+        row = row.closest('li, [data-testid="sortable-item"], [class*="row___"], [class*="itemRowWrapper___"]') ?? row;
+        let image = row.querySelector('img[alt]:not([alt=""])');
+        if (image != null){
+            return image.alt.trim();
+        }
+        let label = row.querySelector('.t-overflow, [class*="name___"], [class*="itemName"]');
+        let text = label == null ? '' : label.textContent.trim();
+        return text !== '' && text.length <= 60 ? text : null;
+    }
+
+    function openOwnFormula(itemId, icon, row){
+        closeOwnFormula();
+        let cached = getCachedCategory(parseInt(itemId, 10));
+        let category = cached != null ? cached.type : null;
+        let key = category == null ? null : String(category).trim().toLowerCase();
+        let fromCategory = key != null && (categoryDeltas[key] != null || categoryQuantities[key] != null);
+        let name = rowItemName(row);
+        const box = document.createElement('div');
+        box.className = 'tmf-own-box';
+        box.innerHTML =
+            '<div class="tmf-own-t"><span></span><span class="tmf-own-x" title="Close">&times;</span></div>' +
+            '<div class="tmf-own-two">' +
+                '<label>Price<input type="text" class="tmf-own-price" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"></label>' +
+                '<label>Quantity<input type="text" class="tmf-own-qty" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"></label>' +
+            '</div>' +
+            '<div class="tmf-own-from"></div>' +
+            '<div class="tmf-own-err" hidden></div>' +
+            '<div class="tmf-own-acts"><button type="button" class="tmf-own-clear">Clear</button><button type="button" class="tmf-own-save">Save</button></div>';
+        box.querySelector('.tmf-own-t span').textContent = name != null ? name + '’s own formula' : 'This item’s own formula';
+        let priceInput = box.querySelector('.tmf-own-price');
+        let qtyInput = box.querySelector('.tmf-own-qty');
+        let inheritedPrice = getEffectiveDelta(category);
+        let inheritedQty = getEffectiveQuantity(category);
+        priceInput.value = itemOwnPrice(itemId) ?? '';
+        qtyInput.value = itemOwnQuantity(itemId) ?? '';
+        priceInput.placeholder = inheritedPrice;
+        qtyInput.placeholder = inheritedQty;
+        box.querySelector('.tmf-own-from').innerHTML = 'Blank uses ' + (fromCategory ? escapeHtml(category) : 'the default') + ': <code>' +
+            escapeHtml(inheritedPrice) + '</code> · <code>' + escapeHtml(inheritedQty) + '</code>' + (category == null ? ', or its category once it has been filled' : '') + '.';
+        document.body.appendChild(box);
+        ownFormulaBox = { box: box, icon: icon, itemId: itemId };
+        placeOwnFormula();
+
+        box.querySelector('.tmf-own-x').addEventListener('click', closeOwnFormula);
+        box.querySelector('.tmf-own-clear').addEventListener('click', function(){
+            priceInput.value = '';
+            qtyInput.value = '';
+            saveOwnFormula();
+        });
+        box.querySelector('.tmf-own-save').addEventListener('click', saveOwnFormula);
+        box.addEventListener('input', function(event){
+            event.target.classList.remove('tmf-own-bad');
+            box.querySelector('.tmf-own-err').hidden = true;
+        });
+        box.addEventListener('keydown', function(event){
+            if (event.key === 'Enter'){
+                event.preventDefault();
+                saveOwnFormula();
+            } else if (event.key === 'Escape'){
+                closeOwnFormula();
+            }
+        });
+        document.addEventListener('pointerdown', closeOwnFormulaOutside, true);
+        window.addEventListener('resize', placeOwnFormula);
+    }
+
+    // Under the ƒ, its arrow pointing at it, kept inside the screen.
+    function placeOwnFormula(){
+        if (ownFormulaBox == null){
+            return;
+        }
+        let box = ownFormulaBox.box;
+        let rect = ownFormulaBox.icon.getBoundingClientRect();
+        if (rect.width === 0 && rect.height === 0){
+            return;
+        }
+        let width = box.offsetWidth;
+        let pageWidth = document.documentElement.clientWidth;
+        let centre = rect.left + rect.width / 2;
+        let left = Math.max(8, Math.min(centre - width + 28, pageWidth - width - 8));
+        box.style.left = (left + window.scrollX) + 'px';
+        box.style.top = (rect.bottom + window.scrollY + 9) + 'px';
+        box.style.setProperty('--tmf-own-arrow', Math.max(10, Math.min(width - 20, centre - left - 5)) + 'px');
+    }
+
+    function closeOwnFormulaOutside(event){
+        if (ownFormulaBox != null && !ownFormulaBox.box.contains(event.target) && event.target !== ownFormulaBox.icon){
+            closeOwnFormula();
+        }
+    }
+
+    function closeOwnFormula(){
+        if (ownFormulaBox == null){
+            return;
+        }
+        ownFormulaBox.box.remove();
+        ownFormulaBox = null;
+        document.removeEventListener('pointerdown', closeOwnFormulaOutside, true);
+        window.removeEventListener('resize', placeOwnFormula);
+    }
+
+    function saveOwnFormula(){
+        if (ownFormulaBox == null){
+            return;
+        }
+        let box = ownFormulaBox.box;
+        let itemId = ownFormulaBox.itemId;
+        let priceInput = box.querySelector('.tmf-own-price');
+        let qtyInput = box.querySelector('.tmf-own-qty');
+        let price = priceInput.value.trim();
+        let quantity = qtyInput.value.trim();
+        let err = box.querySelector('.tmf-own-err');
+        priceInput.classList.remove('tmf-own-bad');
+        qtyInput.classList.remove('tmf-own-bad');
+        let problem = price === '' ? null : settingProblem(price);
+        if (problem != null){
+            priceInput.classList.add('tmf-own-bad');
+            err.textContent = 'Price: ' + problem;
+            err.hidden = false;
+            return;
+        }
+        if (quantity !== '' && !isKnownQuantityMode(quantity)){
+            qtyInput.classList.add('tmf-own-bad');
+            err.textContent = 'Quantity: use max, max-1, a plain number, or skip.';
+            err.hidden = false;
+            return;
+        }
+        let key = String(parseInt(itemId, 10));
+        if (price === '' && quantity === ''){
+            delete itemFormulas[key];
+        } else {
+            itemFormulas[key] = {};
+            if (price !== ''){
+                itemFormulas[key].price = price;
+            }
+            if (quantity !== ''){
+                itemFormulas[key].quantity = quantity;
+            }
+        }
+        saveItemFormulas();
+        renderOwnFormulaIcons(itemId);
+        closeOwnFormula();
+    }
+
     function getRowItemId(wrapperParent){
         if (currentPage == pages.AddItems){
             let infoButton = wrapperParent.querySelector('[class^=itemRow___] [type=button][class^=viewInfoButton___]');
@@ -1011,7 +1226,7 @@
     // A bazaar-only setup never calls Torn, so it must never be asked for a key. Any other
     // source among the active formulas — including the bare default — still needs one.
     function needsTornApiKey(){
-        return [priceDeltaRaw].concat(Object.values(categoryDeltas)).some(function(setting){
+        return [priceDeltaRaw].concat(Object.values(categoryDeltas), itemOwnPrices()).some(function(setting){
             return formulaBranches(setting).some(function(branch){
                 return sourcesOf(branch).some(function(source){ return source !== SOURCE_BAZAAR; });
             });
@@ -1143,9 +1358,46 @@
         }
     }
 
-    // Resolve the formula to use for an item: a per-category override (matched on the item's
+    function loadItemFormulas(){
+        try {
+            let parsed = JSON.parse(localStorage.getItem(itemFormulasKey) ?? "{}");
+            return (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) ? parsed : {};
+        } catch (error) {
+            console.error("[TornMarketFiller] Failed to load item formulas:", error);
+            return {};
+        }
+    }
+
+    function saveItemFormulas(){
+        localStorage.setItem(itemFormulasKey, JSON.stringify(itemFormulas));
+    }
+
+    function itemFormulaOf(itemId){
+        let id = parseInt(itemId, 10);
+        return isNaN(id) ? null : (itemFormulas[String(id)] ?? null);
+    }
+
+    function itemOwnPrice(itemId){
+        let own = itemFormulaOf(itemId);
+        return own != null && typeof own.price === 'string' && own.price.trim() !== '' ? own.price.trim() : null;
+    }
+
+    function itemOwnQuantity(itemId){
+        let own = itemFormulaOf(itemId);
+        return own != null && typeof own.quantity === 'string' && own.quantity.trim() !== '' ? own.quantity.trim() : null;
+    }
+
+    function itemOwnPrices(){
+        return Object.keys(itemFormulas).map(itemOwnPrice).filter(function(price){ return price != null; });
+    }
+
+    // Resolve the formula to use for an item: its own formula if it has one, else a per-category override (matched on the item's
     // type, case-insensitively) if set, otherwise the global default.
-    function getEffectiveDelta(category){
+    function getEffectiveDelta(category, itemId = null){
+        let own = itemOwnPrice(itemId);
+        if (own != null){
+            return own;
+        }
         if (category != null){
             let override = categoryDeltas[String(category).trim().toLowerCase()];
             if (override != null && String(override).trim() !== ''){
@@ -1351,7 +1603,7 @@
             // No per-category overrides of either kind → category is irrelevant; behave like
             // the default path.
             if (Object.keys(categoryDeltas).length === 0 && !hasCategoryQuantityOverrides()){
-                return await priceSetting(priceDeltaRaw, itemId, null, null, context);
+                return await priceSetting(getEffectiveDelta(null, itemId), itemId, null, null, context);
             }
 
             let cached = getCachedCategory(itemId);
@@ -1359,7 +1611,7 @@
             let guessCategory = cached != null ? cached.type : null;
             // Only the first branch decides which endpoint to try first; the rest are priced
             // once the category is known.
-            let guessFormula = firstBranch(getEffectiveDelta(guessCategory));
+            let guessFormula = firstBranch(getEffectiveDelta(guessCategory, itemId));
             // When stale/unknown, force the items endpoint so we definitively re-learn the type even
             // if the chosen source omits it; otherwise guess from the cache to stay 1 call.
             // Without a key that refresh can only fail, and failing it would take a bazaar-only
@@ -1375,7 +1627,7 @@
             if (actualType != null && (cached == null || cached.type !== actualType || expired)){
                 cacheItemCategory(itemId, actualType);
             }
-            return await priceSetting(getEffectiveDelta(category), itemId, category,
+            return await priceSetting(getEffectiveDelta(category, itemId), itemId, category,
                                 { source: firstSource, formula: guessFormula, data: data }, context);
         } catch (error) {
             console.error("[TornMarketFiller] Error fetching data:", error);
@@ -1489,7 +1741,11 @@
     }
 
     // Same lookup as getEffectiveDelta, for the quantity mode.
-    function getEffectiveQuantity(category){
+    function getEffectiveQuantity(category, itemId = null){
+        let own = itemOwnQuantity(itemId);
+        if (own != null){
+            return own;
+        }
         if (category != null){
             let override = categoryQuantities[String(category).trim().toLowerCase()];
             if (override != null && String(override).trim() !== ''){
@@ -1539,7 +1795,8 @@
         if (parentRow == null){
             return 'ok';
         }
-        let mode = getEffectiveQuantity(category);
+        let host = target.closest('[data-tmf-item-id]');
+        let mode = getEffectiveQuantity(category, host != null ? host.dataset.tmfItemId : null);
         let quantityInputs = parentRow.querySelectorAll('[class^=amountInputWrapper___] .input-money-group > .input-money');
         if (quantityInputs.length === 0){
             // Single-copy rows (most clothing) carry a checkbox instead of an amount input,
@@ -1700,7 +1957,7 @@
     }
 
     function settingsUseMine(){
-        return [priceDeltaRaw].concat(Object.values(categoryDeltas)).some(function(setting){
+        return [priceDeltaRaw].concat(Object.values(categoryDeltas), itemOwnPrices()).some(function(setting){
             return formulaBranches(setting).some(usesMine);
         });
     }
@@ -1724,7 +1981,7 @@
             }
             let maxQuantity = await discoverMaxQuantity(quantityInputs, parentRow);
             let cached = getCachedCategory(parseInt(itemId, 10));
-            let listed = resolveQuantity(maxQuantity, getEffectiveQuantity(cached != null ? cached.type : null));
+            let listed = resolveQuantity(maxQuantity, getEffectiveQuantity(cached != null ? cached.type : null, itemId));
             return listed ?? maxQuantity;
         }
         let row = findParentByCondition(target, (el) => String(el.className).indexOf('itemRowWrapper___') > -1);
@@ -3270,7 +3527,8 @@
             html += '<div class="tmf-ana-verdict"><b>Filled ' + money(model.you) + '</b> from <code>' + escapeHtml(trace.winner) + '</code>: ' + escapeHtml(describeBranch(winner, session)) + '.' +
                 (others.length ? ' The other ' + (others.length === 1 ? 'branch' : 'branches') + ': ' + others.join(', ') + '.' : '') + '</div>';
         }
-        html += '<div class="tmf-ana-sec">Formula · <code>' + escapeHtml(trace.setting) + '</code></div>';
+        html += '<div class="tmf-ana-sec">Formula · <code>' + escapeHtml(trace.setting) + '</code>' +
+            (itemOwnPrice(model.itemId) === trace.setting ? '<small>this item’s own</small>' : '') + '</div>';
         html += '<div class="tmf-ana-trace">' + renderTraceNode(trace.root, session, 0) + '</div>';
         return html;
     }
@@ -4182,6 +4440,22 @@
         renderCheatsheetHint(overlay);
     }
 
+    // Focus lands in the middle of a tap, and redrawing the live check (or the cheatsheet hint)
+    // there can change the height of what sits above the tapped field, pulling the field out from
+    // under the finger. On a phone the tap then ends on the API key box instead, and Android shuts
+    // the keyboard it had just opened. So the redraw waits for the click that ends the tap, or
+    // half a second when focus came without one (Tab).
+    function afterTap(overlay, draw){
+        let timer = null;
+        let run = function(){
+            overlay.removeEventListener('click', run, true);
+            clearTimeout(timer);
+            setTimeout(draw, 0);
+        };
+        overlay.addEventListener('click', run, true);
+        timer = setTimeout(run, 500);
+    }
+
     function attachSettingsHelp(overlay){
         overlay.addEventListener('focusin', function(event){
             let input = event.target;
@@ -4194,8 +4468,10 @@
             }
             settingsHelp.field = input;
             settingsHelp[kind === 'quantity' ? 'lastQuantity' : 'lastPrice'] = input;
-            renderLiveCheck(overlay);
-            renderCheatsheetHint(overlay);
+            afterTap(overlay, function(){
+                renderLiveCheck(overlay);
+                renderCheatsheetHint(overlay);
+            });
         });
         overlay.addEventListener('input', function(event){
             if (event.target.classList.contains('tmf-modal-apikey')){
