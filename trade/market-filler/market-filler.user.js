@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Market Filler
 // @namespace    https://github.com/SOLiNARY
-// @version      2.2.0
+// @version      2.2.1
 // @description  Adds a Fill button to every row when you list on the Item Market: one click sets the price and quantity. Price from listings (cheapest minus $1 by default), market value or live bazaars via weav3r.dev, with your own formula and min/max ranges. A popup shows the 5 cheapest listings; click one to undercut it. Quantity modes, per-category settings, favourites with Fill All. Open settings with the cog on the Fill All bar or by holding Fill for 2s. A small chart icon by the star opens item analytics: item-market and bazaar listings on one price ladder (or just one of them), what each keeps after the market fee, whether a bazaar would pay more, where your price lands, stack sizes, and what your formula picked.
 // @author       Silmaril [2665762]
 // @license      MIT License
@@ -19,7 +19,7 @@
     'use strict';
 
     // Keep in sync with @version above — it keys the "What's new" popup.
-    const SCRIPT_VERSION = "2.2.0";
+    const SCRIPT_VERSION = "2.2.1";
 
     const itemUrl = "https://api.torn.com/torn/{itemId}?selections=items&key={apiKey}&comment=MarketFiller";
     const marketUrl = "https://api.torn.com/v2/market/{itemId}?selections=itemMarket&key={apiKey}&comment=MarketFiller";
@@ -96,6 +96,13 @@
     // Write every line for a player, not a developer: one short sentence, plain words,
     // what changed for them rather than what changed in the code.
     const CHANGELOG = [
+        {
+            version: "2.2.1",
+            date: "2026-11-05",
+            changes: [
+                'Settings: on phones, tapping a box such as Default quantity no longer opens the keyboard and closes it again.'
+            ]
+        },
         {
             version: "2.2.0",
             date: "2026-11-02",
@@ -4182,6 +4189,22 @@
         renderCheatsheetHint(overlay);
     }
 
+    // Focus lands in the middle of a tap, and redrawing the live check (or the cheatsheet hint)
+    // there can change the height of what sits above the tapped field, pulling the field out from
+    // under the finger. On a phone the tap then ends on the API key box instead, and Android shuts
+    // the keyboard it had just opened. So the redraw waits for the click that ends the tap, or
+    // half a second when focus came without one (Tab).
+    function afterTap(overlay, draw){
+        let timer = null;
+        let run = function(){
+            overlay.removeEventListener('click', run, true);
+            clearTimeout(timer);
+            setTimeout(draw, 0);
+        };
+        overlay.addEventListener('click', run, true);
+        timer = setTimeout(run, 500);
+    }
+
     function attachSettingsHelp(overlay){
         overlay.addEventListener('focusin', function(event){
             let input = event.target;
@@ -4194,8 +4217,10 @@
             }
             settingsHelp.field = input;
             settingsHelp[kind === 'quantity' ? 'lastQuantity' : 'lastPrice'] = input;
-            renderLiveCheck(overlay);
-            renderCheatsheetHint(overlay);
+            afterTap(overlay, function(){
+                renderLiveCheck(overlay);
+                renderCheatsheetHint(overlay);
+            });
         });
         overlay.addEventListener('input', function(event){
             if (event.target.classList.contains('tmf-modal-apikey')){
