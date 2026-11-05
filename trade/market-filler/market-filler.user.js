@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Market Filler
 // @namespace    https://github.com/SOLiNARY
-// @version      2.3.3
+// @version      2.4.0
 // @description  Adds a Fill button to every row when you list on the Item Market: one click sets the price and quantity. Price from listings (cheapest minus $1 by default), market value or live bazaars via weav3r.dev, with your own formula and min/max ranges. A popup shows the 5 cheapest listings; click one to undercut it. Quantity modes, per-category settings, per-item formulas from the ƒ by the star, favourites with Fill All. Open settings with the cog on the Fill All bar or by holding Fill for 2s. A small chart icon by the star opens item analytics: item-market and bazaar listings on one price ladder (or just one of them), what each keeps after the market fee, whether a bazaar would pay more, where your price lands, stack sizes, and what your formula picked.
 // @author       Silmaril [2665762]
 // @license      MIT License
@@ -19,7 +19,7 @@
     'use strict';
 
     // Keep in sync with @version above — it keys the "What's new" popup.
-    const SCRIPT_VERSION = "2.3.3";
+    const SCRIPT_VERSION = "2.4.0";
 
     const itemUrl = "https://api.torn.com/torn/{itemId}?selections=items&key={apiKey}&comment=MarketFiller";
     const marketUrl = "https://api.torn.com/v2/market/{itemId}?selections=itemMarket&key={apiKey}&comment=MarketFiller";
@@ -78,6 +78,8 @@
     };
     GM_addStyle(`#item-market-root [class^=addListingWrapper___] [class^=panels___] [class^=priceInputWrapper___]>.input-money-group>.input-money,#item-market-root [class^=viewListingWrapper___] [class^=priceInputWrapper___]>.input-money-group>.input-money{font-size:smaller!important;border-bottom-left-radius:0!important;border-top-left-radius:0!important}.silmaril-market-filler-popup{background:var(--tooltip-bg-color);padding:12px 18px;border-radius:8px;border:1px solid #888;box-shadow:0 4px 18px 0 #0009;color:var(--info-msg-font-color);z-index:99999;position:fixed;font-size:1em!important;line-height:1.5;pointer-events:auto}.silmaril-market-filler-popup-close{position:absolute;top:4px;right:7px;font-size:1em;color:#aaa;cursor:pointer}.silmaril-market-filler-popup-draggable{user-select:none;cursor:move}.silmaril-torn-market-filler-popup-price{cursor:pointer}.tmf-fav{cursor:pointer;display:inline-flex;align-items:center;justify-content:center;width:18px;font-size:16px;line-height:1;color:#888;align-self:center;margin-right:2px;user-select:none;-webkit-user-select:none}.tmf-fav.tmf-fav--on{color:gold;text-shadow:0 0 3px rgba(255,215,0,.7)}.tmf-fillall-bar{position:fixed;bottom:110px;right:16px;display:flex;align-items:center;gap:6px;padding:6px 8px;background:rgba(0,0,0,.55);border-radius:20px;z-index:999999;touch-action:none;transition:box-shadow .2s ease}.tmf-fillall-grip{cursor:grab;color:#bbb;font-size:14px;line-height:1;letter-spacing:-2px;min-width:12px;text-align:center;align-self:center;user-select:none;-webkit-user-select:none}.tmf-fillall-bar--dragging{cursor:grabbing;opacity:.92}.tmf-fillall-bar--dragging .tmf-fillall-grip{cursor:grabbing}.tmf-fillall-cog{cursor:pointer;flex:0 0 auto;display:flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:rgba(255,255,255,.12);color:#ddd;font-size:13px;line-height:1;user-select:none;-webkit-user-select:none}.tmf-fillall-cog:hover{background:rgba(255,255,255,.28);color:#fff}.tmf-fillall-bar--min{padding:5px 7px;gap:4px}.tmf-fillall-bar--min .tmf-fillall-btn,.tmf-fillall-bar--min .tmf-fillall-cog{display:none}.tmf-fillall-bar--min .tmf-fillall-grip{font-size:16px}.tmf-autofill-dot{display:none;width:10px;height:10px;border-radius:50%;background:gold;box-shadow:0 0 4px gold;animation:tmfPulse 1s ease-in-out infinite}.tmf-fillall-bar--active .tmf-autofill-dot{display:inline-block}.tmf-fillall-bar--active{box-shadow:0 0 10px 2px rgba(255,215,0,.75)}@keyframes tmfPulse{0%,100%{opacity:.3;transform:scale(.8)}50%{opacity:1;transform:scale(1.2)}}.tmf-viewport-border{display:none;position:fixed;top:0;right:0;bottom:0;left:0;border:3px solid gold;box-shadow:inset 0 0 12px rgba(255,215,0,.6);pointer-events:none;z-index:999998}.tmf-viewport-border--active{display:block}.tmf-toast{position:fixed;bottom:158px;right:16px;max-width:280px;background:rgba(0,0,0,.85);color:#fff;padding:10px 14px;border-radius:8px;border:1px solid gold;font-size:13px;line-height:1.4;z-index:1000000;opacity:0;visibility:hidden;transition:opacity .3s,visibility .3s}.tmf-toast--visible{opacity:1;visibility:visible}.tmf-fav.tmf-fav--off{color:#ff6b6b;text-shadow:none}`);
 
+    // The settings tabs, the Display tab's switches, and the controls those switches hide.
+    GM_addStyle(`html.tmf-hide-fav .tmf-fav,html.tmf-hide-own .tmf-own,html.tmf-hide-ana .tmf-ana-btn,html.tmf-hide-fav.tmf-hide-own.tmf-hide-ana .tmf-icons{display:none!important}.tmf-modal-tabs{display:flex;gap:2px;border-bottom:1px solid #444;margin:0 0 4px}.tmf-modal-tabs button{background:none;border:0;border-bottom:2px solid transparent;margin:0 0 -1px;padding:5px 12px;color:#aaa;font:inherit;font-weight:bold;cursor:pointer;box-shadow:none;height:auto;min-width:0}.tmf-modal-tabs button:hover{color:#ddd}.tmf-modal-tabs button[aria-selected=true]{color:#fff;border-bottom-color:#b5d56a}.tmf-modal-pane[hidden]{display:none!important}.tmf-modal-note{margin:8px 0 2px;font-size:12px;color:#9a9a9a}.tmf-modal .tmf-modal-toggle{display:flex;align-items:center;gap:8px;margin:12px 0 0;font-weight:bold;color:#cfcfcf;cursor:pointer}.tmf-modal-toggle input{width:auto;margin:0}.tmf-modal-hint{margin:2px 0 0 22px;font-size:11.5px;line-height:1.4;color:#9a9a9a}`);
     GM_addStyle(`.tmf-modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:2147483000;justify-content:center;align-items:flex-start;overflow:auto;padding:24px 12px;box-sizing:border-box}.tmf-modal-overlay--open{display:flex}.tmf-modal{background:#1f1f1f;color:#e6e6e6;width:100%;max-width:420px;border:1px solid #666;border-radius:10px;box-shadow:0 10px 40px rgba(0,0,0,.6);padding:16px 18px;box-sizing:border-box;font-size:13px;line-height:1.5}.tmf-modal h3{margin:0 0 12px;font-size:15px;display:flex;justify-content:space-between;align-items:center;color:#fff}.tmf-modal-close{cursor:pointer;color:#bbb;font-size:22px;line-height:1}.tmf-modal label{display:block;margin:10px 0 3px;font-weight:bold;color:#cfcfcf}.tmf-modal input[type=text],.tmf-modal input[type=password]{width:100%;box-sizing:border-box;padding:7px 9px;border-radius:5px;border:1px solid #666;background:#111;color:#eee;font-size:13px}.tmf-modal-key{position:relative;display:flex;align-items:center}.tmf-modal-key input[type=text],.tmf-modal-key input[type=password]{padding-right:52px}.tmf-modal-key-reveal{position:absolute;right:7px;cursor:pointer;color:#bbb;font-size:11px;line-height:1;padding:3px 4px;user-select:none;-webkit-user-select:none}.tmf-modal-key-reveal:hover{color:#fff}.tmf-modal-toggle{display:flex;align-items:center;gap:8px;margin-top:10px;font-weight:bold;color:#cfcfcf}.tmf-modal-toggle input{width:auto}.tmf-modal-cats{margin-top:4px}.tmf-modal-cat-row{display:flex;gap:6px;margin-bottom:6px;align-items:center}.tmf-modal-cat-row .tmf-modal-cat-name{flex:1 1 55%}.tmf-modal-cat-row .tmf-modal-cat-formula{flex:1 1 45%}.tmf-modal-cat-del{cursor:pointer;color:#ff6b6b;font-size:20px;line-height:1;flex:0 0 auto;width:22px;text-align:center}.tmf-modal-addcat{margin-top:2px;cursor:pointer;background:#333;color:#eee;border:1px solid #666;border-radius:5px;padding:5px 10px;font-size:12px}.tmf-modal-resetcat{margin:2px 0 0 8px;cursor:pointer;background:#3a2a2a;color:#ddd;border:1px solid #774;border-radius:5px;padding:5px 10px;font-size:12px}.tmf-modal-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:16px}.tmf-modal-actions button{cursor:pointer;padding:7px 16px;border-radius:5px;border:1px solid #666;background:#333;color:#eee;font-size:13px}.tmf-modal-save{background:#2e7d32!important;border-color:#2e7d32!important;color:#fff!important}.tmf-modal-cat-row input{min-width:0}.tmf-modal-cat-row .tmf-modal-cat-name{flex:1 1 38%}.tmf-modal-cat-row .tmf-modal-cat-formula{flex:1 1 32%}.tmf-modal-cat-row .tmf-modal-cat-qty{flex:1 1 30%}.tmf-modal-cat-head{display:flex;gap:6px;margin:0 0 4px;font-size:11px;color:#9a9a9a}.tmf-modal-cat-head span:nth-child(1){flex:1 1 38%}.tmf-modal-cat-head span:nth-child(2){flex:1 1 32%}.tmf-modal-cat-head span:nth-child(3){flex:1 1 30%}.tmf-modal-cat-head span:nth-child(4){flex:0 0 22px}.tmf-modal-clearexcl{margin:2px 0 0 8px;cursor:pointer;background:#3a2a2a;color:#ddd;border:1px solid #774;border-radius:5px;padding:5px 10px;font-size:12px}.tmf-modal-error{display:none;margin-top:12px;padding:8px 10px;border-radius:5px;background:#3a1f1f;border:1px solid #a34;color:#ffb3b3;font-size:12px;line-height:1.4}.tmf-modal input.tmf-modal-invalid{border-color:#ff6b6b;box-shadow:0 0 0 1px rgba(255,107,107,.45)}`);
 
     GM_addStyle(`.tmf-changelog-release{margin:0 0 14px}.tmf-changelog-release:last-of-type{margin-bottom:0}.tmf-changelog-ver{display:flex;align-items:baseline;gap:8px;margin:0 0 6px}.tmf-changelog-ver b{color:#fff;font-size:13px}.tmf-changelog-date{color:#8a8a8a;font-size:11px;margin-left:auto}.tmf-changelog-badge{background:#2e7d32;color:#fff;border-radius:10px;padding:1px 7px;font-size:10px;text-transform:uppercase;letter-spacing:.04em}.tmf-changelog-items{margin:0;padding-left:18px;color:#cfcfcf}.tmf-changelog-items li{margin:0 0 5px}.tmf-changelog-items code{background:#000;padding:1px 4px;border-radius:3px;color:#cfc}`);
@@ -99,6 +101,13 @@
     // Write every line for a player, not a developer: one short sentence, plain words,
     // what changed for them rather than what changed in the code.
     const CHANGELOG = [
+        {
+            version: "2.4.0",
+            date: "2026-11-05",
+            changes: [
+                'New Display tab in settings: show or hide the star, the ƒ, the chart icon and the lowest-prices popup.'
+            ]
+        },
         {
             version: "2.3.2",
             date: "2026-11-05",
@@ -248,6 +257,36 @@
     // win over the item's category and the defaults; a blank one falls through as before.
     const itemFormulasKey = "silmaril-torn-market-filler-item-formulas";
     let itemFormulas = loadItemFormulas();
+
+    // Which of the script's extra row controls show. All of them do until the Display tab in
+    // settings turns one off. A class on <html> hides it, so rows added later follow too.
+    const displayKey = "silmaril-torn-market-filler-display";
+    const DISPLAY_OPTIONS = [
+        { key: 'fav', hide: 'tmf-hide-fav', label: 'Favourite star', hint: 'The ☆ beside each item. Hidden, your favourites and exclusions still count for Fill All.' },
+        { key: 'own', hide: 'tmf-hide-own', label: 'Own formula (ƒ)', hint: 'The ƒ that gives one item its own formula. Hidden, the formulas you already set still apply.' },
+        { key: 'ana', hide: 'tmf-hide-ana', label: 'Item analytics', hint: 'The chart icon that opens the analytics popup.' }
+    ];
+    let display = loadDisplay();
+    applyDisplay();
+
+    function loadDisplay(){
+        try {
+            const saved = JSON.parse(localStorage.getItem(displayKey) ?? '{}');
+            return saved != null && typeof saved === 'object' ? saved : {};
+        } catch (e) {
+            return {};
+        }
+    }
+
+    function shows(key){
+        return display[key] !== false;
+    }
+
+    function applyDisplay(){
+        DISPLAY_OPTIONS.forEach(function(option){
+            document.documentElement.classList.toggle(option.hide, !shows(option.key));
+        });
+    }
     let categoryDeltas = loadCategoryDeltas();
     let categoryQuantities = loadCategoryQuantities();
     let itemCategoryCache = loadItemCategoryCache();
@@ -4627,6 +4666,26 @@
         renderWizard(overlay);
     }
 
+    function displayPaneMarkup(){
+        return '<div class="tmf-modal-note">Choose what the script adds to each row.</div>' +
+            DISPLAY_OPTIONS.map(function(option){
+                return '<label class="tmf-modal-toggle"><input type="checkbox" class="tmf-modal-show" data-show="' + option.key + '">' + option.label + '</label>' +
+                    '<div class="tmf-modal-hint">' + option.hint + '</div>';
+            }).join('') +
+            '<label class="tmf-modal-toggle"><input type="checkbox" class="tmf-modal-popup">Show lowest-prices popup</label>' +
+            '<div class="tmf-modal-hint">The list of the cheapest listings that opens when you press Fill.</div>' +
+            '';
+    }
+
+    function showSettingsPane(overlay, pane){
+        overlay.querySelectorAll('.tmf-modal-tabs [data-pane]').forEach(function(tab){
+            tab.setAttribute('aria-selected', String(tab.dataset.pane === pane));
+        });
+        overlay.querySelectorAll('.tmf-modal-pane').forEach(function(section){
+            section.hidden = section.dataset.pane !== pane;
+        });
+    }
+
     function ensureSettingsModal(){
         if (document.querySelector('.tmf-settings-overlay') != null){
             return;
@@ -4636,6 +4695,11 @@
         overlay.innerHTML =
             '<div class="tmf-modal">' +
                 '<h3>Market Filler Settings<span class="tmf-modal-close" title="Close">&times;</span></h3>' +
+                '<div class="tmf-modal-tabs" role="tablist">' +
+                    '<button type="button" role="tab" data-pane="prices" aria-selected="true">Prices</button>' +
+                    '<button type="button" role="tab" data-pane="display" aria-selected="false">Display</button>' +
+                '</div>' +
+                '<div class="tmf-modal-pane" data-pane="prices">' +
                 settingsHelpMarkup() +
                 '<label>Default price</label>' +
                 '<input type="text" class="tmf-modal-delta" placeholder="-1[0]">' +
@@ -4647,13 +4711,14 @@
                     '<input type="password" class="tmf-modal-apikey" placeholder="16-character key" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">' +
                     '<span class="tmf-modal-key-reveal" title="Show the key">Show</span>' +
                 '</div>' +
-                '<label class="tmf-modal-toggle"><input type="checkbox" class="tmf-modal-popup">Show lowest-prices popup</label>' +
                 '<label>Per-category overrides</label>' +
                 '<div class="tmf-modal-cat-head"><span>Category</span><span>Price</span><span>Quantity</span><span></span></div>' +
                 '<div class="tmf-modal-cats"></div>' +
                 '<button type="button" class="tmf-modal-addcat">+ Add category</button>' +
                 '<button type="button" class="tmf-modal-resetcat" title="Forget cached item categories. Use if Torn recategorised an item and a wrong discount is being applied.">Reset learned categories</button>' +
                 '<button type="button" class="tmf-modal-clearexcl" title="Un-exclude every item marked ⊘, including ones not currently on screen.">Clear exclusions</button>' +
+                '</div>' +
+                '<div class="tmf-modal-pane" data-pane="display" hidden>' + displayPaneMarkup() + '</div>' +
                 '<div class="tmf-modal-error"></div>' +
                 '<div class="tmf-modal-actions">' +
                     '<button type="button" class="tmf-modal-cancel">Cancel</button>' +
@@ -4663,6 +4728,9 @@
             '<datalist id="tmf-modal-cat-list">' + SETTINGS_CATEGORIES.map(c => '<option value="' + c + '"></option>').join('') + '</datalist>';
         document.body.appendChild(overlay);
 
+        overlay.querySelectorAll('.tmf-modal-tabs [data-pane]').forEach(function(tab){
+            tab.addEventListener('click', function(){ showSettingsPane(overlay, tab.dataset.pane); });
+        });
         overlay.querySelector('.tmf-modal-close').addEventListener('click', closeSettingsModal);
         overlay.querySelector('.tmf-modal-cancel').addEventListener('click', closeSettingsModal);
         overlay.addEventListener('click', function(event){ if (event.target === overlay){ closeSettingsModal(); } });
@@ -4720,6 +4788,8 @@
         const overlay = document.querySelector('.tmf-settings-overlay');
         clearSettingsError(overlay);
         resetSettingsHelp(overlay);
+        showSettingsPane(overlay, 'prices');
+        overlay.querySelectorAll('.tmf-modal-show').forEach(function(box){ box.checked = shows(box.dataset.show); });
         overlay.querySelector('.tmf-modal-delta').value = priceDeltaRaw;
         overlay.querySelector('.tmf-modal-qty').value = quantityModeRaw;
         const keyInput = overlay.querySelector('.tmf-modal-apikey');
@@ -4909,8 +4979,19 @@
             return;
         }
         if (!validateSettingsModal(overlay)){
+            // The problem is on the Prices tab, which may not be the one showing.
+            showSettingsPane(overlay, 'prices');
+            const bad = overlay.querySelector('input.tmf-modal-invalid');
+            if (bad != null){
+                bad.focus();
+            }
             return;
         }
+        let shown = {};
+        overlay.querySelectorAll('.tmf-modal-show').forEach(function(box){ shown[box.dataset.show] = box.checked; });
+        display = shown;
+        localStorage.setItem(displayKey, JSON.stringify(display));
+        applyDisplay();
         let deltaVal = overlay.querySelector('.tmf-modal-delta').value.trim();
         if (deltaVal !== ''){
             priceDeltaRaw = deltaVal;
