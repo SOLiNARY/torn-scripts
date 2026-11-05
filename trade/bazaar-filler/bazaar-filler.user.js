@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Bazaar Filler
 // @namespace    https://github.com/SOLiNARY
-// @version      2.3.3
+// @version      3.0.0
 // @description  Adds a Fill button to every item on your bazaar's Add and Manage pages: one click sets the price and quantity. Price from the item market (cheapest minus $1 by default), market value or live bazaars via weav3r.dev, with your own formula and min/max ranges. Quantity modes, per-category settings, per-item formulas from the ƒ by the star, favourites with Fill All, and a bubble that warns when your price is far below the competition. A small chart icon next to Fill opens item analytics: item-market and bazaar listings on one price ladder (or just one of them), what each keeps after the item-market fee, whether the item market or a bazaar pays more, where your price lands, stack sizes, and what your formula picked. Open settings with the cog on the Fill All bar or by holding Fill for 3s.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT License
@@ -20,7 +20,7 @@
     'use strict';
 
     // Keep in sync with @version above — it keys the "What's new" popup.
-    const SCRIPT_VERSION = "2.3.3";
+    const SCRIPT_VERSION = "3.0.0";
 
     const marketUrl = "https://api.torn.com/v2/market?id={itemId}&selections=itemMarket&key={apiKey}&comment=BazaarFiller";
     const itemUrl = "https://api.torn.com/torn/{itemId}?selections=items&key={apiKey}&comment=BazaarFiller";
@@ -80,17 +80,24 @@
 
     GM_addStyle(`.btn-wrap.torn-bazaar-fill-qty-price{float:right;margin-left:auto;z-index:99999}.btn-wrap.torn-bazaar-clear-qty-price{z-index:99999}div.title-wrap div.name-wrap{display:flex;justify-content:flex-end}.tbf-wave-host{position:relative}.tbf-wave-clip{position:absolute;top:0;right:0;bottom:0;left:0;overflow:hidden;pointer-events:none}.wave{pointer-events:none;position:absolute;top:0;left:0;width:100%;height:33px;background-color:transparent;opacity:0;transform:translateX(-100%);animation:waveAnimation 1s cubic-bezier(0, 0, 0, 1)}@keyframes waveAnimation{0%{opacity:1;transform:translateX(-100%)}100%{opacity:0;transform:translateX(100%)}}.overlay-percentage{position:absolute;top:0;background-color:rgba(0, 0, 0, 0.9);padding:0 5px;border-radius:15px;font-size:10px;pointer-events:none}.overlay-percentage-add{right:-30px}@media (max-width:784px){.overlay-percentage-add{right:0}}.overlay-percentage-manage{right:0}.torn-bazaar-fill-qty-price input{-webkit-touch-callout:none;-webkit-user-select:none;user-select:none;transition:box-shadow 0s}.torn-bazaar-fill-qty-price input.tbf-holding{box-shadow:inset 0 0 0 40px rgba(0,180,255,.35);transition:box-shadow 3s linear}.tbf-fav{cursor:pointer;font-size:16px;line-height:1;margin-left:auto;margin-right:6px;width:16px;text-align:center;color:#888;align-self:center;user-select:none;-webkit-user-select:none;z-index:99999}.tbf-fav~.btn-wrap.torn-bazaar-fill-qty-price{margin-left:0}.tbf-fav.tbf-fav--on{color:gold;text-shadow:0 0 3px rgba(255,215,0,.7)}.tbf-fillall-bar{position:fixed;bottom:110px;right:16px;display:flex;align-items:center;gap:6px;padding:6px 8px;background:rgba(0,0,0,.55);border-radius:20px;z-index:999999;touch-action:none;transition:box-shadow .2s ease}.tbf-fillall-grip{cursor:grab;color:#bbb;font-size:14px;line-height:1;letter-spacing:-2px;min-width:12px;text-align:center;align-self:center;user-select:none;-webkit-user-select:none}.tbf-fillall-bar--dragging{cursor:grabbing;opacity:.92}.tbf-fillall-bar--dragging .tbf-fillall-grip{cursor:grabbing}.tbf-fillall-cog{cursor:pointer;flex:0 0 auto;display:flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:rgba(255,255,255,.12);color:#ddd;font-size:13px;line-height:1;user-select:none;-webkit-user-select:none}.tbf-fillall-cog:hover{background:rgba(255,255,255,.28);color:#fff}.tbf-fillall-bar--min{padding:5px 7px;gap:4px}.tbf-fillall-bar--min .tbf-fillall-btn,.tbf-fillall-bar--min .tbf-fillall-cog{display:none}.tbf-fillall-bar--min .tbf-fillall-grip{font-size:16px}.tbf-autofill-dot{display:none;width:10px;height:10px;border-radius:50%;background:gold;box-shadow:0 0 4px gold;animation:tbfPulse 1s ease-in-out infinite}.tbf-fillall-bar--active .tbf-autofill-dot{display:inline-block}.tbf-fillall-bar--active{box-shadow:0 0 10px 2px rgba(255,215,0,.75)}@keyframes tbfPulse{0%,100%{opacity:.3;transform:scale(.8)}50%{opacity:1;transform:scale(1.2)}}.tbf-viewport-border{display:none;position:fixed;top:0;right:0;bottom:0;left:0;border:3px solid gold;box-shadow:inset 0 0 12px rgba(255,215,0,.6);pointer-events:none;z-index:999998}.tbf-viewport-border--active{display:block}.tbf-toast{position:fixed;bottom:158px;right:16px;max-width:280px;background:rgba(0,0,0,.85);color:#fff;padding:10px 14px;border-radius:8px;border:1px solid gold;font-size:13px;line-height:1.4;z-index:1000000;opacity:0;visibility:hidden;transition:opacity .3s,visibility .3s}.tbf-toast--visible{opacity:1;visibility:visible}.tbf-fav.tbf-fav--off{color:#ff6b6b;text-shadow:none}`);
 
+    // The settings tabs, the Display tab's switches, and the controls those switches hide.
+    GM_addStyle(`.tbf-sq-ico{position:absolute;left:50%;top:50%;width:11px;height:14px;margin:-7px 0 0 -5.5px;pointer-events:none;filter:drop-shadow(0 1px 0 #000)}.tbf-sq:not([data-tbf-sq="clear"]) .tbf-sq-clear,.tbf-sq[data-tbf-sq="clear"] .tbf-sq-fill{display:none}`);
+    GM_addStyle(`html.tbf-hide-fillall .tbf-fillall-bar,html.tbf-hide-fillall .tbf-viewport-border,html.tbf-hide-fav .tbf-fav,html.tbf-hide-own .tbf-own,html.tbf-hide-ana .tbf-ana-btn,html.tbf-hide-bubble .overlay-percentage{display:none!important}html.tbf-hide-fav .tbf-own,html.tbf-hide-fav.tbf-hide-own .tbf-ana-btn,html.tbf-hide-fav.tbf-hide-own.tbf-hide-ana .tbf-fav~.btn-wrap.torn-bazaar-fill-qty-price{margin-left:auto}.tbf-modal-tabs{display:flex;gap:2px;border-bottom:1px solid #444;margin:0 0 4px}.tbf-modal-tabs button{background:none;border:0;border-bottom:2px solid transparent;margin:0 0 -1px;padding:5px 12px;color:#aaa;font:inherit;font-weight:bold;cursor:pointer;box-shadow:none;height:auto;min-width:0}.tbf-modal-tabs button:hover{color:#ddd}.tbf-modal-tabs button[aria-selected=true]{color:#fff;border-bottom-color:#b5d56a}.tbf-modal-pane[hidden]{display:none!important}.tbf-modal-note{margin:8px 0 2px;font-size:12px;color:#9a9a9a}.tbf-modal .tbf-modal-toggle{display:flex;align-items:center;gap:8px;margin:12px 0 0;font-weight:bold;color:#cfcfcf;cursor:pointer}.tbf-modal-toggle input{width:auto;margin:0}.tbf-modal-hint{margin:2px 0 0 22px;font-size:11.5px;line-height:1.4;color:#9a9a9a}`);
     GM_addStyle(`.tbf-modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:2147483000;justify-content:center;align-items:flex-start;overflow:auto;padding:24px 12px;box-sizing:border-box}.tbf-modal-overlay--open{display:flex}.tbf-modal{background:#1f1f1f;color:#e6e6e6;width:100%;max-width:420px;border:1px solid #666;border-radius:10px;box-shadow:0 10px 40px rgba(0,0,0,.6);padding:16px 18px;box-sizing:border-box;font-size:13px;line-height:1.5}.tbf-modal h3{margin:0 0 12px;font-size:15px;display:flex;justify-content:space-between;align-items:center;color:#fff}.tbf-modal-close{cursor:pointer;color:#bbb;font-size:22px;line-height:1}.tbf-modal label{display:block;margin:10px 0 3px;font-weight:bold;color:#cfcfcf}.tbf-modal input[type=text],.tbf-modal input[type=password]{width:100%;box-sizing:border-box;padding:7px 9px;border-radius:5px;border:1px solid #666;background:#111;color:#eee;font-size:13px}.tbf-modal-key{position:relative;display:flex;align-items:center}.tbf-modal-key input[type=text],.tbf-modal-key input[type=password]{padding-right:52px}.tbf-modal-key-reveal{position:absolute;right:7px;cursor:pointer;color:#bbb;font-size:11px;line-height:1;padding:3px 4px;user-select:none;-webkit-user-select:none}.tbf-modal-key-reveal:hover{color:#fff}.tbf-modal-cats{margin-top:4px}.tbf-modal-cat-row{display:flex;gap:6px;margin-bottom:6px;align-items:center}.tbf-modal-cat-row .tbf-modal-cat-name{flex:1 1 55%}.tbf-modal-cat-row .tbf-modal-cat-formula{flex:1 1 45%}.tbf-modal-cat-del{cursor:pointer;color:#ff6b6b;font-size:20px;line-height:1;flex:0 0 auto;width:22px;text-align:center}.tbf-modal-addcat{margin-top:2px;cursor:pointer;background:#333;color:#eee;border:1px solid #666;border-radius:5px;padding:5px 10px;font-size:12px}.tbf-modal-resetcat{margin:2px 0 0 8px;cursor:pointer;background:#3a2a2a;color:#ddd;border:1px solid #774;border-radius:5px;padding:5px 10px;font-size:12px}.tbf-modal-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:16px}.tbf-modal-actions button{cursor:pointer;padding:7px 16px;border-radius:5px;border:1px solid #666;background:#333;color:#eee;font-size:13px}.tbf-modal-save{background:#2e7d32!important;border-color:#2e7d32!important;color:#fff!important}.tbf-modal-cat-row input{min-width:0}.tbf-modal-cat-row .tbf-modal-cat-name{flex:1 1 38%}.tbf-modal-cat-row .tbf-modal-cat-formula{flex:1 1 32%}.tbf-modal-cat-row .tbf-modal-cat-qty{flex:1 1 30%}.tbf-modal-cat-head{display:flex;gap:6px;margin:0 0 4px;font-size:11px;color:#9a9a9a}.tbf-modal-cat-head span:nth-child(1){flex:1 1 38%}.tbf-modal-cat-head span:nth-child(2){flex:1 1 32%}.tbf-modal-cat-head span:nth-child(3){flex:1 1 30%}.tbf-modal-cat-head span:nth-child(4){flex:0 0 22px}.tbf-modal-clearexcl{margin:2px 0 0 8px;cursor:pointer;background:#3a2a2a;color:#ddd;border:1px solid #774;border-radius:5px;padding:5px 10px;font-size:12px}.tbf-modal-error{display:none;margin-top:12px;padding:8px 10px;border-radius:5px;background:#3a1f1f;border:1px solid #a34;color:#ffb3b3;font-size:12px;line-height:1.4}.tbf-modal input.tbf-modal-invalid{border-color:#ff6b6b;box-shadow:0 0 0 1px rgba(255,107,107,.45)}`);
 
     GM_addStyle(`.tbf-changelog-release{margin:0 0 14px}.tbf-changelog-release:last-of-type{margin-bottom:0}.tbf-changelog-ver{display:flex;align-items:baseline;gap:8px;margin:0 0 6px}.tbf-changelog-ver b{color:#fff;font-size:13px}.tbf-changelog-date{color:#8a8a8a;font-size:11px;margin-left:auto}.tbf-changelog-badge{background:#2e7d32;color:#fff;border-radius:10px;padding:1px 7px;font-size:10px;text-transform:uppercase;letter-spacing:.04em}.tbf-changelog-items{margin:0;padding-left:18px;color:#cfcfcf}.tbf-changelog-items li{margin:0 0 5px}.tbf-changelog-items code{background:#000;padding:1px 4px;border-radius:3px;color:#cfc}`);
 
     GM_addStyle(`.tbf-settings-overlay [hidden]{display:none!important}.tbf-settings-overlay .tbf-modal code{background:#000;padding:1px 4px;border-radius:3px;color:#cfc;font-family:Consolas,Menlo,monospace;font-size:12px}.tbf-help-bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between;margin:0 0 8px;padding:6px 8px;background:#262626;border:1px solid #3a3a3a;border-radius:6px}.tbf-help-bar button,.tbf-wiz button,.tbf-sheet button{font-family:inherit;line-height:1.3;text-transform:none;box-shadow:none;height:auto;min-width:0;margin:0;cursor:pointer}.tbf-help-switch{display:inline-flex;align-items:center;gap:8px;background:none;border:0;padding:2px 0;color:#e6e6e6;font-size:12.5px}.tbf-help-track{position:relative;width:30px;height:17px;border-radius:9px;background:#555;flex:none;transition:background .15s}.tbf-help-track:after{content:"";position:absolute;top:2px;left:2px;width:13px;height:13px;border-radius:50%;background:#ddd;transition:transform .15s}.tbf-help-switch[aria-checked="true"] .tbf-help-track{background:#2e7d32}.tbf-help-switch[aria-checked="true"] .tbf-help-track:after{transform:translateX(13px);background:#fff}.tbf-help-write{background:#333;border:1px solid #666;color:#eee;border-radius:5px;padding:5px 10px;font-size:12px}.tbf-help-write:hover{border-color:#999}.tbf-help-write[aria-expanded="true"]{border-color:#b5d56a;color:#fff}.tbf-wiz{margin:0 0 8px;border:1px solid #b5d56a;border-radius:6px;background:#262626;padding:8px 10px 10px;display:grid;gap:8px}.tbf-wiz-h{display:flex;justify-content:space-between;align-items:center;gap:8px;font-weight:bold;color:#fff;font-size:12.5px}.tbf-wiz-h small{font-weight:normal;color:#9a9a9a;font-size:11px;margin-left:6px}.tbf-wiz-close{cursor:pointer;color:#bbb;font-size:20px;line-height:1}.tbf-wiz-qs{display:grid;gap:8px}.tbf-wiz-q{display:grid;gap:4px}.tbf-wiz-q>span{font-size:11.5px;color:#cfcfcf}.tbf-wiz-seg{display:flex;flex-wrap:wrap;gap:4px}.tbf-wiz-seg button{background:#333;border:1px solid #555;color:#ddd;border-radius:5px;padding:4px 8px;font-size:11.5px}.tbf-wiz-seg button:hover{border-color:#888}.tbf-wiz-seg button[aria-pressed="true"]{background:#2e7d32;border-color:#2e7d32;color:#fff}.tbf-wiz-out{display:grid;gap:5px;border-top:1px solid #333;padding-top:8px}.tbf-wiz-f{overflow-wrap:anywhere}.tbf-settings-overlay .tbf-wiz-f code{font-size:12.5px}.tbf-wiz-say{font-size:11.5px;color:#e6e6e6}.tbf-wiz-say b,.tbf-live-say b,.tbf-sheet-tried b{color:#b5d56a}.tbf-wiz-use{justify-self:start;background:#2e7d32;border:1px solid #2e7d32;color:#fff;border-radius:5px;padding:5px 12px;font-size:12px}.tbf-sheet{margin:0 0 4px;border:1px solid #3a3a3a;border-radius:6px;padding:6px 10px}.tbf-sheet>summary{cursor:pointer;font-weight:bold;color:#cfcfcf;font-size:12.5px;padding:2px 0}.tbf-sheet[open]>summary{margin-bottom:4px}.tbf-anat{display:flex;gap:6px;justify-content:center;margin:8px 0 4px;flex-wrap:wrap}.tbf-anat-part{display:grid;justify-items:center;gap:4px}.tbf-settings-overlay .tbf-anat-part code{font-size:17px;padding:3px 8px}.tbf-anat-brace{display:block;width:100%;height:7px;border:1px solid #9a9a9a;border-top:0;border-radius:0 0 4px 4px;box-sizing:border-box}.tbf-anat-part span{font-size:10.5px;color:#cfcfcf;text-align:center;max-width:150px;line-height:1.3}.tbf-anat-note{font-size:11px;color:#9a9a9a;text-align:center;margin:0 0 8px}.tbf-sheet-tabs{display:flex;flex-wrap:wrap;gap:2px;border-bottom:1px solid #444;margin-bottom:4px}.tbf-sheet-tabs button{background:none;border:0;border-bottom:2px solid transparent;margin-bottom:-1px;padding:5px 9px;font-size:12px;color:#aaa;border-radius:0}.tbf-sheet-tabs button:hover{color:#ddd}.tbf-sheet-tabs button[aria-selected="true"]{color:#fff;border-bottom-color:#b5d56a}.tbf-sheet-hint{font-size:10.5px;color:#9a9a9a;margin:4px 0 2px}.tbf-sheet-hint b{color:#cfcfcf;font-weight:normal}.tbf-sheet-row{display:grid;grid-template-columns:auto minmax(0,1fr);gap:2px 12px;align-items:baseline;width:100%;box-sizing:border-box;text-align:left;background:none;border:0;border-bottom:1px solid #2c2c2c;border-radius:0;padding:6px 4px;color:#e6e6e6;font-size:11.5px}.tbf-sheet-row:hover{background:#2a2a2a}.tbf-sheet-row code{overflow-wrap:anywhere}.tbf-sheet-row--wide{grid-template-columns:minmax(0,1fr)}.tbf-sheet-row--on{background:#2a2f1e;box-shadow:inset 3px 0 0 #b5d56a}.tbf-sheet-note{font-size:10.5px;color:#9a9a9a;margin:6px 0 0}.tbf-sheet-tried{margin-top:6px;font-size:11.5px;color:#e6e6e6;line-height:1.45}.tbf-sheet-tried:empty{display:none}.tbf-live{margin-top:6px;background:#262626;border:1px solid #3a3a3a;border-radius:6px;padding:8px 10px;display:grid;gap:6px;font-size:12px;line-height:1.4;text-align:left}.tbf-modal-cats .tbf-live{margin:0 0 6px}.tbf-live-h{display:flex;justify-content:space-between;gap:8px;font-size:10.5px;color:#9a9a9a;text-transform:uppercase;letter-spacing:.5px;font-weight:bold}.tbf-live-h span:last-child{text-transform:none;letter-spacing:0;font-weight:normal;text-align:right}.tbf-live-say{font-size:12.5px;color:#fff}.tbf-live-muted{font-size:11px;color:#9a9a9a}.tbf-live-foot{font-size:10.5px;color:#9a9a9a;border-top:1px solid #333;padding-top:5px}.tbf-live-err{padding:7px 9px;border-radius:5px;background:#3a1f1f;border:1px solid #a34;color:#ffb3b3;font-size:12px}.tbf-live-steps{display:grid;grid-template-columns:auto minmax(0,1fr);gap:3px 10px;font-size:11.5px;margin:0}.tbf-live-steps dt{color:#9a9a9a;margin:0;font-weight:normal}.tbf-live-steps dd{margin:0;color:#e6e6e6;min-width:0}.tbf-live-steps b{color:#fff}.tbf-live-steps b.tbf-live-win{color:#b5d56a;font-size:13px}.tbf-live-tree{display:grid;gap:2px;font-size:11.5px}.tbf-live-tr{display:flex;flex-wrap:wrap;gap:2px 8px;align-items:baseline;padding:3px 6px;border-radius:4px}.tbf-live-tr .p{font-weight:bold;color:#fff;white-space:nowrap}.tbf-live-tr .w{flex:1 1 100%;color:#9a9a9a;font-size:10.5px}.tbf-live-tr .op{color:#9a9a9a;font-family:monospace}.tbf-live-tr--win{background:#2a2f1e;box-shadow:inset 3px 0 0 #8fd08f}.tbf-live-tr--win .p{color:#b5d56a}.tbf-live-lad-h{font-size:10.5px;color:#bbb;text-transform:uppercase;letter-spacing:.5px;font-weight:bold}.tbf-live-lad{border-top:1px solid #333;font-size:11.5px}.tbf-live-lr{display:flex;gap:8px;align-items:center;padding:2px 6px;border-bottom:1px solid #2c2c2c;min-height:22px;box-sizing:border-box}.tbf-live-lr .p{width:78px;text-align:right;flex:none}.tbf-live-lr .q{width:52px;text-align:right;color:#bbb;flex:none}.tbf-live-lr .n{flex:1;min-width:0;color:#9a9a9a;font-size:10.5px}.tbf-live-lr--dim .p,.tbf-live-lr--dim .q{color:#777}.tbf-live-lr--pick{background:#24301c}.tbf-live-lr--pick .n{color:#b5d56a}.tbf-live-lr--you{background:#3a3414;border:1px solid #c9a227;border-radius:5px;color:#fff}.tbf-live-lr--you .n{color:#fff}.tbf-live-lr--gap{color:#777;font-size:10.5px;justify-content:center;min-height:18px}`);
+    // The Fill square inside an Add Items price box: Torn's own money-symbol square, as Market
+    // Filler uses it. The name line's own Fill and Clear hide. The :where() rules only stand in
+    // for Torn's styling where the page has none, so Torn's look wins wherever it exists.
+    GM_addStyle(`.tbf-sq-host>.btn-wrap.torn-bazaar-fill-qty-price,.tbf-sq-host>.btn-wrap.torn-bazaar-clear-qty-price{display:none!important}.input-money-group.tbf-sq-group{display:inline-flex;align-items:flex-start;vertical-align:middle;width:auto!important}.tbf-sq-group>input.input-money{flex:none;min-width:0!important;border-top-left-radius:0!important;border-bottom-left-radius:0!important}.tbf-sq-group>.tbf-sq{flex:none;cursor:pointer}.tbf-sq[data-tbf-sq="busy"]{opacity:.5}:where(.tbf-sq){display:block;width:20px;box-sizing:border-box;background:linear-gradient(#4f4f4f,#3e3e3e);border:1px solid #555;border-right:0;border-radius:5px 0 0 5px}:where(.tbf-sq)>:where(.wai-btn){display:block;width:100%;height:100%;margin:0;padding:0;border:0;background:transparent;cursor:pointer}.tbf-sq{-webkit-touch-callout:none;-webkit-user-select:none;user-select:none;transition:box-shadow 0s}.tbf-sq.tbf-holding{box-shadow:inset 0 0 0 40px rgba(0,180,255,.35);transition:box-shadow 3s linear}`);
     // Phone layout of an Add Items row: the name keeps the first line, and the icons and Fill sit on
     // a second line under it, so neither squeezes the other out of Torn's narrow name column.
     GM_addStyle(`.tbf-brk{display:none}@media (max-width:784px){ul.items-cont li.clearfix:has(.tbf-brk),ul.items-cont div.title-wrap:has(.tbf-brk){height:auto!important}ul.items-cont div.title-wrap div.name-wrap.tbf-wave-host{flex-wrap:wrap;justify-content:flex-start;height:auto!important;min-height:34px}ul.items-cont div.name-wrap .tbf-brk{display:block;flex:0 0 100%;height:0}ul.items-cont div.name-wrap>.t-overflow{flex:1 1 0;min-width:1px}ul.items-cont div.name-wrap .tbf-fav,ul.items-cont div.name-wrap .tbf-own,ul.items-cont div.name-wrap .tbf-ana-btn{margin-right:10px}ul.items-cont div.name-wrap .btn-wrap.torn-bazaar-fill-qty-price,ul.items-cont div.name-wrap .btn-wrap.torn-bazaar-clear-qty-price{float:none;margin-bottom:4px}}`);
     GM_addStyle(`.tbf-own{cursor:pointer;position:relative;display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;margin-right:6px;color:#888;font:italic bold 14px/1 Georgia,"Times New Roman",serif;align-self:center;user-select:none;-webkit-user-select:none;z-index:99999}.tbf-own:hover{color:#fff}.tbf-own--on,.tbf-own--on:hover{color:#8fd08f}.tbf-own--on:after{content:"";position:absolute;top:-1px;right:-1px;width:5px;height:5px;border-radius:50%;background:#8fd08f;pointer-events:none}.tbf-own-box{position:absolute;z-index:2147482000;width:290px;max-width:calc(100vw - 16px);box-sizing:border-box;background:#1f1f1f;color:#e6e6e6;border:1px solid #888;border-radius:8px;box-shadow:0 8px 26px rgba(0,0,0,.8);padding:9px 11px 10px;font:12px/1.45 Arial,Helvetica,sans-serif;text-align:left}.tbf-own-box:before{content:"";position:absolute;top:-6px;left:var(--tbf-own-arrow,24px);width:10px;height:10px;background:#1f1f1f;border-left:1px solid #888;border-top:1px solid #888;transform:rotate(45deg)}.tbf-own-box [hidden]{display:none!important}.tbf-own-t{display:flex;justify-content:space-between;align-items:center;gap:8px;font-weight:bold;color:#fff;font-size:12.5px;margin-bottom:6px}.tbf-own-t span:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.tbf-own-x{cursor:pointer;color:#bbb;font-size:20px;line-height:1;font-weight:normal;flex:none}.tbf-own-x:hover{color:#fff}.tbf-own-two{display:grid;grid-template-columns:minmax(0,1fr) 86px;gap:6px}.tbf-own-two label{display:block;margin:0;font-size:10px;font-weight:normal;color:#9a9a9a}.tbf-own-two input{display:block;width:100%;box-sizing:border-box;margin:2px 0 0;padding:6px 8px;height:auto;border-radius:5px;border:1px solid #666;background:#111;color:#eee;font:13px Consolas,Menlo,monospace}.tbf-own-two input::placeholder{color:#666}.tbf-own-two input.tbf-own-bad{border-color:#ff6b6b;box-shadow:0 0 0 1px rgba(255,107,107,.45)}.tbf-own-from{margin-top:5px;font-size:10.5px;color:#9a9a9a;line-height:1.4}.tbf-own-from code{background:#000;padding:1px 4px;border-radius:3px;color:#cfc;font:10.5px Consolas,Menlo,monospace}.tbf-own-err{margin-top:6px;padding:6px 8px;border-radius:5px;background:#3a1f1f;border:1px solid #a34;color:#ffb3b3;font-size:11px}.tbf-own-acts{display:flex;gap:6px;justify-content:flex-end;margin-top:8px}.tbf-own-acts button{cursor:pointer;padding:5px 12px;border-radius:5px;border:1px solid #666;background:#333;color:#eee;font:12px/1.3 Arial,Helvetica,sans-serif;height:auto;min-width:0;margin:0;box-shadow:none;text-transform:none}.tbf-own-acts .tbf-own-save{background:#2e7d32;border-color:#2e7d32;color:#fff}`);
 
-    GM_addStyle(`.tbf-ana-btn{cursor:pointer;position:relative;display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;margin-right:6px;color:#888;align-self:center;user-select:none;-webkit-user-select:none;z-index:99999}.tbf-ana-btn:hover{color:#fff}.tbf-ana-btn svg{display:block;width:14px;height:12px;fill:currentColor;pointer-events:none}.tbf-wave-host[data-tbf-tone] .tbf-ana-btn:after{content:"";position:absolute;top:-3px;right:-4px;width:8px;height:8px;border-radius:50%;border:1px solid #1f1f1f;background:#4caf50;box-shadow:0 0 3px #4caf50;pointer-events:none;z-index:1}.tbf-wave-host[data-tbf-tone="yellow"] .tbf-ana-btn:after{background:#e6c200;box-shadow:0 0 3px #e6c200}.tbf-wave-host[data-tbf-tone="red"] .tbf-ana-btn:after{background:#e53935;box-shadow:0 0 3px #e53935}.tbf-wave-host[data-tbf-tone="orange"] .tbf-ana-btn:after{background:#fb8c00;box-shadow:0 0 3px #fb8c00}.tbf-wave-host[data-tbf-tone="grey"] .tbf-ana-btn:after{background:#9e9e9e;box-shadow:none}.tbf-ana{display:none;position:fixed;top:60px;left:40px;width:540px;max-width:calc(100vw - 16px);max-height:calc(100vh - 24px);overflow:auto;background:#1f1f1f;color:#e6e6e6;border:1px solid #666;border-radius:10px;box-shadow:0 10px 40px rgba(0,0,0,.6);padding:12px 14px;box-sizing:border-box;font-size:12px;line-height:1.45;z-index:999999;text-align:left}.tbf-ana--open{display:block}@media (max-width:784px){.tbf-ana{top:auto!important;left:0!important;right:0;bottom:0;width:auto;max-width:none;max-height:85vh;border-radius:14px 14px 0 0;border-bottom:0}}.tbf-ana-head{display:flex;align-items:center;gap:10px;margin-bottom:8px;cursor:move;user-select:none;-webkit-user-select:none}@media (max-width:784px){.tbf-ana-head{cursor:default}}.tbf-ana-img{width:34px;height:34px;border-radius:4px;background:#2a2a2a;flex:none;object-fit:contain}.tbf-ana-title{display:flex;flex-direction:column;line-height:1.3;min-width:0}.tbf-ana-title b{font-size:15px;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.tbf-ana-title small{font-size:11px;color:#a5a5a5}.tbf-ana-hb{margin-left:auto;color:#bbb;font-size:16px;line-height:1;cursor:pointer;width:22px;text-align:center;flex:none}.tbf-ana-hb:hover{color:#fff}.tbf-ana-hb.tbf-ana-close{margin-left:0;font-size:22px}.tbf-ana-tabs{display:flex;gap:2px;border-bottom:1px solid #444;margin:0 0 8px}.tbf-ana-tab{padding:5px 12px;font-size:12px;color:#aaa;border-bottom:2px solid transparent;margin-bottom:-1px;cursor:pointer}.tbf-ana-tab:hover{color:#ddd}.tbf-ana-tab--on,.tbf-ana-tab--on:hover{color:#fff;border-bottom-color:#b5d56a}.tbf-ana-kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:6px 0 8px}@media (max-width:784px){.tbf-ana-kpis{grid-template-columns:1fr 1fr}}.tbf-ana-kpi{background:#262626;border:1px solid #3a3a3a;border-radius:6px;padding:6px 8px;min-width:0}.tbf-ana-kpi .l{font-size:9.5px;color:#9a9a9a;text-transform:uppercase;letter-spacing:.5px;white-space:nowrap}.tbf-ana-kpi .v{font-size:15px;font-weight:bold;color:#fff;margin:2px 0 1px;white-space:nowrap}.tbf-ana-kpi .d{font-size:10.5px;color:#aaa;line-height:1.3}.tbf-ana-legend{display:flex;gap:14px;flex-wrap:wrap;font-size:10.5px;color:#bbb;margin:2px 0 4px}.tbf-ana-legend span{display:inline-flex;align-items:center;gap:5px;white-space:nowrap}.tbf-ana-sw{display:inline-block;width:9px;height:9px;border-radius:2px}.tbf-ana-m{background:#3987e5}.tbf-ana-b{background:#d95926}.tbf-ana-src{width:16px;height:16px;border-radius:50%;font-size:9px;font-weight:bold;display:inline-grid;place-items:center;color:#fff;flex:none}.tbf-ana-src.tbf-ana-y{background:#c9a227;color:#1f1f1f;font-size:10px}.tbf-ana-sec{font-size:10.5px;color:#bbb;text-transform:uppercase;letter-spacing:.5px;margin:8px 0 4px;font-weight:bold}.tbf-ana-sec code{text-transform:none;letter-spacing:0}.tbf-ana-sec small{text-transform:none;letter-spacing:0;font-weight:normal;color:#8a8a8a;margin-left:4px}.tbf-ana-cols{display:grid;grid-template-columns:1fr 1fr;gap:16px}@media (max-width:784px){.tbf-ana-cols{grid-template-columns:1fr}}.tbf-ana-band{margin:0 0 7px}.tbf-ana-bl{font-size:11px;color:#ddd;margin-bottom:2px}.tbf-ana-brow{display:flex;align-items:center;gap:6px;height:14px;margin:1px 0}.tbf-ana-bar{display:block;height:8px;border-radius:0 4px 4px 0;flex:none;max-width:46%}.tbf-ana-bv{font-size:10.5px;color:#aaa;white-space:nowrap}.tbf-ana-lad{margin:4px 0 2px;border-top:1px solid #333}.tbf-ana-lr{display:flex;align-items:center;gap:8px;padding:3px 6px;border-bottom:1px solid #2c2c2c;font-size:12px;min-height:25px;box-sizing:border-box}.tbf-ana-lr[data-price]{cursor:pointer}.tbf-ana-lr[data-price]:hover{background:#2a2a2a}.tbf-ana-lr .p{width:82px;text-align:right;color:#f0f0f0;flex:none}.tbf-ana-lr .q{width:56px;color:#bbb;text-align:right;flex:none}.tbf-ana-lr .n{flex:1;color:#999;font-size:10.5px;min-width:0;line-height:1.3}.tbf-ana-lr--you{background:#3a3414;border:1px solid #c9a227;border-radius:6px;margin:2px 0;color:#fff}.tbf-ana-lr--you .p,.tbf-ana-lr--you .n{color:#fff}.tbf-ana-lr--dim .p,.tbf-ana-lr--dim .q{color:#777}.tbf-ana-lr--more{min-height:22px;border-bottom:0}.tbf-ana-lr--hidden{display:none}.tbf-ana--all .tbf-ana-lr--hidden{display:flex}.tbf-ana--all .tbf-ana-showall{display:none}.tbf-ana-tag{display:inline-block;font-size:9.5px;padding:1px 6px;border-radius:8px;background:#2e7d32;color:#fff;white-space:nowrap;line-height:1.4;margin-right:4px}.tbf-ana-tag--gray{background:#444;color:#ccc}.tbf-ana-tag--blue{background:#1c5cab}.tbf-ana-hint{font-size:10.5px;color:#8a8a8a;margin:4px 0 2px}.tbf-ana-verdict{margin:8px 0 2px;padding:7px 9px;background:#262626;border-left:3px solid #c9a227;border-radius:0 6px 6px 0;font-size:11.5px;line-height:1.45;color:#ddd}.tbf-ana code{background:#000;padding:1px 4px;border-radius:3px;color:#cfc;font-size:10.5px}.tbf-ana a{color:#9cc25e;text-decoration:underline;cursor:pointer}.tbf-ana-foot{display:flex;align-items:center;gap:8px;margin-top:10px;padding-top:8px;border-top:1px solid #333}.tbf-ana-foot:empty{display:none}.tbf-ana-sum{flex:1;font-size:10.5px;color:#9a9a9a;line-height:1.3}.tbf-ana-foot button{cursor:pointer;padding:6px 12px;border-radius:5px;border:1px solid #666;background:#333;color:#eee;font-size:12px;white-space:nowrap}.tbf-ana-foot button.tbf-ana-apply{background:#2e7d32;border-color:#2e7d32;color:#fff}.tbf-ana-trace{margin:4px 0 0;font-size:11.5px}.tbf-ana-tr{display:flex;align-items:baseline;gap:8px;padding:3px 6px;border-radius:4px;flex-wrap:wrap;line-height:1.35}.tbf-ana-tr .op{color:#9a9a9a;font-family:monospace;font-size:12px}.tbf-ana-tr .r{font-weight:bold;color:#fff;white-space:nowrap}.tbf-ana-tr .why{color:#9a9a9a;font-size:10.5px;flex:1 1 100%;padding-left:2px}.tbf-ana-tr--win{background:#2a2f1e;border-left:3px solid #8fd08f}.tbf-ana-tr--win .r{color:#b5d56a}.tbf-ana-note{margin-top:6px;font-size:10.5px;color:#8a8a8a;border-top:1px solid #333;padding-top:6px}.tbf-ana-alert{margin:0 0 6px;padding:8px 10px;border-radius:6px;background:#3a2f1f;border:1px solid #a7792a;color:#ffd9a0;font-size:11.5px;line-height:1.4}.tbf-ana-skel{display:inline-block;height:8px;border-radius:4px;background:#333;margin:3px 0}.tbf-ana-muted{color:#8a8a8a;font-size:11px;margin:4px 0}`);
+    GM_addStyle(`.tbf-ana-btn{cursor:pointer;position:relative;display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;margin-right:6px;color:#888;align-self:center;user-select:none;-webkit-user-select:none;z-index:99999}.tbf-ana-btn:hover{color:#fff}.tbf-ana-btn svg{display:block;width:14px;height:12px;fill:currentColor;pointer-events:none}.tbf-wave-host[data-tbf-tone]:not([data-tbf-tone="green"]) .tbf-ana-btn:after{content:"";position:absolute;top:-3px;right:-4px;width:8px;height:8px;border-radius:50%;border:1px solid #1f1f1f;background:#4caf50;box-shadow:0 0 3px #4caf50;pointer-events:none;z-index:1}.tbf-wave-host[data-tbf-tone="yellow"] .tbf-ana-btn:after{background:#e6c200;box-shadow:0 0 3px #e6c200}.tbf-wave-host[data-tbf-tone="red"] .tbf-ana-btn:after{background:#e53935;box-shadow:0 0 3px #e53935}.tbf-wave-host[data-tbf-tone="orange"] .tbf-ana-btn:after{background:#fb8c00;box-shadow:0 0 3px #fb8c00}.tbf-wave-host[data-tbf-tone="grey"] .tbf-ana-btn:after{background:#9e9e9e;box-shadow:none}.tbf-ana{display:none;position:fixed;top:60px;left:40px;width:540px;max-width:calc(100vw - 16px);max-height:calc(100vh - 24px);overflow:auto;background:#1f1f1f;color:#e6e6e6;border:1px solid #666;border-radius:10px;box-shadow:0 10px 40px rgba(0,0,0,.6);padding:12px 14px;box-sizing:border-box;font-size:12px;line-height:1.45;z-index:999999;text-align:left}.tbf-ana--open{display:block}@media (max-width:784px){.tbf-ana{top:auto!important;left:0!important;right:0;bottom:0;width:auto;max-width:none;max-height:85vh;border-radius:14px 14px 0 0;border-bottom:0}}.tbf-ana-head{display:flex;align-items:center;gap:10px;margin-bottom:8px;cursor:move;user-select:none;-webkit-user-select:none}@media (max-width:784px){.tbf-ana-head{cursor:default}}.tbf-ana-img{width:34px;height:34px;border-radius:4px;background:#2a2a2a;flex:none;object-fit:contain}.tbf-ana-title{display:flex;flex-direction:column;line-height:1.3;min-width:0}.tbf-ana-title b{font-size:15px;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.tbf-ana-title small{font-size:11px;color:#a5a5a5}.tbf-ana-hb{margin-left:auto;color:#bbb;font-size:16px;line-height:1;cursor:pointer;width:22px;text-align:center;flex:none}.tbf-ana-hb:hover{color:#fff}.tbf-ana-hb.tbf-ana-close{margin-left:0;font-size:22px}.tbf-ana-tabs{display:flex;gap:2px;border-bottom:1px solid #444;margin:0 0 8px}.tbf-ana-tab{padding:5px 12px;font-size:12px;color:#aaa;border-bottom:2px solid transparent;margin-bottom:-1px;cursor:pointer}.tbf-ana-tab:hover{color:#ddd}.tbf-ana-tab--on,.tbf-ana-tab--on:hover{color:#fff;border-bottom-color:#b5d56a}.tbf-ana-kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:6px 0 8px}@media (max-width:784px){.tbf-ana-kpis{grid-template-columns:1fr 1fr}}.tbf-ana-kpi{background:#262626;border:1px solid #3a3a3a;border-radius:6px;padding:6px 8px;min-width:0}.tbf-ana-kpi .l{font-size:9.5px;color:#9a9a9a;text-transform:uppercase;letter-spacing:.5px;white-space:nowrap}.tbf-ana-kpi .v{font-size:15px;font-weight:bold;color:#fff;margin:2px 0 1px;white-space:nowrap}.tbf-ana-kpi .d{font-size:10.5px;color:#aaa;line-height:1.3}.tbf-ana-legend{display:flex;gap:14px;flex-wrap:wrap;font-size:10.5px;color:#bbb;margin:2px 0 4px}.tbf-ana-legend span{display:inline-flex;align-items:center;gap:5px;white-space:nowrap}.tbf-ana-sw{display:inline-block;width:9px;height:9px;border-radius:2px}.tbf-ana-m{background:#3987e5}.tbf-ana-b{background:#d95926}.tbf-ana-src{width:16px;height:16px;border-radius:50%;font-size:9px;font-weight:bold;display:inline-grid;place-items:center;color:#fff;flex:none}.tbf-ana-src.tbf-ana-y{background:#c9a227;color:#1f1f1f;font-size:10px}.tbf-ana-sec{font-size:10.5px;color:#bbb;text-transform:uppercase;letter-spacing:.5px;margin:8px 0 4px;font-weight:bold}.tbf-ana-sec code{text-transform:none;letter-spacing:0}.tbf-ana-sec small{text-transform:none;letter-spacing:0;font-weight:normal;color:#8a8a8a;margin-left:4px}.tbf-ana-cols{display:grid;grid-template-columns:1fr 1fr;gap:16px}@media (max-width:784px){.tbf-ana-cols{grid-template-columns:1fr}}.tbf-ana-band{margin:0 0 7px}.tbf-ana-bl{font-size:11px;color:#ddd;margin-bottom:2px}.tbf-ana-brow{display:flex;align-items:center;gap:6px;height:14px;margin:1px 0}.tbf-ana-bar{display:block;height:8px;border-radius:0 4px 4px 0;flex:none;max-width:46%}.tbf-ana-bv{font-size:10.5px;color:#aaa;white-space:nowrap}.tbf-ana-lad{margin:4px 0 2px;border-top:1px solid #333}.tbf-ana-lr{display:flex;align-items:center;gap:8px;padding:3px 6px;border-bottom:1px solid #2c2c2c;font-size:12px;min-height:25px;box-sizing:border-box}.tbf-ana-lr[data-price]{cursor:pointer}.tbf-ana-lr[data-price]:hover{background:#2a2a2a}.tbf-ana-lr .p{width:82px;text-align:right;color:#f0f0f0;flex:none}.tbf-ana-lr .q{width:56px;color:#bbb;text-align:right;flex:none}.tbf-ana-lr .n{flex:1;color:#999;font-size:10.5px;min-width:0;line-height:1.3}.tbf-ana-lr--you{background:#3a3414;border:1px solid #c9a227;border-radius:6px;margin:2px 0;color:#fff}.tbf-ana-lr--you .p,.tbf-ana-lr--you .n{color:#fff}.tbf-ana-lr--dim .p,.tbf-ana-lr--dim .q{color:#777}.tbf-ana-lr--more{min-height:22px;border-bottom:0}.tbf-ana-lr--hidden{display:none}.tbf-ana--all .tbf-ana-lr--hidden{display:flex}.tbf-ana--all .tbf-ana-showall{display:none}.tbf-ana-tag{display:inline-block;font-size:9.5px;padding:1px 6px;border-radius:8px;background:#2e7d32;color:#fff;white-space:nowrap;line-height:1.4;margin-right:4px}.tbf-ana-tag--gray{background:#444;color:#ccc}.tbf-ana-tag--blue{background:#1c5cab}.tbf-ana-hint{font-size:10.5px;color:#8a8a8a;margin:4px 0 2px}.tbf-ana-verdict{margin:8px 0 2px;padding:7px 9px;background:#262626;border-left:3px solid #c9a227;border-radius:0 6px 6px 0;font-size:11.5px;line-height:1.45;color:#ddd}.tbf-ana code{background:#000;padding:1px 4px;border-radius:3px;color:#cfc;font-size:10.5px}.tbf-ana a{color:#9cc25e;text-decoration:underline;cursor:pointer}.tbf-ana-foot{display:flex;align-items:center;gap:8px;margin-top:10px;padding-top:8px;border-top:1px solid #333}.tbf-ana-foot:empty{display:none}.tbf-ana-sum{flex:1;font-size:10.5px;color:#9a9a9a;line-height:1.3}.tbf-ana-foot button{cursor:pointer;padding:6px 12px;border-radius:5px;border:1px solid #666;background:#333;color:#eee;font-size:12px;white-space:nowrap}.tbf-ana-foot button.tbf-ana-apply{background:#2e7d32;border-color:#2e7d32;color:#fff}.tbf-ana-trace{margin:4px 0 0;font-size:11.5px}.tbf-ana-tr{display:flex;align-items:baseline;gap:8px;padding:3px 6px;border-radius:4px;flex-wrap:wrap;line-height:1.35}.tbf-ana-tr .op{color:#9a9a9a;font-family:monospace;font-size:12px}.tbf-ana-tr .r{font-weight:bold;color:#fff;white-space:nowrap}.tbf-ana-tr .why{color:#9a9a9a;font-size:10.5px;flex:1 1 100%;padding-left:2px}.tbf-ana-tr--win{background:#2a2f1e;border-left:3px solid #8fd08f}.tbf-ana-tr--win .r{color:#b5d56a}.tbf-ana-note{margin-top:6px;font-size:10.5px;color:#8a8a8a;border-top:1px solid #333;padding-top:6px}.tbf-ana-alert{margin:0 0 6px;padding:8px 10px;border-radius:6px;background:#3a2f1f;border:1px solid #a7792a;color:#ffd9a0;font-size:11.5px;line-height:1.4}.tbf-ana-skel{display:inline-block;height:8px;border-radius:4px;background:#333;margin:3px 0}.tbf-ana-muted{color:#8a8a8a;font-size:11px;margin:4px 0}`);
 
     GM_addStyle(`.tbf-ana-ctl{display:flex;flex-wrap:wrap;gap:6px 16px;align-items:center;margin:0 0 8px}.tbf-ana-ctlg{display:inline-flex;align-items:center;gap:6px}.tbf-ana-ctll{font-size:10.5px;color:#9a9a9a;text-transform:uppercase;letter-spacing:.5px}.tbf-ana-seg{display:inline-flex;border:1px solid #444;border-radius:12px;overflow:hidden}.tbf-ana-opt{padding:3px 10px;font-size:11px;line-height:1.5;color:#aaa;cursor:pointer;white-space:nowrap;user-select:none;-webkit-user-select:none}.tbf-ana-opt+.tbf-ana-opt{border-left:1px solid #444}.tbf-ana-opt:hover{color:#fff}.tbf-ana-opt--on,.tbf-ana-opt--on:hover{background:#b5d56a;color:#1f1f1f;font-weight:bold}.tbf-ana-opt em{font-style:normal;opacity:.65;margin-left:4px}.tbf-ana-lr .k{width:84px;text-align:right;color:#c9d8a6;flex:none}.tbf-ana-lr .k.tbf-ana-k0{color:#a8a8a8}.tbf-ana-lad--keep .tbf-ana-lr .k{font-weight:bold;color:#b5d56a}.tbf-ana-lad--keep .tbf-ana-lr .k.tbf-ana-k0{color:#f0f0f0}.tbf-ana-lad--keep .tbf-ana-lr .p{color:#9a9a9a}.tbf-ana-lad--keep .tbf-ana-lr--you .p{color:#e6d9a8}.tbf-ana-lr.tbf-ana-lh{min-height:20px;font-size:9.5px;text-transform:uppercase;letter-spacing:.5px}.tbf-ana-lad .tbf-ana-lh .p,.tbf-ana-lad .tbf-ana-lh .q,.tbf-ana-lad .tbf-ana-lh .k{color:#8a8a8a;font-weight:normal}.tbf-ana-lh .tbf-ana-src{visibility:hidden}.tbf-ana-where{margin:0 0 10px;padding:6px 9px 8px;background:#262626;border:1px solid #3a3a3a;border-radius:6px}.tbf-ana-where .tbf-ana-sec{margin:0 0 4px}.tbf-ana-wr{display:flex;flex-wrap:wrap;align-items:center;gap:2px 8px;padding:3px 5px;border-radius:4px;font-size:12px}.tbf-ana-wr--win{background:#2a2f1e}.tbf-ana-wn{width:74px;color:#ddd}.tbf-ana-wl{color:#9a9a9a;min-width:92px}.tbf-ana-wa{color:#666}.tbf-ana-wk{font-weight:bold;color:#f0f0f0;min-width:100px}.tbf-ana-wr--win .tbf-ana-wk{color:#b5d56a}.tbf-ana-ws{margin-top:5px;font-size:11.5px;color:#ddd;line-height:1.45}@media (max-width:560px){.tbf-ana-lad .tbf-ana-lr{flex-wrap:wrap;row-gap:2px}.tbf-ana-lr .p{width:74px}.tbf-ana-lr .q{width:46px}.tbf-ana-lr .k{width:78px}.tbf-ana-lad .tbf-ana-lr .n{flex:1 1 100%;padding-left:24px}.tbf-ana-lad .tbf-ana-lr .n:empty{display:none}.tbf-ana-lad .tbf-ana-lr--more .n{padding-left:0}.tbf-ana-wa,.tbf-ana-wr .tbf-ana-tag{display:none}.tbf-ana-wn{width:66px}.tbf-ana-wl{min-width:0}.tbf-ana-wk{min-width:0;margin-left:auto}}`);
 
@@ -102,6 +109,15 @@
     // Write every line for a player, not a developer: one short sentence, plain words,
     // what changed for them rather than what changed in the code.
     const CHANGELOG = [
+        {
+            version: "3.0.0",
+            date: "2026-11-05",
+            changes: [
+                'Fill now sits inside the price box on the Add Items page, as a $ square like the one in Market Filler. Tap it to fill, tap the × it turns into to clear, hold it for settings.',
+                'New Display tab in settings: show or hide the star, the ƒ, the chart icon, the price bubble and the Fill All button.',
+                'The chart icon keeps a coloured dot after a Fill only when the price needs a look.'
+            ]
+        },
         {
             version: "2.3.2",
             date: "2026-11-05",
@@ -238,6 +254,38 @@
     // win over the item's category and the defaults; a blank one falls through as before.
     const itemFormulasKey = "silmaril-torn-bazaar-filler-item-formulas";
     let itemFormulas = loadItemFormulas();
+
+    // Which of the script's extra row controls show. All of them do until the Display tab in
+    // settings turns one off. A class on <html> hides it, so rows added later follow too.
+    const displayKey = "silmaril-torn-bazaar-filler-display";
+    const DISPLAY_OPTIONS = [
+        { key: 'fav', hide: 'tbf-hide-fav', label: 'Favourite star', hint: 'The ☆ beside each item. Hidden, your favourites and exclusions still count for Fill All.' },
+        { key: 'own', hide: 'tbf-hide-own', label: 'Own formula (ƒ)', hint: 'The ƒ that gives one item its own formula. Hidden, the formulas you already set still apply.' },
+        { key: 'ana', hide: 'tbf-hide-ana', label: 'Item analytics', hint: 'The chart icon that opens the analytics popup.' },
+        { key: 'bubble', hide: 'tbf-hide-bubble', label: 'Price bubble', hint: 'The percentage beside the price box after a Fill, which compares your price with the 3rd-cheapest listing.' },
+        { key: 'fillall', hide: 'tbf-hide-fillall', label: 'Fill All button', hint: 'The floating Fill All bar with its ⚙. Hidden, you can still open settings by holding Fill on any row.' }
+    ];
+    let display = loadDisplay();
+    applyDisplay();
+
+    function loadDisplay(){
+        try {
+            const saved = JSON.parse(localStorage.getItem(displayKey) ?? '{}');
+            return saved != null && typeof saved === 'object' ? saved : {};
+        } catch (e) {
+            return {};
+        }
+    }
+
+    function shows(key){
+        return display[key] !== false;
+    }
+
+    function applyDisplay(){
+        DISPLAY_OPTIONS.forEach(function(option){
+            document.documentElement.classList.toggle(option.hide, !shows(option.key));
+        });
+    }
     let categoryDeltas = loadCategoryDeltas();
     let categoryQuantities = loadCategoryQuantities();
     let itemCategoryCache = loadItemCategoryCache();
@@ -287,6 +335,9 @@
             let alreadyHasFillBtn = nameWrap.querySelector(".btn-wrap.torn-bazaar-fill-qty-price") != null;
             if (!alreadyHasFillBtn && !isParentRowDisabled){
                 insertFillAndWaveBtn(nameWrap, addItemsLabels, pages.AddItems);
+            }
+            if (!isParentRowDisabled){
+                ensureFillSquare(nameWrap);
             }
         });
 
@@ -476,6 +527,111 @@
 
     }
 
+    // ---- Fill inside the price box -------------------------------------------------------------
+    // On Add Items, Fill and Clear sit as a small square at the left of the row's price box, the
+    // way Market Filler does it. The square only presses the row's own Fill or Clear button,
+    // which stays in the name line but hidden, so filling itself works exactly as before.
+    const ROW_END_GAP_PX = 9;
+
+    // The icon inside the Fill square: a $ before a fill, and a × once the row is filled and the
+    // next tap clears it. Each square gets its own gradient ids, because a gradient shared by id
+    // stops drawing everywhere once the row that defines it is hidden.
+    function fillSquareIcon(){
+        const FILL_ICON_DOLLAR = 'M10.36 10.44Q10.36 12.06 9.27 12.96Q8.18 13.85 6.04 13.93V15.5H5.06V13.96Q3.14 13.89 2.06 13.05Q0.98 12.21 0.64 10.48L2.94 10.05Q3.11 11.07 3.62 11.54Q4.12 12.01 5.06 12.1V8.59Q5.04 8.57 4.93 8.55Q4.82 8.53 4.79 8.53Q3.33 8.2 2.59 7.74Q1.85 7.29 1.45 6.6Q1.05 5.9 1.05 4.9Q1.05 3.41 2.07 2.59Q3.1 1.77 5.06 1.7V0.5H6.04V1.7Q7.22 1.75 8 2.07Q8.79 2.4 9.27 3.03Q9.75 3.67 10.04 4.84L7.68 5.19Q7.54 4.41 7.15 3.99Q6.76 3.56 6.04 3.46V6.62L6.14 6.64Q6.4 6.64 7.72 7.07Q9.05 7.5 9.7 8.34Q10.36 9.18 10.36 10.44ZM5.06 3.42Q3.4 3.55 3.4 4.86Q3.4 5.25 3.54 5.51Q3.67 5.78 3.94 5.95Q4.2 6.12 5.06 6.4ZM8.03 10.48Q8.03 10.03 7.86 9.74Q7.7 9.46 7.39 9.28Q7.08 9.1 6.04 8.81V12.1Q8.03 11.97 8.03 10.48Z';
+        const FILL_ICON_CLEAR = 'M1.6 6 3 4.6l2.5 2.5L8 4.6 9.4 6 6.9 8.5l2.5 2.5L8 12.4 5.5 9.9 3 12.4 1.6 11l2.5-2.5z';
+        fillSquareIcon.count = (fillSquareIcon.count || 0) + 1;
+        const id = 'tbf-sq-' + fillSquareIcon.count;
+        const holder = document.createElement('span');
+        holder.innerHTML = '<svg class="tbf-sq-ico" viewBox="0 0 11 16" aria-hidden="true"><defs>' +
+            '<linearGradient id="' + id + 'g" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="#eee"/><stop offset="1" stop-color="#9a9a9a"/></linearGradient>' +
+            '<linearGradient id="' + id + 'r" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="#ffb0b0"/><stop offset="1" stop-color="#d36a6a"/></linearGradient></defs>' +
+            '<path class="tbf-sq-fill" fill="url(#' + id + 'g)" d="' + FILL_ICON_DOLLAR + '"/>' +
+            '<path class="tbf-sq-clear" fill="url(#' + id + 'r)" d="' + FILL_ICON_CLEAR + '"/></svg>';
+        return holder.firstChild;
+    }
+
+    function ensureFillSquare(nameWrap){
+        const row = nameWrap.closest('li');
+        const group = row != null ? row.querySelector('div.price div.input-money-group') : null;
+        const fillBtn = nameWrap.querySelector('.torn-bazaar-fill-qty-price span.btn');
+        const clearBtn = nameWrap.querySelector('.torn-bazaar-clear-qty-price span.btn');
+        if (group == null || fillBtn == null || clearBtn == null || group.querySelector(':scope > .tbf-sq') != null || group.dataset.tbfSqWait){
+            return;
+        }
+        // The square goes inside the box without widening it: the price input gives up the
+        // square's width. A row on a category tab that is not showing has no size yet, so it
+        // waits until it is laid out.
+        const priceInput = group.querySelector(':scope > input.input-money:not([type=hidden])');
+        if (priceInput == null){
+            return;
+        }
+        const inputBox = priceInput.getBoundingClientRect();
+        const inputWidth = inputBox.width;
+        if (inputWidth === 0){
+            if (typeof ResizeObserver === 'function'){
+                group.dataset.tbfSqWait = '1';
+                const wait = new ResizeObserver(function(){
+                    if (group.getBoundingClientRect().width > 0){
+                        wait.disconnect();
+                        delete group.dataset.tbfSqWait;
+                        ensureFillSquare(nameWrap);
+                    }
+                });
+                wait.observe(group);
+            }
+            return;
+        }
+        const square = document.createElement('span');
+        square.className = 'input-money-symbol tbf-sq';
+        // One fixed tooltip: Torn's tooltips keep the first title they see.
+        square.title = 'Fill this row, or clear it once filled (hold for settings)';
+        square.style.position = 'relative';
+        const button = document.createElement('input');
+        button.type = 'button';
+        button.className = 'wai-btn';
+        square.appendChild(button);
+        square.appendChild(fillSquareIcon());
+        // Like Market Filler, the square itself takes the taps: Torn's styling can hide the
+        // button inside it.
+        attachSettingsLongPress(square);
+
+        // Fill shows until a fill finishes, then Clear. Both are hidden while a fill runs.
+        const sync = function(){
+            const fillShown = fillBtn.style.display !== 'none';
+            const clearShown = clearBtn.style.display !== 'none';
+            const state = fillShown ? 'fill' : (clearShown ? 'clear' : 'busy');
+            square.dataset.tbfSq = state;
+        };
+        square.addEventListener('click', function(event){
+            event.preventDefault();
+            event.stopPropagation();
+            const state = square.dataset.tbfSq;
+            if (state === 'fill'){
+                fillBtn.querySelector('input').click();
+            } else if (state === 'clear'){
+                clearBtn.querySelector('input').click();
+            }
+        });
+        const watch = new MutationObserver(sync);
+        watch.observe(fillBtn, { attributes: true, attributeFilter: ['style'] });
+        watch.observe(clearBtn, { attributes: true, attributeFilter: ['style'] });
+        sync();
+
+        // Same height and offset as the price input, so the square lines up with it.
+        const look = window.getComputedStyle(priceInput);
+        square.style.height = priceInput.getBoundingClientRect().height + 'px';
+        square.style.marginTop = look.marginTop;
+        group.classList.add('tbf-sq-group');
+        group.prepend(square);
+        const squareWidth = square.getBoundingClientRect().width;
+        // Leave the same 9px after the box as the item market does. On a computer the bazaar's
+        // price box runs to the very end of the row.
+        const gapAfter = row.getBoundingClientRect().right - inputBox.right;
+        const extra = Math.max(0, ROW_END_GAP_PX - gapAfter);
+        priceInput.style.setProperty('width', Math.max(40, Math.round(inputWidth - squareWidth - extra)) + 'px', 'important');
+        nameWrap.classList.add('tbf-sq-host');
+    }
+
     function insertPercentageSpan(element){
         let moneyGroupDiv = element.querySelector("div.price div.input-money-group");
 
@@ -502,7 +658,7 @@
 
     async function fillQuantityAndPrice(element, pageType, isAuto){
         let amountDiv = element.parentElement.parentElement.parentElement.parentElement.parentElement.querySelector("div.amount-main-wrap");
-        let priceInputs = amountDiv.querySelectorAll("div.price div input");
+        let priceInputs = amountDiv.querySelectorAll("div.price div input.input-money");
         let keyupEvent = new Event("keyup", {bubbles: true});
         let inputEvent = new Event("input", {bubbles: true});
 
@@ -685,7 +841,7 @@
 
     function clearQuantityAndPrice(element){
         let amountDiv = element.parentElement.parentElement.parentElement.parentElement.parentElement.querySelector("div.amount-main-wrap");
-        let priceInputs = amountDiv.querySelectorAll("div.price div input");
+        let priceInputs = amountDiv.querySelectorAll("div.price div input.input-money");
         let keyupEvent = new Event("keyup", {bubbles: true});
         let inputEvent = new Event("input", {bubbles: true});
 
@@ -3711,7 +3867,7 @@
             priceInputs[0].dispatchEvent(inputEvent);
         } else {
             let amountDiv = rowAmountDiv(row);
-            let priceInputs = amountDiv == null ? [] : amountDiv.querySelectorAll("div.price div input");
+            let priceInputs = amountDiv == null ? [] : amountDiv.querySelectorAll("div.price div input.input-money");
             if (priceInputs.length === 0){
                 showToast('Could not find the price box on this row.');
                 return;
@@ -4754,6 +4910,24 @@
         renderWizard(overlay);
     }
 
+    function displayPaneMarkup(){
+        return '<div class="tbf-modal-note">Choose what the script adds to the page.</div>' +
+            DISPLAY_OPTIONS.map(function(option){
+                return '<label class="tbf-modal-toggle"><input type="checkbox" class="tbf-modal-show" data-show="' + option.key + '">' + option.label + '</label>' +
+                    '<div class="tbf-modal-hint">' + option.hint + '</div>';
+            }).join('') +
+            '';
+    }
+
+    function showSettingsPane(overlay, pane){
+        overlay.querySelectorAll('.tbf-modal-tabs [data-pane]').forEach(function(tab){
+            tab.setAttribute('aria-selected', String(tab.dataset.pane === pane));
+        });
+        overlay.querySelectorAll('.tbf-modal-pane').forEach(function(section){
+            section.hidden = section.dataset.pane !== pane;
+        });
+    }
+
     function ensureSettingsModal(){
         if (document.querySelector('.tbf-settings-overlay') != null){
             return;
@@ -4763,6 +4937,11 @@
         overlay.innerHTML =
             '<div class="tbf-modal">' +
                 '<h3>Bazaar Filler Settings<span class="tbf-modal-close" title="Close">&times;</span></h3>' +
+                '<div class="tbf-modal-tabs" role="tablist">' +
+                    '<button type="button" role="tab" data-pane="prices" aria-selected="true">Prices</button>' +
+                    '<button type="button" role="tab" data-pane="display" aria-selected="false">Display</button>' +
+                '</div>' +
+                '<div class="tbf-modal-pane" data-pane="prices">' +
                 settingsHelpMarkup() +
                 '<label>Default price</label>' +
                 '<input type="text" class="tbf-modal-delta" placeholder="-1">' +
@@ -4780,6 +4959,8 @@
                 '<button type="button" class="tbf-modal-addcat">+ Add category</button>' +
                 '<button type="button" class="tbf-modal-resetcat" title="Forget cached item categories. Use if Torn recategorised an item and a wrong discount is being applied.">Reset learned categories</button>' +
                 '<button type="button" class="tbf-modal-clearexcl" title="Un-exclude every item marked ⊘, including ones not currently on screen.">Clear exclusions</button>' +
+                '</div>' +
+                '<div class="tbf-modal-pane" data-pane="display" hidden>' + displayPaneMarkup() + '</div>' +
                 '<div class="tbf-modal-error"></div>' +
                 '<div class="tbf-modal-actions">' +
                     '<button type="button" class="tbf-modal-cancel">Cancel</button>' +
@@ -4789,6 +4970,9 @@
             '<datalist id="tbf-modal-cat-list">' + SETTINGS_CATEGORIES.map(c => '<option value="' + c + '"></option>').join('') + '</datalist>';
         document.body.appendChild(overlay);
 
+        overlay.querySelectorAll('.tbf-modal-tabs [data-pane]').forEach(function(tab){
+            tab.addEventListener('click', function(){ showSettingsPane(overlay, tab.dataset.pane); });
+        });
         overlay.querySelector('.tbf-modal-close').addEventListener('click', closeSettingsModal);
         overlay.querySelector('.tbf-modal-cancel').addEventListener('click', closeSettingsModal);
         overlay.addEventListener('click', function(event){ if (event.target === overlay){ closeSettingsModal(); } });
@@ -4846,6 +5030,8 @@
         const overlay = document.querySelector('.tbf-settings-overlay');
         clearSettingsError(overlay);
         resetSettingsHelp(overlay);
+        showSettingsPane(overlay, 'prices');
+        overlay.querySelectorAll('.tbf-modal-show').forEach(function(box){ box.checked = shows(box.dataset.show); });
         overlay.querySelector('.tbf-modal-delta').value = priceDeltaRaw;
         overlay.querySelector('.tbf-modal-qty').value = quantityModeRaw;
         const keyInput = overlay.querySelector('.tbf-modal-apikey');
@@ -5034,7 +5220,21 @@
             return;
         }
         if (!validateSettingsModal(overlay)){
+            // The problem is on the Prices tab, which may not be the one showing.
+            showSettingsPane(overlay, 'prices');
+            const bad = overlay.querySelector('input.tbf-modal-invalid');
+            if (bad != null){
+                bad.focus();
+            }
             return;
+        }
+        let shown = {};
+        overlay.querySelectorAll('.tbf-modal-show').forEach(function(box){ shown[box.dataset.show] = box.checked; });
+        display = shown;
+        localStorage.setItem(displayKey, JSON.stringify(display));
+        applyDisplay();
+        if (!shows('fillall') && autoFillActive){
+            stopAutoFill();
         }
         let deltaVal = overlay.querySelector('.tbf-modal-delta').value.trim();
         if (deltaVal !== ''){
