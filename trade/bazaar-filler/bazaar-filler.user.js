@@ -88,7 +88,7 @@
     // The Fill square inside an Add Items price box: Torn's own money-symbol square, as Market
     // Filler uses it. The name line's own Fill and Clear hide. The :where() rules only stand in
     // for Torn's styling where the page has none, so Torn's look wins wherever it exists.
-    GM_addStyle(`.tbf-sq-host>.btn-wrap.torn-bazaar-fill-qty-price,.tbf-sq-host>.btn-wrap.torn-bazaar-clear-qty-price{display:none!important}.input-money-group.tbf-sq-group{display:inline-flex;align-items:stretch;vertical-align:middle;box-sizing:border-box;max-width:100%}.tbf-sq-group>input.input-money{flex:1 1 0;min-width:0!important;width:auto!important}.tbf-sq-group>.tbf-sq{flex:none;align-self:stretch}.tbf-sq[data-tbf-sq="busy"]{opacity:.5}:where(.tbf-sq){display:block;width:20px;box-sizing:border-box;background:linear-gradient(#4f4f4f,#3e3e3e);border:1px solid #555;border-right:0;border-radius:5px 0 0 5px}:where(.tbf-sq)>:where(.wai-btn){display:block;width:100%;height:100%;margin:0;padding:0;border:0;background:transparent;cursor:pointer}.tbf-sq>.wai-btn{-webkit-touch-callout:none;-webkit-user-select:none;user-select:none;transition:box-shadow 0s}.tbf-sq>.wai-btn.tbf-holding{box-shadow:inset 0 0 0 40px rgba(0,180,255,.35);transition:box-shadow 3s linear}`);
+    GM_addStyle(`.tbf-sq-host>.btn-wrap.torn-bazaar-fill-qty-price,.tbf-sq-host>.btn-wrap.torn-bazaar-clear-qty-price{display:none!important}.input-money-group.tbf-sq-group{display:inline-flex;align-items:flex-start;vertical-align:middle;width:auto!important}.tbf-sq-group>input.input-money{flex:none;min-width:0!important}.tbf-sq-group>.tbf-sq{flex:none;cursor:pointer}.tbf-sq[data-tbf-sq="busy"]{opacity:.5}:where(.tbf-sq){display:block;width:20px;box-sizing:border-box;background:linear-gradient(#4f4f4f,#3e3e3e);border:1px solid #555;border-right:0;border-radius:5px 0 0 5px}:where(.tbf-sq)>:where(.wai-btn){display:block;width:100%;height:100%;margin:0;padding:0;border:0;background:transparent;cursor:pointer}.tbf-sq{-webkit-touch-callout:none;-webkit-user-select:none;user-select:none;transition:box-shadow 0s}.tbf-sq.tbf-holding{box-shadow:inset 0 0 0 40px rgba(0,180,255,.35);transition:box-shadow 3s linear}`);
     // Phone layout of an Add Items row: the name keeps the first line, and the icons and Fill sit on
     // a second line under it, so neither squeezes the other out of Torn's narrow name column.
     GM_addStyle(`.tbf-brk{display:none}@media (max-width:784px){ul.items-cont li.clearfix:has(.tbf-brk),ul.items-cont div.title-wrap:has(.tbf-brk){height:auto!important}ul.items-cont div.title-wrap div.name-wrap.tbf-wave-host{flex-wrap:wrap;justify-content:flex-start;height:auto!important;min-height:34px}ul.items-cont div.name-wrap .tbf-brk{display:block;flex:0 0 100%;height:0}ul.items-cont div.name-wrap>.t-overflow{flex:1 1 0;min-width:1px}ul.items-cont div.name-wrap .tbf-fav,ul.items-cont div.name-wrap .tbf-own,ul.items-cont div.name-wrap .tbf-ana-btn{margin-right:10px}ul.items-cont div.name-wrap .btn-wrap.torn-bazaar-fill-qty-price,ul.items-cont div.name-wrap .btn-wrap.torn-bazaar-clear-qty-price{float:none;margin-bottom:4px}}`);
@@ -495,10 +495,15 @@
         if (group == null || fillBtn == null || clearBtn == null || group.querySelector(':scope > .tbf-sq') != null || group.dataset.tbfSqWait){
             return;
         }
-        // The square goes inside the box without widening it, so the box is measured first. A row
-        // on a category tab that is not showing has no size yet: wait until it is laid out.
-        const width = group.getBoundingClientRect().width;
-        if (width === 0){
+        // The square goes inside the box without widening it: the price input gives up the
+        // square's width. A row on a category tab that is not showing has no size yet, so it
+        // waits until it is laid out.
+        const priceInput = group.querySelector(':scope > input.input-money:not([type=hidden])');
+        if (priceInput == null){
+            return;
+        }
+        const inputWidth = priceInput.getBoundingClientRect().width;
+        if (inputWidth === 0){
             if (typeof ResizeObserver === 'function'){
                 group.dataset.tbfSqWait = '1';
                 const wait = new ResizeObserver(function(){
@@ -519,7 +524,9 @@
         button.type = 'button';
         button.className = 'wai-btn';
         square.appendChild(button);
-        attachSettingsLongPress(button);
+        // Like Market Filler, the square itself takes the taps: Torn's styling can hide the
+        // button inside it.
+        attachSettingsLongPress(square);
 
         // Fill shows until a fill finishes, then Clear. Both are hidden while a fill runs.
         const sync = function(){
@@ -527,9 +534,9 @@
             const clearShown = clearBtn.style.display !== 'none';
             const state = fillShown ? 'fill' : (clearShown ? 'clear' : 'busy');
             square.dataset.tbfSq = state;
-            button.title = state === 'fill' ? 'Fill this row (hold for settings)' : (state === 'clear' ? 'Clear this row' : 'Filling...');
+            square.title = state === 'fill' ? 'Fill this row (hold for settings)' : (state === 'clear' ? 'Clear this row' : 'Filling...');
         };
-        button.addEventListener('click', function(event){
+        square.addEventListener('click', function(event){
             event.preventDefault();
             event.stopPropagation();
             const state = square.dataset.tbfSq;
@@ -545,17 +552,13 @@
         sync();
 
         // Same height and offset as the price input, so the square lines up with it.
-        const priceInput = group.querySelector(':scope > input.input-money:not([type=hidden])');
-        if (priceInput != null){
-            const look = window.getComputedStyle(priceInput);
-            square.style.height = priceInput.getBoundingClientRect().height + 'px';
-            square.style.marginTop = look.marginTop;
-            square.style.marginBottom = look.marginBottom;
-            square.style.alignSelf = 'flex-start';
-        }
-        group.style.width = width + 'px';
+        const look = window.getComputedStyle(priceInput);
+        square.style.height = priceInput.getBoundingClientRect().height + 'px';
+        square.style.marginTop = look.marginTop;
         group.classList.add('tbf-sq-group');
         group.prepend(square);
+        const squareWidth = square.getBoundingClientRect().width;
+        priceInput.style.setProperty('width', Math.max(40, Math.round(inputWidth - squareWidth)) + 'px', 'important');
         nameWrap.classList.add('tbf-sq-host');
     }
 
