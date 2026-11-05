@@ -487,6 +487,8 @@
     // On Add Items, Fill and Clear sit as a small square at the left of the row's price box, the
     // way Market Filler does it. The square only presses the row's own Fill or Clear button,
     // which stays in the name line but hidden, so filling itself works exactly as before.
+    const ROW_END_GAP_PX = 9;
+
     function ensureFillSquare(nameWrap){
         const row = nameWrap.closest('li');
         const group = row != null ? row.querySelector('div.price div.input-money-group') : null;
@@ -502,7 +504,8 @@
         if (priceInput == null){
             return;
         }
-        const inputWidth = priceInput.getBoundingClientRect().width;
+        const inputBox = priceInput.getBoundingClientRect();
+        const inputWidth = inputBox.width;
         if (inputWidth === 0){
             if (typeof ResizeObserver === 'function'){
                 group.dataset.tbfSqWait = '1';
@@ -559,7 +562,11 @@
         group.classList.add('tbf-sq-group');
         group.prepend(square);
         const squareWidth = square.getBoundingClientRect().width;
-        priceInput.style.setProperty('width', Math.max(40, Math.round(inputWidth - squareWidth)) + 'px', 'important');
+        // Leave the same 9px after the box as the item market does. On a computer the bazaar's
+        // price box runs to the very end of the row.
+        const gapAfter = row.getBoundingClientRect().right - inputBox.right;
+        const extra = Math.max(0, ROW_END_GAP_PX - gapAfter);
+        priceInput.style.setProperty('width', Math.max(40, Math.round(inputWidth - squareWidth - extra)) + 'px', 'important');
         nameWrap.classList.add('tbf-sq-host');
     }
 
