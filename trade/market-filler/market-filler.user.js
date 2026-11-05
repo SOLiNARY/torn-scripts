@@ -99,6 +99,7 @@
         {
             version: "2.2.1",
             date: "2026-11-05",
+            silent: true,
             changes: [
                 'Settings: on phones, tapping a box such as Default quantity no longer opens the keyboard and closes it again.'
             ]
