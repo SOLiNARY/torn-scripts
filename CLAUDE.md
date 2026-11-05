@@ -5,6 +5,11 @@ build step and no dependency install: the file that is committed is the file a u
 Torn PDA, the Android app, runs these too, and it ignores `@require` entirely — so a script may
 never depend on a library it did not define itself.
 
+Torn PDA turns a typographic apostrophe (’) in the script into a plain `'` before it runs the
+script. A `’` inside a single-quoted string then ends the string early, and the whole script fails
+with `SyntaxError: Unexpected identifier 's'`. So use `\u2019` in JavaScript strings, or
+`&rsquo;` in HTML, never the literal character. The same goes for curly double quotes.
+
 ## Releasing a script
 
 A release touches the same three places in the file, and they must agree:
