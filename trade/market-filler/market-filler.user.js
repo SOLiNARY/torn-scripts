@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Market Filler
 // @namespace    https://github.com/SOLiNARY
-// @version      2.3.0
+// @version      2.2.1
 // @description  Adds a Fill button to every row when you list on the Item Market: one click sets the price and quantity. Price from listings (cheapest minus $1 by default), market value or live bazaars via weav3r.dev, with your own formula and min/max ranges. A popup shows the 5 cheapest listings; click one to undercut it. Quantity modes, per-category settings, favourites with Fill All. Open settings with the cog on the Fill All bar or by holding Fill for 2s. A small chart icon by the star opens item analytics: item-market and bazaar listings on one price ladder (or just one of them), what each keeps after the market fee, whether a bazaar would pay more, where your price lands, stack sizes, and what your formula picked.
 // @author       Silmaril [2665762]
 // @license      MIT License
@@ -19,7 +19,7 @@
     'use strict';
 
     // Keep in sync with @version above — it keys the "What's new" popup.
-    const SCRIPT_VERSION = "2.3.0";
+    const SCRIPT_VERSION = "2.2.1";
 
     const itemUrl = "https://api.torn.com/torn/{itemId}?selections=items&key={apiKey}&comment=MarketFiller";
     const marketUrl = "https://api.torn.com/v2/market/{itemId}?selections=itemMarket&key={apiKey}&comment=MarketFiller";
@@ -83,7 +83,6 @@
     GM_addStyle(`.tmf-changelog-release{margin:0 0 14px}.tmf-changelog-release:last-of-type{margin-bottom:0}.tmf-changelog-ver{display:flex;align-items:baseline;gap:8px;margin:0 0 6px}.tmf-changelog-ver b{color:#fff;font-size:13px}.tmf-changelog-date{color:#8a8a8a;font-size:11px;margin-left:auto}.tmf-changelog-badge{background:#2e7d32;color:#fff;border-radius:10px;padding:1px 7px;font-size:10px;text-transform:uppercase;letter-spacing:.04em}.tmf-changelog-items{margin:0;padding-left:18px;color:#cfcfcf}.tmf-changelog-items li{margin:0 0 5px}.tmf-changelog-items code{background:#000;padding:1px 4px;border-radius:3px;color:#cfc}`);
 
     GM_addStyle(`.tmf-settings-overlay [hidden]{display:none!important}.tmf-settings-overlay .tmf-modal code{background:#000;padding:1px 4px;border-radius:3px;color:#cfc;font-family:Consolas,Menlo,monospace;font-size:12px}.tmf-help-bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between;margin:0 0 8px;padding:6px 8px;background:#262626;border:1px solid #3a3a3a;border-radius:6px}.tmf-help-bar button,.tmf-wiz button,.tmf-sheet button{font-family:inherit;line-height:1.3;text-transform:none;box-shadow:none;height:auto;min-width:0;margin:0;cursor:pointer}.tmf-help-switch{display:inline-flex;align-items:center;gap:8px;background:none;border:0;padding:2px 0;color:#e6e6e6;font-size:12.5px}.tmf-help-track{position:relative;width:30px;height:17px;border-radius:9px;background:#555;flex:none;transition:background .15s}.tmf-help-track:after{content:"";position:absolute;top:2px;left:2px;width:13px;height:13px;border-radius:50%;background:#ddd;transition:transform .15s}.tmf-help-switch[aria-checked="true"] .tmf-help-track{background:#2e7d32}.tmf-help-switch[aria-checked="true"] .tmf-help-track:after{transform:translateX(13px);background:#fff}.tmf-help-write{background:#333;border:1px solid #666;color:#eee;border-radius:5px;padding:5px 10px;font-size:12px}.tmf-help-write:hover{border-color:#999}.tmf-help-write[aria-expanded="true"]{border-color:#b5d56a;color:#fff}.tmf-wiz{margin:0 0 8px;border:1px solid #b5d56a;border-radius:6px;background:#262626;padding:8px 10px 10px;display:grid;gap:8px}.tmf-wiz-h{display:flex;justify-content:space-between;align-items:center;gap:8px;font-weight:bold;color:#fff;font-size:12.5px}.tmf-wiz-h small{font-weight:normal;color:#9a9a9a;font-size:11px;margin-left:6px}.tmf-wiz-close{cursor:pointer;color:#bbb;font-size:20px;line-height:1}.tmf-wiz-qs{display:grid;gap:8px}.tmf-wiz-q{display:grid;gap:4px}.tmf-wiz-q>span{font-size:11.5px;color:#cfcfcf}.tmf-wiz-seg{display:flex;flex-wrap:wrap;gap:4px}.tmf-wiz-seg button{background:#333;border:1px solid #555;color:#ddd;border-radius:5px;padding:4px 8px;font-size:11.5px}.tmf-wiz-seg button:hover{border-color:#888}.tmf-wiz-seg button[aria-pressed="true"]{background:#2e7d32;border-color:#2e7d32;color:#fff}.tmf-wiz-out{display:grid;gap:5px;border-top:1px solid #333;padding-top:8px}.tmf-wiz-f{overflow-wrap:anywhere}.tmf-settings-overlay .tmf-wiz-f code{font-size:12.5px}.tmf-wiz-say{font-size:11.5px;color:#e6e6e6}.tmf-wiz-say b,.tmf-live-say b,.tmf-sheet-tried b{color:#b5d56a}.tmf-wiz-use{justify-self:start;background:#2e7d32;border:1px solid #2e7d32;color:#fff;border-radius:5px;padding:5px 12px;font-size:12px}.tmf-sheet{margin:0 0 4px;border:1px solid #3a3a3a;border-radius:6px;padding:6px 10px}.tmf-sheet>summary{cursor:pointer;font-weight:bold;color:#cfcfcf;font-size:12.5px;padding:2px 0}.tmf-sheet[open]>summary{margin-bottom:4px}.tmf-anat{display:flex;gap:6px;justify-content:center;margin:8px 0 4px;flex-wrap:wrap}.tmf-anat-part{display:grid;justify-items:center;gap:4px}.tmf-settings-overlay .tmf-anat-part code{font-size:17px;padding:3px 8px}.tmf-anat-brace{display:block;width:100%;height:7px;border:1px solid #9a9a9a;border-top:0;border-radius:0 0 4px 4px;box-sizing:border-box}.tmf-anat-part span{font-size:10.5px;color:#cfcfcf;text-align:center;max-width:150px;line-height:1.3}.tmf-anat-note{font-size:11px;color:#9a9a9a;text-align:center;margin:0 0 8px}.tmf-sheet-tabs{display:flex;flex-wrap:wrap;gap:2px;border-bottom:1px solid #444;margin-bottom:4px}.tmf-sheet-tabs button{background:none;border:0;border-bottom:2px solid transparent;margin-bottom:-1px;padding:5px 9px;font-size:12px;color:#aaa;border-radius:0}.tmf-sheet-tabs button:hover{color:#ddd}.tmf-sheet-tabs button[aria-selected="true"]{color:#fff;border-bottom-color:#b5d56a}.tmf-sheet-hint{font-size:10.5px;color:#9a9a9a;margin:4px 0 2px}.tmf-sheet-hint b{color:#cfcfcf;font-weight:normal}.tmf-sheet-row{display:grid;grid-template-columns:auto minmax(0,1fr);gap:2px 12px;align-items:baseline;width:100%;box-sizing:border-box;text-align:left;background:none;border:0;border-bottom:1px solid #2c2c2c;border-radius:0;padding:6px 4px;color:#e6e6e6;font-size:11.5px}.tmf-sheet-row:hover{background:#2a2a2a}.tmf-sheet-row code{overflow-wrap:anywhere}.tmf-sheet-row--wide{grid-template-columns:minmax(0,1fr)}.tmf-sheet-row--on{background:#2a2f1e;box-shadow:inset 3px 0 0 #b5d56a}.tmf-sheet-note{font-size:10.5px;color:#9a9a9a;margin:6px 0 0}.tmf-sheet-tried{margin-top:6px;font-size:11.5px;color:#e6e6e6;line-height:1.45}.tmf-sheet-tried:empty{display:none}.tmf-live{margin-top:6px;background:#262626;border:1px solid #3a3a3a;border-radius:6px;padding:8px 10px;display:grid;gap:6px;font-size:12px;line-height:1.4;text-align:left}.tmf-modal-cats .tmf-live{margin:0 0 6px}.tmf-live-h{display:flex;justify-content:space-between;gap:8px;font-size:10.5px;color:#9a9a9a;text-transform:uppercase;letter-spacing:.5px;font-weight:bold}.tmf-live-h span:last-child{text-transform:none;letter-spacing:0;font-weight:normal;text-align:right}.tmf-live-say{font-size:12.5px;color:#fff}.tmf-live-muted{font-size:11px;color:#9a9a9a}.tmf-live-foot{font-size:10.5px;color:#9a9a9a;border-top:1px solid #333;padding-top:5px}.tmf-live-err{padding:7px 9px;border-radius:5px;background:#3a1f1f;border:1px solid #a34;color:#ffb3b3;font-size:12px}.tmf-live-steps{display:grid;grid-template-columns:auto minmax(0,1fr);gap:3px 10px;font-size:11.5px;margin:0}.tmf-live-steps dt{color:#9a9a9a;margin:0;font-weight:normal}.tmf-live-steps dd{margin:0;color:#e6e6e6;min-width:0}.tmf-live-steps b{color:#fff}.tmf-live-steps b.tmf-live-win{color:#b5d56a;font-size:13px}.tmf-live-tree{display:grid;gap:2px;font-size:11.5px}.tmf-live-tr{display:flex;flex-wrap:wrap;gap:2px 8px;align-items:baseline;padding:3px 6px;border-radius:4px}.tmf-live-tr .p{font-weight:bold;color:#fff;white-space:nowrap}.tmf-live-tr .w{flex:1 1 100%;color:#9a9a9a;font-size:10.5px}.tmf-live-tr .op{color:#9a9a9a;font-family:monospace}.tmf-live-tr--win{background:#2a2f1e;box-shadow:inset 3px 0 0 #8fd08f}.tmf-live-tr--win .p{color:#b5d56a}.tmf-live-lad-h{font-size:10.5px;color:#bbb;text-transform:uppercase;letter-spacing:.5px;font-weight:bold}.tmf-live-lad{border-top:1px solid #333;font-size:11.5px}.tmf-live-lr{display:flex;gap:8px;align-items:center;padding:2px 6px;border-bottom:1px solid #2c2c2c;min-height:22px;box-sizing:border-box}.tmf-live-lr .p{width:78px;text-align:right;flex:none}.tmf-live-lr .q{width:52px;text-align:right;color:#bbb;flex:none}.tmf-live-lr .n{flex:1;min-width:0;color:#9a9a9a;font-size:10.5px}.tmf-live-lr--dim .p,.tmf-live-lr--dim .q{color:#777}.tmf-live-lr--pick{background:#24301c}.tmf-live-lr--pick .n{color:#b5d56a}.tmf-live-lr--you{background:#3a3414;border:1px solid #c9a227;border-radius:5px;color:#fff}.tmf-live-lr--you .n{color:#fff}.tmf-live-lr--gap{color:#777;font-size:10.5px;justify-content:center;min-height:18px}`);
-    GM_addStyle(`.tmf-modal-cat-on{flex:0 0 30px;display:inline-flex;align-items:center;justify-content:center;background:none;border:0;padding:0;margin:0;height:auto;min-width:0;box-shadow:none;cursor:pointer}.tmf-modal-cat-on[aria-checked="true"] .tmf-help-track{background:#2e7d32}.tmf-modal-cat-on[aria-checked="true"] .tmf-help-track:after{transform:translateX(13px);background:#fff}.tmf-modal-cat-row--off input{opacity:.45}.tmf-modal-cat-head span:nth-child(1){flex:0 0 30px;text-align:center}.tmf-modal-cat-head span:nth-child(2){flex:1 1 38%}.tmf-modal-cat-head span:nth-child(3){flex:1 1 32%}.tmf-modal-cat-head span:nth-child(4){flex:1 1 30%}.tmf-modal-cat-head span:nth-child(5){flex:0 0 22px}`);
 
     GM_addStyle(`.tmf-ana-btn{cursor:pointer;display:inline-flex;align-items:center;justify-content:center;width:18px;color:#888;align-self:center;margin-right:2px;user-select:none;-webkit-user-select:none}.tmf-ana-btn:hover{color:#ddd}.tmf-ana-btn svg{display:block;width:14px;height:12px;fill:currentColor;pointer-events:none}.tmf-ana{display:none;position:fixed;top:60px;left:40px;width:540px;max-width:calc(100vw - 16px);max-height:calc(100vh - 24px);overflow:auto;background:#1f1f1f;color:#e6e6e6;border:1px solid #666;border-radius:10px;box-shadow:0 10px 40px rgba(0,0,0,.6);padding:12px 14px;box-sizing:border-box;font-size:12px;line-height:1.45;z-index:999999;text-align:left}.tmf-ana--open{display:block}@media (max-width:784px){.tmf-ana{top:auto!important;left:0!important;right:0;bottom:0;width:auto;max-width:none;max-height:85vh;border-radius:14px 14px 0 0;border-bottom:0}}.tmf-ana-head{display:flex;align-items:center;gap:10px;margin-bottom:8px;cursor:move;user-select:none;-webkit-user-select:none}@media (max-width:784px){.tmf-ana-head{cursor:default}}.tmf-ana-img{width:34px;height:34px;border-radius:4px;background:#2a2a2a;flex:none;object-fit:contain}.tmf-ana-title{display:flex;flex-direction:column;line-height:1.3;min-width:0}.tmf-ana-title b{font-size:15px;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.tmf-ana-title small{font-size:11px;color:#a5a5a5}.tmf-ana-hb{margin-left:auto;color:#bbb;font-size:16px;line-height:1;cursor:pointer;width:22px;text-align:center;flex:none}.tmf-ana-hb:hover{color:#fff}.tmf-ana-hb.tmf-ana-close{margin-left:0;font-size:22px}.tmf-ana-tabs{display:flex;gap:2px;border-bottom:1px solid #444;margin:0 0 8px}.tmf-ana-tab{padding:5px 12px;font-size:12px;color:#aaa;border-bottom:2px solid transparent;margin-bottom:-1px;cursor:pointer}.tmf-ana-tab:hover{color:#ddd}.tmf-ana-tab--on,.tmf-ana-tab--on:hover{color:#fff;border-bottom-color:#b5d56a}.tmf-ana-kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:6px 0 8px}@media (max-width:784px){.tmf-ana-kpis{grid-template-columns:1fr 1fr}}.tmf-ana-kpi{background:#262626;border:1px solid #3a3a3a;border-radius:6px;padding:6px 8px;min-width:0}.tmf-ana-kpi .l{font-size:9.5px;color:#9a9a9a;text-transform:uppercase;letter-spacing:.5px;white-space:nowrap}.tmf-ana-kpi .v{font-size:15px;font-weight:bold;color:#fff;margin:2px 0 1px;white-space:nowrap}.tmf-ana-kpi .d{font-size:10.5px;color:#aaa;line-height:1.3}.tmf-ana-legend{display:flex;gap:14px;flex-wrap:wrap;font-size:10.5px;color:#bbb;margin:2px 0 4px}.tmf-ana-legend span{display:inline-flex;align-items:center;gap:5px;white-space:nowrap}.tmf-ana-sw{display:inline-block;width:9px;height:9px;border-radius:2px}.tmf-ana-m{background:#3987e5}.tmf-ana-b{background:#d95926}.tmf-ana-src{width:16px;height:16px;border-radius:50%;font-size:9px;font-weight:bold;display:inline-grid;place-items:center;color:#fff;flex:none}.tmf-ana-src.tmf-ana-y{background:#c9a227;color:#1f1f1f;font-size:10px}.tmf-ana-sec{font-size:10.5px;color:#bbb;text-transform:uppercase;letter-spacing:.5px;margin:8px 0 4px;font-weight:bold}.tmf-ana-sec code{text-transform:none;letter-spacing:0}.tmf-ana-sec small{text-transform:none;letter-spacing:0;font-weight:normal;color:#8a8a8a;margin-left:4px}.tmf-ana-cols{display:grid;grid-template-columns:1fr 1fr;gap:16px}@media (max-width:784px){.tmf-ana-cols{grid-template-columns:1fr}}.tmf-ana-band{margin:0 0 7px}.tmf-ana-bl{font-size:11px;color:#ddd;margin-bottom:2px}.tmf-ana-brow{display:flex;align-items:center;gap:6px;height:14px;margin:1px 0}.tmf-ana-bar{display:block;height:8px;border-radius:0 4px 4px 0;flex:none;max-width:46%}.tmf-ana-bv{font-size:10.5px;color:#aaa;white-space:nowrap}.tmf-ana-lad{margin:4px 0 2px;border-top:1px solid #333}.tmf-ana-lr{display:flex;align-items:center;gap:8px;padding:3px 6px;border-bottom:1px solid #2c2c2c;font-size:12px;min-height:25px;box-sizing:border-box}.tmf-ana-lr[data-price]{cursor:pointer}.tmf-ana-lr[data-price]:hover{background:#2a2a2a}.tmf-ana-lr .p{width:82px;text-align:right;color:#f0f0f0;flex:none}.tmf-ana-lr .q{width:56px;color:#bbb;text-align:right;flex:none}.tmf-ana-lr .n{flex:1;color:#999;font-size:10.5px;min-width:0;line-height:1.3}.tmf-ana-lr--you{background:#3a3414;border:1px solid #c9a227;border-radius:6px;margin:2px 0;color:#fff}.tmf-ana-lr--you .p,.tmf-ana-lr--you .n{color:#fff}.tmf-ana-lr--dim .p,.tmf-ana-lr--dim .q{color:#777}.tmf-ana-lr--more{min-height:22px;border-bottom:0}.tmf-ana-lr--hidden{display:none}.tmf-ana--all .tmf-ana-lr--hidden{display:flex}.tmf-ana--all .tmf-ana-showall{display:none}.tmf-ana-tag{display:inline-block;font-size:9.5px;padding:1px 6px;border-radius:8px;background:#2e7d32;color:#fff;white-space:nowrap;line-height:1.4;margin-right:4px}.tmf-ana-tag--gray{background:#444;color:#ccc}.tmf-ana-tag--blue{background:#1c5cab}.tmf-ana-hint{font-size:10.5px;color:#8a8a8a;margin:4px 0 2px}.tmf-ana-verdict{margin:8px 0 2px;padding:7px 9px;background:#262626;border-left:3px solid #c9a227;border-radius:0 6px 6px 0;font-size:11.5px;line-height:1.45;color:#ddd}.tmf-ana code{background:#000;padding:1px 4px;border-radius:3px;color:#cfc;font-size:10.5px}.tmf-ana a{color:#9cc25e;text-decoration:underline;cursor:pointer}.tmf-ana-foot{display:flex;align-items:center;gap:8px;margin-top:10px;padding-top:8px;border-top:1px solid #333}.tmf-ana-foot:empty{display:none}.tmf-ana-sum{flex:1;font-size:10.5px;color:#9a9a9a;line-height:1.3}.tmf-ana-foot button{cursor:pointer;padding:6px 12px;border-radius:5px;border:1px solid #666;background:#333;color:#eee;font-size:12px;white-space:nowrap}.tmf-ana-foot button.tmf-ana-apply{background:#2e7d32;border-color:#2e7d32;color:#fff}.tmf-ana-trace{margin:4px 0 0;font-size:11.5px}.tmf-ana-tr{display:flex;align-items:baseline;gap:8px;padding:3px 6px;border-radius:4px;flex-wrap:wrap;line-height:1.35}.tmf-ana-tr .op{color:#9a9a9a;font-family:monospace;font-size:12px}.tmf-ana-tr .r{font-weight:bold;color:#fff;white-space:nowrap}.tmf-ana-tr .why{color:#9a9a9a;font-size:10.5px;flex:1 1 100%;padding-left:2px}.tmf-ana-tr--win{background:#2a2f1e;border-left:3px solid #8fd08f}.tmf-ana-tr--win .r{color:#b5d56a}.tmf-ana-note{margin-top:6px;font-size:10.5px;color:#8a8a8a;border-top:1px solid #333;padding-top:6px}.tmf-ana-alert{margin:0 0 6px;padding:8px 10px;border-radius:6px;background:#3a2f1f;border:1px solid #a7792a;color:#ffd9a0;font-size:11.5px;line-height:1.4}.tmf-ana-skel{display:inline-block;height:8px;border-radius:4px;background:#333;margin:3px 0}.tmf-ana-muted{color:#8a8a8a;font-size:11px;margin:4px 0}`);
 
@@ -97,13 +96,6 @@
     // Write every line for a player, not a developer: one short sentence, plain words,
     // what changed for them rather than what changed in the code.
     const CHANGELOG = [
-        {
-            version: "2.3.0",
-            date: "2026-11-05",
-            changes: [
-                'Settings: each category override has an on/off switch, so you can pause one without losing its formula.'
-            ]
-        },
         {
             version: "2.2.1",
             date: "2026-11-05",
@@ -221,23 +213,13 @@
     // Per-category quantity overrides live in their own map so the existing delta entries keep
     // their shape (a bare formula string) and upgrade without migration.
     const categoryQuantitiesKey = "silmaril-torn-market-filler-category-quantities";
-    // Category overrides switched off in settings. Their formulas stay saved; while off, those items
-    // use the defaults.
-    const categoryOffKey = "silmaril-torn-market-filler-category-off";
     const itemCategoryCacheKey = "silmaril-torn-market-filler-item-categories";
     // Item types are mostly immutable but Torn occasionally recategorises an item, so cached
     // categories are re-verified from each response and forcibly refreshed once past this TTL.
     const CATEGORY_TTL_MS = 14 * 24 * 60 * 60 * 1000;
     const SETTINGS_CATEGORIES = ["Melee","Primary","Secondary","Defensive","Temporary","Drug","Medical","Booster","Energy Drink","Alcohol","Candy","Enhancer","Clothing","Jewelry","Material","Flower","Plushie","Car","Supply Pack","Special","Collectible","Artifact","Tool","Other"];
-    // The stored maps hold every saved override, switched-off ones included. The two maps below
-    // leave the switched-off categories out, so everything that prices or fills a row only ever
-    // sees the categories that are on.
-    let storedCategoryDeltas = loadCategoryDeltas();
-    let storedCategoryQuantities = loadCategoryQuantities();
-    let categoryOff = loadCategoryOff();
-    let categoryDeltas = {};
-    let categoryQuantities = {};
-    applyCategoryOff();
+    let categoryDeltas = loadCategoryDeltas();
+    let categoryQuantities = loadCategoryQuantities();
     let itemCategoryCache = loadItemCategoryCache();
 
     // "Fill All" auto-fill mode state. One activation fills each favourite item once;
@@ -2376,7 +2358,7 @@
     }
 
     function saveCategoryDeltas(){
-        localStorage.setItem(categoryDeltasKey, JSON.stringify(storedCategoryDeltas));
+        localStorage.setItem(categoryDeltasKey, JSON.stringify(categoryDeltas));
     }
 
     function loadCategoryQuantities(){
@@ -2390,34 +2372,7 @@
     }
 
     function saveCategoryQuantities(){
-        localStorage.setItem(categoryQuantitiesKey, JSON.stringify(storedCategoryQuantities));
-    }
-
-    function loadCategoryOff(){
-        try {
-            let parsed = JSON.parse(localStorage.getItem(categoryOffKey) ?? "[]");
-            return new Set(Array.isArray(parsed) ? parsed.map(function(name){ return String(name).trim().toLowerCase(); }) : []);
-        } catch (error) {
-            return new Set();
-        }
-    }
-
-    function saveCategoryOff(){
-        localStorage.setItem(categoryOffKey, JSON.stringify([...categoryOff]));
-    }
-
-    function applyCategoryOff(){
-        let keepOn = function(stored){
-            let on = {};
-            Object.keys(stored).forEach(function(name){
-                if (!categoryOff.has(name)){
-                    on[name] = stored[name];
-                }
-            });
-            return on;
-        };
-        categoryDeltas = keepOn(storedCategoryDeltas);
-        categoryQuantities = keepOn(storedCategoryQuantities);
+        localStorage.setItem(categoryQuantitiesKey, JSON.stringify(categoryQuantities));
     }
 
     function loadItemCategoryCache(){
@@ -4083,9 +4038,6 @@
         let data = settingsHelp.data;
         let where = data != null ? escapeHtml(data.name) + (data.mine != null ? ' · stack ' + count(data.mine) : '') : (settingsHelp.loading ? 'reading…' : 'no prices yet');
         let html = '<div class="tmf-live-h"><span>Live check · ' + escapeHtml(helpFieldName(field)) + '</span><span>' + where + '</span></div>' + blank;
-        if (field.closest('.tmf-modal-cat-row--off') != null){
-            html += '<div class="tmf-live-muted">Switched off: these items use the default price and quantity until you switch it back on.</div>';
-        }
         let bad = false;
         if (kind === 'quantity'){
             if (!isKnownQuantityMode(text)){
@@ -4414,7 +4366,7 @@
                 '</div>' +
                 '<label class="tmf-modal-toggle"><input type="checkbox" class="tmf-modal-popup">Show lowest-prices popup</label>' +
                 '<label>Per-category overrides</label>' +
-                '<div class="tmf-modal-cat-head"><span title="On/off">On</span><span>Category</span><span>Price</span><span>Quantity</span><span></span></div>' +
+                '<div class="tmf-modal-cat-head"><span>Category</span><span>Price</span><span>Quantity</span><span></span></div>' +
                 '<div class="tmf-modal-cats"></div>' +
                 '<button type="button" class="tmf-modal-addcat">+ Add category</button>' +
                 '<button type="button" class="tmf-modal-resetcat" title="Forget cached item categories. Use if Torn recategorised an item and a wrong discount is being applied.">Reset learned categories</button>' +
@@ -4461,7 +4413,7 @@
         attachSettingsHelp(overlay);
     }
 
-    function addCategoryRow(name, formula, quantity, off = false){
+    function addCategoryRow(name, formula, quantity){
         const list = document.querySelector('.tmf-modal-cats');
         if (list == null){
             return;
@@ -4469,7 +4421,6 @@
         const row = document.createElement('div');
         row.className = 'tmf-modal-cat-row';
         row.innerHTML =
-            '<button type="button" class="tmf-modal-cat-on" role="switch"><span class="tmf-help-track"></span></button>' +
             '<input type="text" class="tmf-modal-cat-name" list="tmf-modal-cat-list" placeholder="Category">' +
             '<input type="text" class="tmf-modal-cat-formula" placeholder="-5%">' +
             '<input type="text" class="tmf-modal-cat-qty" placeholder="max-1">' +
@@ -4478,21 +4429,6 @@
         row.querySelector('.tmf-modal-cat-formula').value = formula;
         row.querySelector('.tmf-modal-cat-qty').value = quantity;
         row.querySelector('.tmf-modal-cat-del').addEventListener('click', function(){ row.remove(); settingsHelpRowRemoved(); });
-        // Off keeps the formula and quantity typed in, but the category's items use the defaults.
-        const toggle = row.querySelector('.tmf-modal-cat-on');
-        const setOn = function(on){
-            toggle.setAttribute('aria-checked', String(on));
-            toggle.title = on ? 'On: switch off to use the defaults for this category, keeping its formula' : 'Off: this category uses the defaults. Switch on to use its formula again';
-            row.classList.toggle('tmf-modal-cat-row--off', !on);
-        };
-        setOn(!off);
-        toggle.addEventListener('click', function(){
-            setOn(row.classList.contains('tmf-modal-cat-row--off'));
-            let overlay = row.closest('.tmf-settings-overlay');
-            if (overlay != null){
-                renderLiveCheck(overlay);
-            }
-        });
         list.appendChild(row);
     }
 
@@ -4515,8 +4451,8 @@
         list.innerHTML = '';
         // One row per category named by either map, so a category with only a quantity
         // override still shows up.
-        let names = [...new Set(Object.keys(storedCategoryDeltas).concat(Object.keys(storedCategoryQuantities)))];
-        names.forEach(function(key){ addCategoryRow(key, storedCategoryDeltas[key] ?? '', storedCategoryQuantities[key] ?? '', categoryOff.has(key)); });
+        let names = [...new Set(Object.keys(categoryDeltas).concat(Object.keys(categoryQuantities)))];
+        names.forEach(function(key){ addCategoryRow(key, categoryDeltas[key] ?? '', categoryQuantities[key] ?? ''); });
         overlay.classList.add('tmf-modal-overlay--open');
         startSettingsHelp(overlay);
     }
@@ -4723,20 +4659,10 @@
                 quantityMap[name] = quantity;
             }
         });
-        let offNames = new Set();
-        overlay.querySelectorAll('.tmf-modal-cat-row--off').forEach(function(row){
-            let name = row.querySelector('.tmf-modal-cat-name').value.trim().toLowerCase();
-            if (map[name] != null || quantityMap[name] != null){
-                offNames.add(name);
-            }
-        });
-        storedCategoryDeltas = map;
-        storedCategoryQuantities = quantityMap;
-        categoryOff = offNames;
-        applyCategoryOff();
+        categoryDeltas = map;
+        categoryQuantities = quantityMap;
         saveCategoryDeltas();
         saveCategoryQuantities();
-        saveCategoryOff();
         closeSettingsModal();
     }
 
