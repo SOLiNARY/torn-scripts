@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Market Filler
 // @namespace    https://github.com/SOLiNARY
-// @version      2.3.2
+// @version      2.3.3
 // @description  Adds a Fill button to every row when you list on the Item Market: one click sets the price and quantity. Price from listings (cheapest minus $1 by default), market value or live bazaars via weav3r.dev, with your own formula and min/max ranges. A popup shows the 5 cheapest listings; click one to undercut it. Quantity modes, per-category settings, per-item formulas from the ƒ by the star, favourites with Fill All. Open settings with the cog on the Fill All bar or by holding Fill for 2s. A small chart icon by the star opens item analytics: item-market and bazaar listings on one price ladder (or just one of them), what each keeps after the market fee, whether a bazaar would pay more, where your price lands, stack sizes, and what your formula picked.
 // @author       Silmaril [2665762]
 // @license      MIT License
@@ -19,7 +19,7 @@
     'use strict';
 
     // Keep in sync with @version above — it keys the "What's new" popup.
-    const SCRIPT_VERSION = "2.3.2";
+    const SCRIPT_VERSION = "2.3.3";
 
     const itemUrl = "https://api.torn.com/torn/{itemId}?selections=items&key={apiKey}&comment=MarketFiller";
     const marketUrl = "https://api.torn.com/v2/market/{itemId}?selections=itemMarket&key={apiKey}&comment=MarketFiller";
@@ -517,7 +517,7 @@
             '<div class="tmf-own-from"></div>' +
             '<div class="tmf-own-err" hidden></div>' +
             '<div class="tmf-own-acts"><button type="button" class="tmf-own-clear">Clear</button><button type="button" class="tmf-own-save">Save</button></div>';
-        box.querySelector('.tmf-own-t span').textContent = name != null ? name + '’s own formula' : 'This item’s own formula';
+        box.querySelector('.tmf-own-t span').textContent = name != null ? name + '\u2019s own formula' : 'This item\u2019s own formula';
         let priceInput = box.querySelector('.tmf-own-price');
         let qtyInput = box.querySelector('.tmf-own-qty');
         let inheritedPrice = getEffectiveDelta(category);
@@ -3561,7 +3561,7 @@
                 (others.length ? ' The other ' + (others.length === 1 ? 'branch' : 'branches') + ': ' + others.join(', ') + '.' : '') + '</div>';
         }
         html += '<div class="tmf-ana-sec">Formula · <code>' + escapeHtml(trace.setting) + '</code>' +
-            (itemOwnPrice(model.itemId) === trace.setting ? '<small>this item’s own</small>' : '') + '</div>';
+            (itemOwnPrice(model.itemId) === trace.setting ? '<small>this item\u2019s own</small>' : '') + '</div>';
         html += '<div class="tmf-ana-trace">' + renderTraceNode(trace.root, session, 0) + '</div>';
         return html;
     }

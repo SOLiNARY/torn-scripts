@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Bazaar Filler
 // @namespace    https://github.com/SOLiNARY
-// @version      2.3.2
+// @version      2.3.3
 // @description  Adds a Fill button to every item on your bazaar's Add and Manage pages: one click sets the price and quantity. Price from the item market (cheapest minus $1 by default), market value or live bazaars via weav3r.dev, with your own formula and min/max ranges. Quantity modes, per-category settings, per-item formulas from the ƒ by the star, favourites with Fill All, and a bubble that warns when your price is far below the competition. A small chart icon next to Fill opens item analytics: item-market and bazaar listings on one price ladder (or just one of them), what each keeps after the item-market fee, whether the item market or a bazaar pays more, where your price lands, stack sizes, and what your formula picked. Open settings with the cog on the Fill All bar or by holding Fill for 3s.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT License
@@ -20,7 +20,7 @@
     'use strict';
 
     // Keep in sync with @version above — it keys the "What's new" popup.
-    const SCRIPT_VERSION = "2.3.2";
+    const SCRIPT_VERSION = "2.3.3";
 
     const marketUrl = "https://api.torn.com/v2/market?id={itemId}&selections=itemMarket&key={apiKey}&comment=BazaarFiller";
     const itemUrl = "https://api.torn.com/torn/{itemId}?selections=items&key={apiKey}&comment=BazaarFiller";
@@ -1055,7 +1055,7 @@
             '<div class="tbf-own-from"></div>' +
             '<div class="tbf-own-err" hidden></div>' +
             '<div class="tbf-own-acts"><button type="button" class="tbf-own-clear">Clear</button><button type="button" class="tbf-own-save">Save</button></div>';
-        box.querySelector('.tbf-own-t span').textContent = name != null ? name + '’s own formula' : 'This item’s own formula';
+        box.querySelector('.tbf-own-t span').textContent = name != null ? name + '\u2019s own formula' : 'This item\u2019s own formula';
         let priceInput = box.querySelector('.tbf-own-price');
         let qtyInput = box.querySelector('.tbf-own-qty');
         let inheritedPrice = getEffectiveDelta(category);
@@ -3664,7 +3664,7 @@
                 (others.length ? ' The other ' + (others.length === 1 ? 'branch' : 'branches') + ': ' + others.join(', ') + '.' : '') + '</div>';
         }
         html += '<div class="tbf-ana-sec">Formula · <code>' + escapeHtml(trace.setting) + '</code>' +
-            (itemOwnPrice(model.itemId) === trace.setting ? '<small>this item’s own</small>' : '') + '</div>';
+            (itemOwnPrice(model.itemId) === trace.setting ? '<small>this item\u2019s own</small>' : '') + '</div>';
         html += '<div class="tbf-ana-trace">' + renderTraceNode(trace.root, session, 0) + '</div>';
         if (model.you != null && winner != null && Array.isArray(winner.listings) && winner.listings.length > 0){
             let percent = priceCoefficientPercent(model.you, winner.listings);
