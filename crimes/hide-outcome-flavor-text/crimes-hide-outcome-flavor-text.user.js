@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Crimes Hide Outcome Flavor Text
 // @namespace    https://github.com/SOLiNARY
-// @version      0.3.3
+// @version      0.3.4
 // @description  Allows to toggle (hide/show) visibility for crimes outcome flavor text After an update, a "What's new" popup lists what changed.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT License
@@ -22,7 +22,7 @@
     // shows one panel, not eight. The DOM is the channel because userscript sandboxes cannot see
     // each other's globals, and it needs no grants beyond what each script already asks for.
 
-    const SCRIPT_VERSION = "0.3.3";  // keep in sync with @version above
+    const SCRIPT_VERSION = "0.3.4";  // keep in sync with @version above
     const WHATS_NEW_NAME = "Crimes Hide Outcome Flavor Text";
     const WHATS_NEW_KEY = "silmaril-hide-outcome-flavor-text-last-seen-version";
     // Newest release first. Every release above the version last seen is shown at once, so
@@ -253,9 +253,32 @@
     const hideOutcomeFlavorTextFlagRaw = localStorage.getItem("silmaril-torn-hide-crimes-outcome-flavor-text") ?? true;
     let hideOutcomeFlavorTextFlag = hideOutcomeFlavorTextFlagRaw !== 'false';
  
+    // Torn re-hashes its class names on every build, so the story is matched by how its class
+    // starts. A bare [class*=story___] would also catch any "history___" element, hence the two
+    // forms. .outcome-content is Torn's own unhashed class, kept as a fallback ancestor. The rule
+    // is !important because Torn's own outcome styles can outrank a plain selector.
+    const OUTCOME_STORY_SELECTOR = [
+        '[class*="outcome___"] [class^="story___"]',
+        '[class*="outcome___"] [class*=" story___"]',
+        '.outcome-content [class^="story___"]',
+        '.outcome-content [class*=" story___"]'
+    ].join(',');
+    // One style element, rewritten on every toggle, rather than a new one stacked each time.
+    const outcomeStoryStyle = document.createElement('style');
+    outcomeStoryStyle.id = 'silmaril-hide-outcome-flavor-text-style';
+    (document.head ?? document.documentElement).appendChild(outcomeStoryStyle);
+ 
     toggleOutcomeFlavorTextVisibility();
  
-    $("div.crimes-app").on("click", "[class*=heading___]", function(event) {
+    // Plain DOM rather than the page's jQuery, which a userscript cannot count on. Listening on
+    // the document also works when Torn renders the crimes app after this script starts, and
+    // closest() toggles once per click however Torn nests its headings.
+    document.addEventListener('click', function(event) {
+        const target = event.target;
+        const heading = target != null && typeof target.closest === 'function' ? target.closest('[class*=heading___]') : null;
+        if (heading == null || heading.closest('div.crimes-app') == null){
+            return;
+        }
         hideOutcomeFlavorTextFlag = !hideOutcomeFlavorTextFlag;
         localStorage.setItem("silmaril-torn-hide-crimes-outcome-flavor-text", hideOutcomeFlavorTextFlag);
         showPopOutText(hideOutcomeFlavorTextFlag ? 'HIDING outcome flavor text!' : 'SHOWING outcome flavor text!', event.clientX, event.clientY, hideOutcomeFlavorTextFlag);
@@ -263,11 +286,9 @@
     });
  
     function toggleOutcomeFlavorTextVisibility(){
-        GM_addStyle(`
-            div[class*=outcome___] p[class*=story___] {
-                display: ${hideOutcomeFlavorTextFlag ? 'none' : 'block'};
-            }
-        `);
+        outcomeStoryStyle.textContent = hideOutcomeFlavorTextFlag
+            ? OUTCOME_STORY_SELECTOR + '{display:none !important}'
+            : '';
     }
  
     function showPopOutText(text, mouseX, mouseY, isSuccess = true, delay = 2000) {
