@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Bazaar Filler
 // @namespace    https://github.com/SOLiNARY
-// @version      3.1.0
+// @version      3.1.1
 // @description  Adds a Fill button to every item on your bazaar's Add and Manage pages: one click sets the price and quantity. Price from the item market (cheapest minus $1 by default), market value or live bazaars via weav3r.dev, with your own formula and min/max ranges. Quantity modes, per-category settings, per-item formulas from the ƒ by the star, favourites with Fill All, and a bubble that warns when your price is far below the competition. A small chart icon next to Fill opens item analytics: item-market and bazaar listings on one price ladder (or just one of them), what each keeps after the item-market fee, whether the item market or a bazaar pays more, where your price lands, stack sizes, and what your formula picked. Open settings with the cog on the Fill All bar or by holding Fill for 3s.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT License
@@ -20,7 +20,7 @@
     'use strict';
 
     // Keep in sync with @version above — it keys the "What's new" popup.
-    const SCRIPT_VERSION = "3.1.0";
+    const SCRIPT_VERSION = "3.1.1";
 
     const marketUrl = "https://api.torn.com/v2/market?id={itemId}&selections=itemMarket&key={apiKey}&comment=BazaarFiller";
     const itemUrl = "https://api.torn.com/torn/{itemId}?selections=items&key={apiKey}&comment=BazaarFiller";
@@ -35,7 +35,7 @@
     const weav3rAllUrl = "https://weav3r.dev/api/marketplace";
 
     // Which endpoint a formula's price comes from.
-    const SOURCE_ITEM_MARKET = "itemmarket";  // Torn live item market listings (default)
+    const SOURCE_ITEM_MARKET = "itemmarket";  // Torn item market listings, an hourly snapshot (default)
     const SOURCE_MARKET_VALUE = "items";      // Torn market value, i.e. [market]
     const SOURCE_BAZAAR = "bazaar";           // weav3r player bazaars, i.e. [bazaar...]
 
@@ -113,6 +113,13 @@
     // Write every line for a player, not a developer: one short sentence, plain words,
     // what changed for them rather than what changed in the code.
     const CHANGELOG = [
+        {
+            version: "3.1.1",
+            date: "2026-11-10",
+            changes: [
+                'Torn now updates item-market prices only about once an hour, so item analytics shows how old they are.'
+            ]
+        },
         {
             version: "3.1.0",
             date: "2026-11-05",
@@ -3008,6 +3015,15 @@
         return n + (suffixes[(v - 20) % 10] || suffixes[v] || suffixes[0]);
     }
 
+    // Since 2026-11-10 Torn serves item-market listings from a snapshot it refreshes about once
+    // an hour, and stamps the response with when it was taken. Milliseconds, or null without one.
+    function marketSnapshotTime(data){
+        let ts = data != null && data.itemmarket != null ? Number(data.itemmarket.cache_timestamp) : NaN;
+        return Number.isFinite(ts) && ts > 0 ? ts * 1000 : null;
+    }
+
+    const MARKET_SNAPSHOT_TITLE = 'Torn refreshes item-market listings about once an hour, so some of these may have sold since and newer ones may be missing.';
+
     function ago(ts){
         let seconds = Math.max(0, Math.round((Date.now() - ts) / 1000));
         if (seconds < 5){
@@ -3297,7 +3313,7 @@
                 }).filter(function(listing){
                     return Number.isFinite(listing.price) && Number.isFinite(listing.amount);
                 }).sort(function(a, b){ return a.price - b.price; });
-                model.market = { listings: listings };
+                model.market = { listings: listings, snapshot: marketSnapshotTime(marketData) };
                 let item = marketData.itemmarket.item ?? {};
                 model.name = model.name ?? item.name ?? null;
                 model.type = model.type ?? item.type ?? null;
@@ -3444,8 +3460,8 @@
             say = (best === 'm' ? 'The item market' : 'A bazaar') + ' leaves you <b>' + money(Math.abs(gap)) + ' more</b> each after the ' + feePercent() + '% item-market fee' +
                 (model.mine != null && model.mine > 1 ? ', ' + money(Math.abs(gap) * model.mine) + ' for ' + count(model.mine) : '') + '. ' +
                 (best === ANALYTICS_SOLD_ON ? 'You are already listing where it pays more.'
-                    : ANALYTICS_SOLD_ON === 'b' ? 'You are filling a bazaar, so these would pay more on the item market right now.'
-                    : 'You are on the item market, so these would pay more in a bazaar right now.');
+                    : ANALYTICS_SOLD_ON === 'b' ? 'You are filling a bazaar, so these would pay more on the item market.'
+                    : 'You are on the item market, so these would pay more in a bazaar.');
         }
         return '<div class="tbf-ana-where"><div class="tbf-ana-sec">Where to sell<small>the cheapest in each place, undercut by $1</small></div>' +
             line(places[0]) + line(places[1]) + '<div class="tbf-ana-ws">' + say + '</div></div>';
@@ -3512,12 +3528,18 @@
         return html;
     }
 
+    // When the popup read the item, and how old what it read is: Torn's item-market snapshot can
+    // be an hour or more older than the read itself.
     function renderFreshness(model){
         let parts = ['Read ' + ago(model.readAt)];
+        let snapshot = model.market != null ? model.market.snapshot : null;
+        if (snapshot != null){
+            parts.push('item-market listings as of ' + ago(snapshot));
+        }
         if (model.bazaar != null && model.bazaar.checked != null){
             parts.push('bazaar listings last checked ' + ago(model.bazaar.checked));
         }
-        return '<div class="tbf-ana-hint">' + escapeHtml(parts.join(' · ')) + '</div>';
+        return '<div class="tbf-ana-hint"' + (snapshot != null ? ' title="' + escapeHtml(MARKET_SNAPSHOT_TITLE) + '"' : '') + '>' + escapeHtml(parts.join(' · ')) + '</div>';
     }
 
     function renderBarRow(cls, width, text){
@@ -3716,7 +3738,8 @@
         let head = fee ? '<div class="tbf-ana-lr tbf-ana-lh"><span class="tbf-ana-src"></span><span class="p">Listed</span><span class="q">Qty</span><span class="k">You keep</span><span class="n"></span></div>' : '';
         html += renderLegend(filter) + '<div class="tbf-ana-lad' + (byKeep ? ' tbf-ana-lad--keep' : '') + '">' + head + shown.join('') +
             (more.length ? '<div class="tbf-ana-lr tbf-ana-lr--more"><span class="n">' + more.join(' · ') + '</span></div>' : '') + '</div>' +
-            '<div class="tbf-ana-hint">Click a listing to price $1 under it.' + (fee ? ' You keep is the listed price minus the ' + feePercent() + '% item-market fee; a bazaar takes no fee.' : '') + '</div>';
+            '<div class="tbf-ana-hint">Click a listing to price $1 under it.' + (fee ? ' You keep is the listed price minus the ' + feePercent() + '% item-market fee; a bazaar takes no fee.' : '') + '</div>' +
+            renderFreshness(model);
         return html;
     }
 
