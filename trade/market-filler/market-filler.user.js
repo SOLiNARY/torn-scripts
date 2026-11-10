@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Market Filler
 // @namespace    https://github.com/SOLiNARY
-// @version      3.1.0
+// @version      3.1.1
 // @description  Adds a Fill button to every row when you list on the Item Market: one click sets the price and quantity. Price from listings (cheapest minus $1 by default), market value or live bazaars via weav3r.dev, with your own formula and min/max ranges. A popup shows the 5 cheapest listings; click one to undercut it. Quantity modes, per-category settings, per-item formulas from the ƒ by the star, favourites with Fill All. Open settings with the cog on the Fill All bar or by holding Fill for 2s. A small chart icon by the star opens item analytics: item-market and bazaar listings on one price ladder (or just one of them), what each keeps after the market fee, whether a bazaar would pay more, where your price lands, stack sizes, and what your formula picked.
 // @author       Silmaril [2665762]
 // @license      MIT License
@@ -19,7 +19,7 @@
     'use strict';
 
     // Keep in sync with @version above — it keys the "What's new" popup.
-    const SCRIPT_VERSION = "3.1.0";
+    const SCRIPT_VERSION = "3.1.1";
 
     const itemUrl = "https://api.torn.com/torn/{itemId}?selections=items&key={apiKey}&comment=MarketFiller";
     const marketUrl = "https://api.torn.com/v2/market/{itemId}?selections=itemMarket&key={apiKey}&comment=MarketFiller";
@@ -35,7 +35,7 @@
     const weav3rAllUrl = "https://weav3r.dev/api/marketplace";
 
     // Which endpoint a formula's price comes from.
-    const SOURCE_ITEM_MARKET = "itemmarket";  // Torn live item market listings (default)
+    const SOURCE_ITEM_MARKET = "itemmarket";  // Torn item market listings, an hourly snapshot (default)
     const SOURCE_MARKET_VALUE = "items";      // Torn market value, i.e. [market]
     const SOURCE_BAZAAR = "bazaar";           // weav3r player bazaars, i.e. [bazaar...]
 
@@ -76,7 +76,7 @@
         style.innerHTML = s;
         document.head.appendChild(style);
     };
-    GM_addStyle(`#item-market-root [class^=addListingWrapper___] [class^=panels___] [class^=priceInputWrapper___]>.input-money-group>.input-money,#item-market-root [class^=viewListingWrapper___] [class^=priceInputWrapper___]>.input-money-group>.input-money{font-size:smaller!important;border-bottom-left-radius:0!important;border-top-left-radius:0!important}.silmaril-market-filler-popup{background:var(--tooltip-bg-color);padding:12px 18px;border-radius:8px;border:1px solid #888;box-shadow:0 4px 18px 0 #0009;color:var(--info-msg-font-color);z-index:99999;position:fixed;font-size:1em!important;line-height:1.5;pointer-events:auto}.silmaril-market-filler-popup-close{position:absolute;top:4px;right:7px;font-size:1em;color:#aaa;cursor:pointer}.silmaril-market-filler-popup-draggable{user-select:none;cursor:move}.silmaril-torn-market-filler-popup-price{cursor:pointer}.tmf-fav{cursor:pointer;display:inline-flex;align-items:center;justify-content:center;width:18px;font-size:16px;line-height:1;color:#888;align-self:center;margin-right:2px;user-select:none;-webkit-user-select:none}.tmf-fav.tmf-fav--on{color:gold;text-shadow:0 0 3px rgba(255,215,0,.7)}.tmf-fillall-bar{position:fixed;bottom:110px;right:16px;display:flex;align-items:center;gap:6px;padding:6px 8px;background:rgba(0,0,0,.55);border-radius:20px;z-index:999999;touch-action:none;transition:box-shadow .2s ease}.tmf-fillall-grip{cursor:grab;color:#bbb;font-size:14px;line-height:1;letter-spacing:-2px;min-width:12px;text-align:center;align-self:center;user-select:none;-webkit-user-select:none}.tmf-fillall-bar--dragging{cursor:grabbing;opacity:.92}.tmf-fillall-bar--dragging .tmf-fillall-grip{cursor:grabbing}.tmf-fillall-cog{cursor:pointer;flex:0 0 auto;display:flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:rgba(255,255,255,.12);color:#ddd;font-size:13px;line-height:1;user-select:none;-webkit-user-select:none}.tmf-fillall-cog:hover{background:rgba(255,255,255,.28);color:#fff}.tmf-fillall-bar--min{padding:5px 7px;gap:4px}.tmf-fillall-bar--min .tmf-fillall-btn,.tmf-fillall-bar--min .tmf-fillall-cog{display:none}.tmf-fillall-bar--min .tmf-fillall-grip{font-size:16px}.tmf-autofill-dot{display:none;width:10px;height:10px;border-radius:50%;background:gold;box-shadow:0 0 4px gold;animation:tmfPulse 1s ease-in-out infinite}.tmf-fillall-bar--active .tmf-autofill-dot{display:inline-block}.tmf-fillall-bar--active{box-shadow:0 0 10px 2px rgba(255,215,0,.75)}@keyframes tmfPulse{0%,100%{opacity:.3;transform:scale(.8)}50%{opacity:1;transform:scale(1.2)}}.tmf-viewport-border{display:none;position:fixed;top:0;right:0;bottom:0;left:0;border:3px solid gold;box-shadow:inset 0 0 12px rgba(255,215,0,.6);pointer-events:none;z-index:999998}.tmf-viewport-border--active{display:block}.tmf-toast{position:fixed;bottom:158px;right:16px;max-width:280px;background:rgba(0,0,0,.85);color:#fff;padding:10px 14px;border-radius:8px;border:1px solid gold;font-size:13px;line-height:1.4;z-index:1000000;opacity:0;visibility:hidden;transition:opacity .3s,visibility .3s}.tmf-toast--visible{opacity:1;visibility:visible}.tmf-fav.tmf-fav--off{color:#ff6b6b;text-shadow:none}`);
+    GM_addStyle(`#item-market-root [class^=addListingWrapper___] [class^=panels___] [class^=priceInputWrapper___]>.input-money-group>.input-money,#item-market-root [class^=viewListingWrapper___] [class^=priceInputWrapper___]>.input-money-group>.input-money{font-size:smaller!important;border-bottom-left-radius:0!important;border-top-left-radius:0!important}.silmaril-market-filler-popup{background:var(--tooltip-bg-color);padding:12px 18px;border-radius:8px;border:1px solid #888;box-shadow:0 4px 18px 0 #0009;color:var(--info-msg-font-color);z-index:99999;position:fixed;font-size:1em!important;line-height:1.5;pointer-events:auto}.silmaril-market-filler-popup-close{position:absolute;top:4px;right:7px;font-size:1em;color:#aaa;cursor:pointer}.silmaril-market-filler-popup-draggable{user-select:none;cursor:move}.silmaril-torn-market-filler-popup-price{cursor:pointer}.silmaril-torn-market-filler-popup-age{font-size:11px;line-height:1.3;opacity:.7;margin-top:6px}.tmf-fav{cursor:pointer;display:inline-flex;align-items:center;justify-content:center;width:18px;font-size:16px;line-height:1;color:#888;align-self:center;margin-right:2px;user-select:none;-webkit-user-select:none}.tmf-fav.tmf-fav--on{color:gold;text-shadow:0 0 3px rgba(255,215,0,.7)}.tmf-fillall-bar{position:fixed;bottom:110px;right:16px;display:flex;align-items:center;gap:6px;padding:6px 8px;background:rgba(0,0,0,.55);border-radius:20px;z-index:999999;touch-action:none;transition:box-shadow .2s ease}.tmf-fillall-grip{cursor:grab;color:#bbb;font-size:14px;line-height:1;letter-spacing:-2px;min-width:12px;text-align:center;align-self:center;user-select:none;-webkit-user-select:none}.tmf-fillall-bar--dragging{cursor:grabbing;opacity:.92}.tmf-fillall-bar--dragging .tmf-fillall-grip{cursor:grabbing}.tmf-fillall-cog{cursor:pointer;flex:0 0 auto;display:flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:rgba(255,255,255,.12);color:#ddd;font-size:13px;line-height:1;user-select:none;-webkit-user-select:none}.tmf-fillall-cog:hover{background:rgba(255,255,255,.28);color:#fff}.tmf-fillall-bar--min{padding:5px 7px;gap:4px}.tmf-fillall-bar--min .tmf-fillall-btn,.tmf-fillall-bar--min .tmf-fillall-cog{display:none}.tmf-fillall-bar--min .tmf-fillall-grip{font-size:16px}.tmf-autofill-dot{display:none;width:10px;height:10px;border-radius:50%;background:gold;box-shadow:0 0 4px gold;animation:tmfPulse 1s ease-in-out infinite}.tmf-fillall-bar--active .tmf-autofill-dot{display:inline-block}.tmf-fillall-bar--active{box-shadow:0 0 10px 2px rgba(255,215,0,.75)}@keyframes tmfPulse{0%,100%{opacity:.3;transform:scale(.8)}50%{opacity:1;transform:scale(1.2)}}.tmf-viewport-border{display:none;position:fixed;top:0;right:0;bottom:0;left:0;border:3px solid gold;box-shadow:inset 0 0 12px rgba(255,215,0,.6);pointer-events:none;z-index:999998}.tmf-viewport-border--active{display:block}.tmf-toast{position:fixed;bottom:158px;right:16px;max-width:280px;background:rgba(0,0,0,.85);color:#fff;padding:10px 14px;border-radius:8px;border:1px solid gold;font-size:13px;line-height:1.4;z-index:1000000;opacity:0;visibility:hidden;transition:opacity .3s,visibility .3s}.tmf-toast--visible{opacity:1;visibility:visible}.tmf-fav.tmf-fav--off{color:#ff6b6b;text-shadow:none}`);
 
     // The settings tabs, the Display tab's switches, and the controls those switches hide.
     GM_addStyle(`.input-money-group>.silmaril-market-filler-button+input.input-money{border-top-left-radius:0!important;border-bottom-left-radius:0!important}.input-money-group>.silmaril-market-filler-button{flex:none;align-self:flex-start}.tmf-sq-ico{position:absolute;left:50%;top:50%;width:11px;height:14px;margin:-7px 0 0 -5.5px;pointer-events:none;filter:drop-shadow(0 1px 0 #000)}.silmaril-market-filler-button:not([data-action-flag="clear"]) .tmf-sq-clear,.silmaril-market-filler-button[data-action-flag="clear"] .tmf-sq-fill{display:none}`);
@@ -104,6 +104,13 @@
     // Write every line for a player, not a developer: one short sentence, plain words,
     // what changed for them rather than what changed in the code.
     const CHANGELOG = [
+        {
+            version: "3.1.1",
+            date: "2026-11-10",
+            changes: [
+                'Torn now updates item-market prices only about once an hour, so item analytics and the cheapest-listings popup show how old they are.'
+            ]
+        },
         {
             version: "3.1.0",
             date: "2026-11-05",
@@ -2055,14 +2062,15 @@
 
         let action = target.getAttribute('data-action-flag');
         let mine = action == 'fill' && settingsUseMine() ? await readStackForMine(target, itemId) : null;
-        let pricing = await fetchPricingForItem(itemId, { mine: mine, session: newSession(itemId) });
+        let session = newSession(itemId);
+        let pricing = await fetchPricingForItem(itemId, { mine: mine, session: session });
         let prices = pricing.prices;
         let status = getPricesStatus(prices);
 
         if (showPopup) {
             const breakdown = GetPricesBreakdown(prices);
             // Thanks to Rosti [2840742] for the help with the prices popup component
-            showCustomFillPopup(target, breakdown);
+            showCustomFillPopup(target, breakdown + await marketAgeLine(session, pricing));
         }
         if (status === 'unmatched') {
             // A stack size or "above" limit left no listing to read: leave the row as it is.
@@ -2141,6 +2149,16 @@
 
     function hideAllFillPopups() {
         document.querySelector('.silmaril-market-filler-popup').style.display = 'none';
+    }
+
+    // Item-market listings in the popup come from Torn's hourly snapshot, so it says how old
+    // they are. Bazaar listings, a single price and an error message get no line.
+    async function marketAgeLine(session, pricing){
+        if (!Array.isArray(pricing.prices) || sourceOf(pricing.formula) !== SOURCE_ITEM_MARKET){
+            return '';
+        }
+        let snapshot = marketSnapshotTime(await sessionData(session, SOURCE_ITEM_MARKET));
+        return snapshot == null ? '' : '<div class="silmaril-torn-market-filler-popup-age" title="' + escapeHtml(MARKET_SNAPSHOT_TITLE) + '">Item market as of ' + ago(snapshot) + '</div>';
     }
 
     function showCustomFillPopup(targetElem, contentHTML) {
@@ -2864,6 +2882,15 @@
         return n + (suffixes[(v - 20) % 10] || suffixes[v] || suffixes[0]);
     }
 
+    // Since 2026-11-10 Torn serves item-market listings from a snapshot it refreshes about once
+    // an hour, and stamps the response with when it was taken. Milliseconds, or null without one.
+    function marketSnapshotTime(data){
+        let ts = data != null && data.itemmarket != null ? Number(data.itemmarket.cache_timestamp) : NaN;
+        return Number.isFinite(ts) && ts > 0 ? ts * 1000 : null;
+    }
+
+    const MARKET_SNAPSHOT_TITLE = 'Torn refreshes item-market listings about once an hour, so some of these may have sold since and newer ones may be missing.';
+
     function ago(ts){
         let seconds = Math.max(0, Math.round((Date.now() - ts) / 1000));
         if (seconds < 5){
@@ -3137,7 +3164,7 @@
                 }).filter(function(listing){
                     return Number.isFinite(listing.price) && Number.isFinite(listing.amount);
                 }).sort(function(a, b){ return a.price - b.price; });
-                model.market = { listings: listings };
+                model.market = { listings: listings, snapshot: marketSnapshotTime(marketData) };
                 let item = marketData.itemmarket.item ?? {};
                 model.name = model.name ?? item.name ?? null;
                 model.type = model.type ?? item.type ?? null;
@@ -3280,8 +3307,8 @@
             say = (best === 'm' ? 'The item market' : 'A bazaar') + ' leaves you <b>' + money(Math.abs(gap)) + ' more</b> each after the ' + feePercent() + '% item-market fee' +
                 (model.mine != null && model.mine > 1 ? ', ' + money(Math.abs(gap) * model.mine) + ' for ' + count(model.mine) : '') + '. ' +
                 (best === ANALYTICS_SOLD_ON ? 'You are already listing where it pays more.'
-                    : ANALYTICS_SOLD_ON === 'b' ? 'You are filling a bazaar, so these would pay more on the item market right now.'
-                    : 'You are on the item market, so these would pay more in a bazaar right now.');
+                    : ANALYTICS_SOLD_ON === 'b' ? 'You are filling a bazaar, so these would pay more on the item market.'
+                    : 'You are on the item market, so these would pay more in a bazaar.');
         }
         return '<div class="tmf-ana-where"><div class="tmf-ana-sec">Where to sell<small>the cheapest in each place, undercut by $1</small></div>' +
             line(places[0]) + line(places[1]) + '<div class="tmf-ana-ws">' + say + '</div></div>';
@@ -3348,12 +3375,18 @@
         return html;
     }
 
+    // When the popup read the item, and how old what it read is: Torn's item-market snapshot can
+    // be an hour or more older than the read itself.
     function renderFreshness(model){
         let parts = ['Read ' + ago(model.readAt)];
+        let snapshot = model.market != null ? model.market.snapshot : null;
+        if (snapshot != null){
+            parts.push('item-market listings as of ' + ago(snapshot));
+        }
         if (model.bazaar != null && model.bazaar.checked != null){
             parts.push('bazaar listings last checked ' + ago(model.bazaar.checked));
         }
-        return '<div class="tmf-ana-hint">' + escapeHtml(parts.join(' · ')) + '</div>';
+        return '<div class="tmf-ana-hint"' + (snapshot != null ? ' title="' + escapeHtml(MARKET_SNAPSHOT_TITLE) + '"' : '') + '>' + escapeHtml(parts.join(' · ')) + '</div>';
     }
 
     function renderBarRow(cls, width, text){
@@ -3552,7 +3585,8 @@
         let head = fee ? '<div class="tmf-ana-lr tmf-ana-lh"><span class="tmf-ana-src"></span><span class="p">Listed</span><span class="q">Qty</span><span class="k">You keep</span><span class="n"></span></div>' : '';
         html += renderLegend(filter) + '<div class="tmf-ana-lad' + (byKeep ? ' tmf-ana-lad--keep' : '') + '">' + head + shown.join('') +
             (more.length ? '<div class="tmf-ana-lr tmf-ana-lr--more"><span class="n">' + more.join(' · ') + '</span></div>' : '') + '</div>' +
-            '<div class="tmf-ana-hint">Click a listing to price $1 under it.' + (fee ? ' You keep is the listed price minus the ' + feePercent() + '% item-market fee; a bazaar takes no fee.' : '') + '</div>';
+            '<div class="tmf-ana-hint">Click a listing to price $1 under it.' + (fee ? ' You keep is the listed price minus the ' + feePercent() + '% item-market fee; a bazaar takes no fee.' : '') + '</div>' +
+            renderFreshness(model);
         return html;
     }
 
