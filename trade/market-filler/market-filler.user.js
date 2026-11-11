@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Torn Market Filler
 // @namespace    https://github.com/SOLiNARY
-// @version      3.1.1
-// @description  Adds a Fill button to every row when you list on the Item Market: one click sets the price and quantity. Price from listings (cheapest minus $1 by default), market value or live bazaars via weav3r.dev, with your own formula and min/max ranges. A popup shows the 5 cheapest listings; click one to undercut it. Quantity modes, per-category settings, per-item formulas from the ƒ by the star, favourites with Fill All. Open settings with the cog on the Fill All bar or by holding Fill for 2s. A small chart icon by the star opens item analytics: item-market and bazaar listings on one price ladder (or just one of them), what each keeps after the market fee, whether a bazaar would pay more, where your price lands, stack sizes, and what your formula picked.
+// @version      3.2.0
+// @description  Adds a Fill button to every row when you list on the Item Market: one click sets the price and quantity. Price from listings (cheapest minus $1 by default), market value or live bazaars via weav3r.dev, with your own formula, a set price like =1, and min/max ranges. A popup shows the 5 cheapest listings; click one to undercut it. Quantity modes, per-category settings, per-item formulas from the ƒ by the star, favourites with Fill All. Open settings with the cog on the Fill All bar or by holding Fill for 2s. A small chart icon by the star opens item analytics: item-market and bazaar listings on one price ladder (or just one of them), what each keeps after the market fee, whether a bazaar would pay more, where your price lands, stack sizes, and what your formula picked.
 // @author       Silmaril [2665762]
 // @license      MIT License
 // @match        https://www.torn.com/page.php?sid=ItemMarket*
@@ -19,7 +19,7 @@
     'use strict';
 
     // Keep in sync with @version above — it keys the "What's new" popup.
-    const SCRIPT_VERSION = "3.1.1";
+    const SCRIPT_VERSION = "3.2.0";
 
     const itemUrl = "https://api.torn.com/torn/{itemId}?selections=items&key={apiKey}&comment=MarketFiller";
     const marketUrl = "https://api.torn.com/v2/market/{itemId}?selections=itemMarket&key={apiKey}&comment=MarketFiller";
@@ -38,6 +38,7 @@
     const SOURCE_ITEM_MARKET = "itemmarket";  // Torn item market listings, an hourly snapshot (default)
     const SOURCE_MARKET_VALUE = "items";      // Torn market value, i.e. [market]
     const SOURCE_BAZAAR = "bazaar";           // weav3r player bazaars, i.e. [bazaar...]
+    const SOURCE_FIXED = "fixed";             // a set price, i.e. =1: nothing to read at all
 
     // weav3r serves its own cache with a 30-180s TTL, so re-asking sooner than this only burns
     // rate limit. The bulk snapshot covers every item at once and backs [bazaar:avg].
@@ -104,6 +105,14 @@
     // Write every line for a player, not a developer: one short sentence, plain words,
     // what changed for them rather than what changed in the code.
     const CHANGELOG = [
+        {
+            version: "3.2.0",
+            date: "2026-11-11",
+            changes: [
+                'Start a price with = to set it outright: <code>=1</code> lists for exactly $1, as the default, for a category or for one item.',
+                'A set price also works as a floor: <code>max(-1[0], =1000)</code> undercuts by $1 but never goes below $1,000.'
+            ]
+        },
         {
             version: "3.1.1",
             date: "2026-11-10",
@@ -640,7 +649,8 @@
         priceInput.placeholder = inheritedPrice;
         qtyInput.placeholder = inheritedQty;
         box.querySelector('.tmf-own-from').innerHTML = 'Blank uses ' + (fromCategory ? escapeHtml(category) : 'the default') + ': <code>' +
-            escapeHtml(inheritedPrice) + '</code> · <code>' + escapeHtml(inheritedQty) + '</code>' + (category == null ? ', or its category once it has been filled' : '') + '.';
+            escapeHtml(inheritedPrice) + '</code> · <code>' + escapeHtml(inheritedQty) + '</code>' + (category == null ? ', or its category once it has been filled' : '') + '.' +
+            ' A set price starts with =, so <code>=1</code> is exactly $1.';
         document.body.appendChild(box);
         ownFormulaBox = { box: box, icon: icon, itemId: itemId };
         placeOwnFormula();
@@ -767,8 +777,19 @@
     }
 
     function stripDeltaBracket(formula){
+        // A set price is the price itself, with no change to apply on top of it.
+        if (fixedPrice(formula) != null){
+            return '';
+        }
         // Trimmed, because Save accepts "-1 [0]" and the delta parser does not allow the space.
         return formula.indexOf('[') == -1 ? formula : formula.substring(0, formula.indexOf('[')).trim();
+    }
+
+    // "=1" is a set price: exactly $1, whatever anyone else charges. "=$1" reads the same. Null
+    // for every other formula. Save makes sure it is at least $1.
+    function fixedPrice(formula){
+        let match = String(formula ?? '').trim().match(/^=\s*\$?\s*(\d+)$/);
+        return match == null ? null : parseInt(match[1], 10);
     }
 
     // The index of the ) that closes the ( at `open`, or -1 when nothing does.
@@ -950,6 +971,9 @@
     }
 
     function sourceOf(formula){
+        if (fixedPrice(formula) != null){
+            return SOURCE_FIXED;
+        }
         let token = bracketToken(formula);
         if (token === 'market'){
             return SOURCE_MARKET_VALUE;
@@ -1369,12 +1393,13 @@
         return typeof apiKey === 'string' && apiKey.indexOf('PDA-APIKEY') === -1 && apiKey.length === 16;
     }
 
-    // A bazaar-only setup never calls Torn, so it must never be asked for a key. Any other
-    // source among the active formulas — including the bare default — still needs one.
+    // A bazaar-only setup never calls Torn, so it must never be asked for a key, and nor does a
+    // set price. Any other source among the active formulas — including the bare default —
+    // still needs one.
     function needsTornApiKey(){
         return [priceDeltaRaw].concat(Object.values(categoryDeltas), itemOwnPrices()).some(function(setting){
             return formulaBranches(setting).some(function(branch){
-                return sourcesOf(branch).some(function(source){ return source !== SOURCE_BAZAAR; });
+                return sourcesOf(branch).some(function(source){ return source !== SOURCE_BAZAAR && source !== SOURCE_FIXED; });
             });
         });
     }
@@ -1428,6 +1453,10 @@
     }
 
     function fetchSource(source, formula, itemId){
+        // A set price reads nothing, so it costs no call.
+        if (source === SOURCE_FIXED){
+            return Promise.resolve({});
+        }
         if (source === SOURCE_BAZAAR){
             return fetchBazaarData(formula, itemId);
         }
@@ -1463,6 +1492,9 @@
     // listings array. Returns null when a bazaar source has nothing usable, which tells the
     // caller to fall back to the item market.
     function parsePrices(data, itemId, source, formula){
+        if (source === SOURCE_FIXED){
+            return {"price": fixedPrice(formula), "amount": 1};
+        }
         if (source === SOURCE_MARKET_VALUE){
             return {"price": data.items[itemId].market_value, "amount": 1};
         }
@@ -2068,7 +2100,10 @@
         let status = getPricesStatus(prices);
 
         if (showPopup) {
-            const breakdown = GetPricesBreakdown(prices);
+            // A set price read no listings, so there are none to show or click.
+            const breakdown = status === 'ok' && sourceOf(pricing.formula) === SOURCE_FIXED
+                ? money(prices.price) + ' is a set price, so no listings were read.'
+                : GetPricesBreakdown(prices);
             // Thanks to Rosti [2840742] for the help with the prices popup component
             showCustomFillPopup(target, breakdown + await marketAgeLine(session, pricing));
         }
@@ -3609,6 +3644,9 @@
         if (detail.unmatched != null){
             return capitalise(detail.unmatched);
         }
+        if (detail.source === SOURCE_FIXED){
+            return 'a set price, whatever the listings say';
+        }
         if (detail.nothing || detail.basis == null){
             return 'no usable bazaar price, so this branch sat out';
         }
@@ -3887,8 +3925,9 @@
         let cheapest = '-1' + HELP_CHEAPEST;
         return [
             { name: 'Change', kind: 'price', rows: [
-                ['-1', '$1 less'], ['-5%', '5% less'], ['+10%', '10% more'], ['[0]', 'nothing in front: the price as it is']
-            ], note: 'With no brackets, the change applies to the cheapest item-market listing.' },
+                ['-1', '$1 less'], ['-5%', '5% less'], ['+10%', '10% more'], ['[0]', 'nothing in front: the price as it is'],
+                ['=1', 'a set price: exactly $1, whatever others charge']
+            ], note: 'With no brackets, the change applies to the cheapest item-market listing. A plain 1 means $1 more than it; =1 means $1.' },
             { name: 'Start from', kind: 'price', rows: [
                 ['-1[0]', 'cheapest listing'], ['-1[1]', '2nd cheapest. Counting starts at 0'], ['-1[14]', '15th cheapest'],
                 ['-1[median]', 'middle price, by unit'], ['[market]', "Torn's market value"],
@@ -3904,7 +3943,8 @@
                 ['-1[bazaar] | ' + cheapest, 'the higher of the two, so the second is a floor'],
                 ['max(-1[bazaar], ' + cheapest + ')', 'the same as |'],
                 ['min(-1[bazaar], ' + cheapest + ')', 'the lower of the two: undercut whichever is cheapest'],
-                ['min(max(' + cheapest + ', +10%[market]), -1[14])', 'keep the price between a floor and a ceiling']
+                ['min(max(' + cheapest + ', +10%[market]), -1[14])', 'keep the price between a floor and a ceiling'],
+                ['max(' + cheapest + ', =1000)', 'never below $1,000']
             ], note: 'Put min() and max() inside each other as deep as you need.' },
             { name: 'Quantity', kind: 'quantity', rows: [
                 ['max', 'all of them'], ['max-1', 'keep one back'], ['max-3', 'keep three back'], ['1', 'always list one'], ['skip', 'never list']
@@ -3964,8 +4004,8 @@
     function helpParts(formula){
         let source = sourceOf(formula);
         let selector = listingSelector(formula);
-        let scalar = source === SOURCE_MARKET_VALUE ? 'market' : (source === SOURCE_BAZAAR && selector.kind === 'avg' ? 'avg' : null);
-        return { kind: 'formula', formula: formula, source: source, sel: selector, delta: stripDeltaBracket(formula), limitFormula: aboveLimit(formula), scalar: scalar, price: null };
+        let scalar = source === SOURCE_FIXED ? 'fixed' : source === SOURCE_MARKET_VALUE ? 'market' : (source === SOURCE_BAZAAR && selector.kind === 'avg' ? 'avg' : null);
+        return { kind: 'formula', formula: formula, source: source, sel: selector, delta: stripDeltaBracket(formula), limitFormula: aboveLimit(formula), scalar: scalar, fixed: fixedPrice(formula), price: null };
     }
 
     function helpSourceWord(source){
@@ -3999,6 +4039,9 @@
     }
 
     function formulaInWords(parts){
+        if (parts.scalar === 'fixed'){
+            return 'a set price of ' + money(parts.fixed);
+        }
         let noun;
         let tail = helpStackTail(parts);
         if (parts.scalar != null){
@@ -4082,6 +4125,10 @@
     // then does a bazaar with no listings fall back to the item market, as it does on a Fill.
     function liveBranch(formula, data, alone){
         let d = helpParts(formula);
+        if (d.scalar === 'fixed'){
+            d.price = d.fixed;
+            return d;
+        }
         if (d.scalar != null){
             d.base = d.scalar === 'market' ? data.value : data.average;
             if (d.base == null){
@@ -4241,6 +4288,11 @@
 
     function liveSteps(d, priced){
         let rows = [];
+        if (d.scalar === 'fixed'){
+            rows.push(['Look at', 'nothing: the price is set, whatever anyone else charges']);
+            rows.push(['Price', '<b class="tmf-live-win">' + money(d.fixed) + '</b>']);
+            return liveStepsHtml(rows);
+        }
         if (d.scalar != null){
             rows.push(['Start from', (d.scalar === 'market' ? 'Torn market value' : 'the bazaar average') + (priced ? ' <b>' + money(d.base) + '</b>' : '')]);
         } else {
@@ -4480,7 +4532,13 @@
                 bad = true;
                 html += '<div class="tmf-live-err">Can\'t save this yet: ' + escapeHtml(check.problem) + '</div>';
             } else {
-                html += liveExplain(check) + liveFoot(check);
+                html += liveExplain(check);
+                // A plain number reads as "that much more than the cheapest", which is not
+                // always what was meant.
+                if (/^\d+$/.test(text)){
+                    html += '<div class="tmf-live-muted">For exactly ' + money(Number(text)) + ', write <code>=' + escapeHtml(text) + '</code>.</div>';
+                }
+                html += liveFoot(check);
             }
         }
         field.classList.toggle('tmf-modal-invalid', bad);
@@ -4925,6 +4983,16 @@
     // A price formula is an optional discount ("-1", "+5", "-5%") followed by an optional
     // source in brackets. Either half may be left out; a bare source means "as it stands".
     function formulaProblem(branch){
+        let trimmed = branch.trim();
+        if (trimmed.charAt(0) === '='){
+            let fixed = fixedPrice(trimmed);
+            if (fixed == null){
+                return trimmed.indexOf('[') !== -1
+                    ? "a set price stands on its own, with nothing in [ ] after it. Write =1, not =1[0]."
+                    : "'" + trimmed + "' is not a set price. Write = and whole dollars, like =1 or =250000.";
+            }
+            return fixed >= 1 ? null : "a set price has to be at least $1.";
+        }
         let open = branch.indexOf('[');
         let delta = (open === -1 ? branch : branch.substring(0, open)).trim();
         if (delta !== '' && !/^[-+]?\d+(\.\d+)?%?$/.test(delta)){
@@ -4964,6 +5032,10 @@
         }
         if (depth > 0){
             return "min() and max() need a closing ).";
+        }
+        // "=1,000" would otherwise be read as =1 and a second formula, 000.
+        if (/=\s*\$?\s*\d{1,3}(,\d{3})+(?!\d)/.test(raw)){
+            return "write a set price without commas, like =1000. A comma separates formulas.";
         }
         return expressionProblem(raw);
     }
