@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Bazaar Filler
 // @namespace    https://github.com/SOLiNARY
-// @version      3.2.0
+// @version      3.2.1
 // @description  Adds a Fill button to every item on your bazaar's Add and Manage pages: one click sets the price and quantity. Price from the item market (cheapest minus $1 by default), market value or live bazaars via weav3r.dev, with your own formula, a set price like =1, and min/max ranges. Quantity modes, per-category settings, per-item formulas from the ƒ by the star, favourites with Fill All, and a bubble that warns when your price is far below the competition. A small chart icon next to Fill opens item analytics: item-market and bazaar listings on one price ladder (or just one of them), what each keeps after the item-market fee, whether the item market or a bazaar pays more, where your price lands, stack sizes, and what your formula picked. Open settings with the cog on the Fill All bar or by holding Fill for 3s.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT License
@@ -20,7 +20,7 @@
     'use strict';
 
     // Keep in sync with @version above — it keys the "What's new" popup.
-    const SCRIPT_VERSION = "3.2.0";
+    const SCRIPT_VERSION = "3.2.1";
 
     const marketUrl = "https://api.torn.com/v2/market?id={itemId}&selections=itemMarket&key={apiKey}&comment=BazaarFiller";
     const itemUrl = "https://api.torn.com/torn/{itemId}?selections=items&key={apiKey}&comment=BazaarFiller";
@@ -55,9 +55,25 @@
     // A Fill All run hits the same weav3r failure on every row; one notice a minute explains the
     // red bars without burying the page in toasts.
     const WEAV3R_NOTICE_THROTTLE_MS = 60 * 1000;
+    // Torn answers every error it knows about as JSON, but a reply can still come back empty,
+    // as a web page (Cloudflare), or not at all. Such a read is asked for again after each of
+    // these waits before the row gives up and says which of the three it was.
+    const TORN_RETRY_DELAYS_MS = [1000, 3000];
+    // The code of the Torn-shaped error a read becomes when Torn never gave a usable reply.
+    // Torn's own codes are 0 and up, and -1 is already this script's "something else failed".
+    const TORN_NO_REPLY = -2;
+    // Fill All meets the same dead API on every row; one notice a minute is enough.
+    const TORN_NOTICE_THROTTLE_MS = 60 * 1000;
+    // What the player can do, for each way a read failed.
+    const TORN_NO_REPLY_HINTS = {
+        empty: 'This comes from Torn, not your key or settings. Try again in a minute.',
+        page: 'Torn or its Cloudflare turned the request away. Try again in a minute.',
+        unreachable: 'Check your connection, and that no ad blocker or VPN blocks api.torn.com.'
+    };
     let weav3rItemCache = new Map();
     let weav3rAllCache = null;
     let lastWeav3rNoticeTs = 0;
+    let lastTornNoticeTs = 0;
     let priceDeltaRaw = localStorage.getItem("silmaril-torn-bazaar-filler-price-delta") ?? '-1';
     // How many units to list per item: "max" (all of them), "max-N" (keep N back), a fixed
     // number, or "skip"/"0" to never list. Defaults to "max" — the behaviour before this existed.
@@ -114,6 +130,14 @@
     // Write every line for a player, not a developer: one short sentence, plain words,
     // what changed for them rather than what changed in the code.
     const CHANGELOG = [
+        {
+            version: "3.2.1",
+            date: "2026-11-18",
+            changes: [
+                'When Torn&rsquo;s API does not answer properly, Fill now asks again, and if it still fails, a note says what happened.',
+                'Item analytics says what Torn sent back instead of &ldquo;Unexpected end of JSON input&rdquo;, and asks again when opened after a failed Fill.'
+            ]
+        },
         {
             version: "3.2.0",
             date: "2026-11-11",
@@ -2624,9 +2648,11 @@
         return session;
     }
 
+    // A session with a failed read is not handed on: whoever looks next asks Torn again rather
+    // than showing the same failure for the rest of the minute.
     function recentSession(itemId){
         let session = itemSessions.get(itemId);
-        return session != null && (Date.now() - session.ts) <= SESSION_TTL_MS ? session : null;
+        return session != null && !session.failedRead && (Date.now() - session.ts) <= SESSION_TTL_MS ? session : null;
     }
 
     // [bazaar:avg] is served from the bulk snapshot and every other bazaar read from the per-item
@@ -2641,7 +2667,13 @@
         }
         let key = readKey(source, formula);
         if (!session.reads.has(key)){
-            session.reads.set(key, fetchSource(source, formula, itemId));
+            let read = fetchSource(source, formula, itemId);
+            session.reads.set(key, read);
+            read.then(function(data){
+                if (data == null || data.error != null){
+                    session.failedRead = true;
+                }
+            }, function(){ session.failedRead = true; });
         }
         return session.reads.get(key);
     }
@@ -2654,7 +2686,63 @@
         if (source === SOURCE_BAZAAR){
             return fetchBazaarData(formula, itemId);
         }
-        return fetch(buildTornPriceUrl(source, itemId)).then(response => response.json());
+        return fetchTorn(buildTornPriceUrl(source, itemId));
+    }
+
+    // One Torn API read. Whatever Torn answers in JSON, its own errors included, goes back as it
+    // is. A reply that is empty, is not JSON, or never arrives is asked for again, with a
+    // timestamp so Torn's 30-second cache cannot hand back the same reply, and after the last try
+    // it becomes a Torn-shaped error that says which of the three it was. Without this the row
+    // only turned red and analytics showed the browser's own "Unexpected end of JSON input".
+    async function fetchTorn(url){
+        let failure = null;
+        for (let attempt = 0; attempt <= TORN_RETRY_DELAYS_MS.length; attempt++){
+            if (attempt > 0){
+                console.warn("[TornBazaarFiller] " + failure.text + ", asking again.");
+                await sleep(TORN_RETRY_DELAYS_MS[attempt - 1]);
+            }
+            let reply = await readTornReply(attempt === 0 ? url : url + "&timestamp=" + Math.floor(Date.now() / 1000));
+            if (reply.data != null){
+                return reply.data;
+            }
+            failure = reply;
+        }
+        return tornNoReply(failure, TORN_RETRY_DELAYS_MS.length + 1);
+    }
+
+    // One attempt: {data} for a JSON reply, otherwise {kind, text} saying what came back instead.
+    async function readTornReply(url){
+        let response;
+        let body;
+        try {
+            response = await fetch(url);
+            body = await response.text();
+        } catch (error) {
+            return { kind: 'unreachable', text: "Torn's API could not be reached (" + (error == null ? 'network error' : (error.message ?? String(error))) + ")" };
+        }
+        if (body.trim() === ''){
+            return { kind: 'empty', text: "Torn's API sent an empty reply (HTTP " + response.status + ")" };
+        }
+        try {
+            let data = JSON.parse(body);
+            if (data != null && typeof data === 'object'){
+                return { data: data };
+            }
+        } catch (error) {
+            // Not JSON: described below.
+        }
+        let what = body.trim().charAt(0) === '<' ? 'a web page' : 'a broken reply';
+        return { kind: 'page', text: "Torn's API sent " + what + " instead of prices (HTTP " + response.status + ")" };
+    }
+
+    function tornNoReply(failure, tries){
+        let text = failure.text + ", tried " + tries + " times";
+        console.error("[TornBazaarFiller] " + text);
+        if (Date.now() - lastTornNoticeTs >= TORN_NOTICE_THROTTLE_MS){
+            lastTornNoticeTs = Date.now();
+            showToast(text + '. ' + TORN_NO_REPLY_HINTS[failure.kind]);
+        }
+        return { error: { code: TORN_NO_REPLY, error: text, kind: failure.kind } };
     }
 
     function itemMarketPrice(data, formula, itemId, context){
@@ -3252,6 +3340,7 @@
         let session = analyticsSession ?? newSession(row.itemId);
         analyticsSession = session;
         try {
+            let failure = null;
             if (session.trace == null){
                 // A cold open prices the row exactly as Fill would, inputs untouched.
                 let mine = readRowStack(row);
@@ -3260,10 +3349,13 @@
                 session.category = pricing.category;
                 if (pricing.data.error == null){
                     await resolveFillPrice(pricing, row.itemId, { mine: mine, session: session });
+                } else {
+                    // The first read failed before the setting was ever applied.
+                    failure = describeError(pricing.data);
                 }
             }
             await readAllSources(session);
-            session.failure = null;
+            session.failure = failure;
         } catch (error) {
             console.error("[TornBazaarFiller] Analytics failed for item " + row.itemId + ":", error);
             session.failure = error == null ? 'unknown error' : (error.message ?? String(error));
@@ -3520,7 +3612,7 @@
 
     function renderOverview(model, session){
         let html = '';
-        if (session.failure != null){
+        if (session.failure != null && session.trace != null){
             html += renderAlert('Could not read everything: ' + escapeHtml(session.failure) + '.');
         }
         let unmatched = traceUnmatched(session);
