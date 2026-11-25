@@ -34,7 +34,7 @@
             version: "0.8.0",
             date: "2026-11-25",
             changes: [
-            'New: press a number key, 1 to 9, to switch to the loadout with that number on its button.',
+            'New: a number key, 1 to 9, does what the button with that number does: it switches to that loadout, or reloads the page if it is already on.',
             'The keys do nothing while you type in a box, and you can turn them off in the + settings window.'
             ]
         },
@@ -1242,8 +1242,9 @@ body:not(.dark-mode) .silmaril-ls-chips .silmaril-ls-active .silmaril-ls-num {
     }
 
     // ---- Number keys ------------------------------------------------------------------------
-    // Pressing 1-9 does what pressing the button with that number does. One key press sends at
-    // most one request, the same as a click, and a key held down does not send more. Only
+    // Pressing 1-9 does what pressing the button with that number does: it switches to that
+    // loadout, or reloads the page when it is already on. One key press sends at most one
+    // request, the same as a click, and a key held down does not send more. Only
     // loadouts that have a button respond, so the button is there to show how the switch went.
     const numberKeysStorageKey = "silmaril-loadout-switcher-number-keys";
     let numberKeysOn = readNumberKeysSetting();
@@ -1299,9 +1300,11 @@ body:not(.dark-mode) .silmaril-ls-chips .silmaril-ls-active .silmaril-ls-num {
         if (!button) return;
         event.preventDefault();
         if (event.repeat) return;
-        // A click on the loadout that is already on reloads the page. A key pressed twice by
-        // mistake should not, so here it does nothing.
-        if (button.classList.contains('silmaril-ls-active')) return;
+        // As with a click, the key of the loadout that is already on reloads the page.
+        if (button.classList.contains('silmaril-ls-active')) {
+            location.reload();
+            return;
+        }
         switchLoadout(button);
     }
 
