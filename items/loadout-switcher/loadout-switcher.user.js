@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Torn Loadout Switcher
 // @namespace    https://github.com/SOLiNARY
-// @version      0.7.2
-// @description  Adds customisable quick loadout change buttons on Items page. After an update, a "What's new" popup lists what changed.
+// @version      0.8.0
+// @description  Adds customisable quick loadout change buttons on Items page, and number keys 1-9 to switch with. After an update, a "What's new" popup lists what changed.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT
 // @match        https://www.torn.com/item.php*
@@ -22,7 +22,7 @@
     // shows one panel, not eight. The DOM is the channel because userscript sandboxes cannot see
     // each other's globals, and it needs no grants beyond what each script already asks for.
 
-    const SCRIPT_VERSION = "0.7.2";  // keep in sync with @version above
+    const SCRIPT_VERSION = "0.8.0";  // keep in sync with @version above
     const WHATS_NEW_NAME = "Loadout Switcher";
     const WHATS_NEW_KEY = "silmaril-loadout-switcher-last-seen-version";
     // Newest release first. Every release above the version last seen is shown at once, so
@@ -30,6 +30,14 @@
     // `silent: true` is left out of that and never opens the popup by itself; it is listed
     // only when the popup is opened from the menu. Leaving the flag off means false.
     const CHANGELOG = [
+        {
+            version: "0.8.0",
+            date: "2026-11-25",
+            changes: [
+            'New: a number key, 1 to 9, does what the button with that number does: it switches to that loadout, or reloads the page if it is already on.',
+            'The keys do nothing while you type in a box, and you can turn them off in the + settings window.'
+            ]
+        },
         {
             version: "0.7.2",
             date: "2026-10-20",
@@ -804,7 +812,8 @@ body:not(.dark-mode) .silmaril-ls-chips .silmaril-ls-active .silmaril-ls-num {
         settings.className = 'silmaril-ls-btn silmaril-ls-gear';
         settings.textContent = '+';
         settings.addEventListener('click', () => {
-            openSettings((chosen) => {
+            openSettings((chosen, numberKeys) => {
+                saveNumberKeysSetting(numberKeys);
                 selectedLoadouts = chosen.join(',');
                 localStorage.setItem("silmaril-loadout-switcher-selected-loadouts", selectedLoadouts);
                 selectedLoadoutsArray = chosen;
@@ -949,6 +958,20 @@ body:not(.dark-mode) .silmaril-ls-chips .silmaril-ls-active .silmaril-ls-num {
 #${SETTINGS_HOST_ID} .sls-unnamed {
     color: #777;
 }
+#${SETTINGS_HOST_ID} label.sls-option {
+    align-items: flex-start;
+    margin-top: 10px;
+    padding: 10px 6px 0 4px;
+    border-top: 1px solid #3a3a3a;
+}
+#${SETTINGS_HOST_ID} .sls-option input {
+    margin-top: 3px;
+}
+#${SETTINGS_HOST_ID} .sls-option-hint {
+    display: block;
+    color: #8a8a8a;
+    font-size: 12px;
+}
 #${SETTINGS_HOST_ID} .sls-actions {
     display: flex;
     justify-content: flex-end;
@@ -1072,6 +1095,21 @@ body:not(.dark-mode) .silmaril-ls-chips .silmaril-ls-active .silmaril-ls-num {
             document.addEventListener('pointercancel', end);
         }
 
+        const keysOption = document.createElement('label');
+        keysOption.className = 'sls-option';
+        const keysBox = document.createElement('input');
+        keysBox.type = 'checkbox';
+        keysBox.checked = numberKeysOn;
+        const keysText = document.createElement('span');
+        const keysName = document.createElement('span');
+        keysName.textContent = 'Number keys switch loadouts';
+        const keysHint = document.createElement('span');
+        keysHint.className = 'sls-option-hint';
+        keysHint.textContent = 'Press a button\u2019s number, 1 to 9, to switch to it. Ignored while you type in a box.';
+        keysText.append(keysName, keysHint);
+        keysOption.append(keysBox, keysText);
+        panel.appendChild(keysOption);
+
         const actions = document.createElement('div');
         actions.className = 'sls-actions';
         const cancel = document.createElement('button');
@@ -1101,7 +1139,7 @@ body:not(.dark-mode) .silmaril-ls-chips .silmaril-ls-active .silmaril-ls-num {
         save.addEventListener('click', () => {
             const chosen = [...list.querySelectorAll('input:checked')].map((box) => box.value);
             dismiss();
-            onSave(chosen);
+            onSave(chosen, keysBox.checked);
         });
 
         document.body.appendChild(host);
@@ -1138,6 +1176,12 @@ body:not(.dark-mode) .silmaril-ls-chips .silmaril-ls-active .silmaril-ls-num {
             location.reload();
             return;
         }
+        await switchLoadout(button);
+    }
+
+    // Shared by the buttons and the number keys, so a key press shows the same spinner, tick
+    // or red on its button as a click does.
+    async function switchLoadout(button) {
         if (button.classList.contains('disabled') || button.classList.contains('silmaril-ls-busy')) {
             return;
         }
@@ -1196,6 +1240,75 @@ body:not(.dark-mode) .silmaril-ls-chips .silmaril-ls-active .silmaril-ls-num {
         nameAtSwitch = headerName(titleEl);
         refreshActive(titleEl);
     }
+
+    // ---- Number keys ------------------------------------------------------------------------
+    // Pressing 1-9 does what pressing the button with that number does: it switches to that
+    // loadout, or reloads the page when it is already on. One key press sends at most one
+    // request, the same as a click, and a key held down does not send more. Only
+    // loadouts that have a button respond, so the button is there to show how the switch went.
+    const numberKeysStorageKey = "silmaril-loadout-switcher-number-keys";
+    let numberKeysOn = readNumberKeysSetting();
+
+    function readNumberKeysSetting() {
+        try {
+            return localStorage.getItem(numberKeysStorageKey) !== 'off';
+        } catch (e) {
+            return true;
+        }
+    }
+
+    function saveNumberKeysSetting(on) {
+        numberKeysOn = on;
+        try {
+            localStorage.setItem(numberKeysStorageKey, on ? 'on' : 'off');
+        } catch (e) { /* the choice then lasts until the page reloads */
+        }
+    }
+
+    // The loadout a key press stands for, or null. event.key covers the number row and the
+    // numpad with Num Lock on; event.code covers layouts such as AZERTY, whose number row types
+    // symbols unless Shift is held.
+    function loadoutFromKey(event) {
+        if (/^[1-9]$/.test(event.key)) return event.key;
+        const match = /^Digit([1-9])$/.exec(event.code || '');
+        return match ? match[1] : null;
+    }
+
+    // The composed path reaches inside shadow roots, where the event's own target would only
+    // name the host.
+    function isTyping(event) {
+        return [...event.composedPath(), document.activeElement].some((node) =>
+            node instanceof Element && (node.isContentEditable ||
+                node.closest('input, textarea, select, [role="textbox"], [contenteditable]:not([contenteditable="false"])') !== null));
+    }
+
+    // A popup on top - this script's settings, the What's new panel or one of Torn's own - has
+    // the player's attention, so a number pressed then is not meant for the bar beneath it.
+    function dialogOpen() {
+        return [...document.querySelectorAll('[aria-modal="true"], dialog[open]')]
+            .some((element) => element.getClientRects().length > 0);
+    }
+
+    function onNumberKey(event) {
+        if (!numberKeysOn || event.defaultPrevented || event.isComposing) return;
+        if (event.ctrlKey || event.altKey || event.metaKey || event.shiftKey ||
+            (event.getModifierState && event.getModifierState('AltGraph'))) return;
+        const loadout = loadoutFromKey(event);
+        if (loadout === null || isTyping(event) || dialogOpen()) return;
+        const button = [...document.querySelectorAll(`div.${containerClass} button[data-loadout-number="${loadout}"]`)]
+            .find(isRendered);
+        if (!button) return;
+        event.preventDefault();
+        if (event.repeat) return;
+        // As with a click, the key of the loadout that is already on reloads the page.
+        if (button.classList.contains('silmaril-ls-active')) {
+            location.reload();
+            return;
+        }
+        switchLoadout(button);
+    }
+
+    document.addEventListener('keydown', onNumberKey);
 
     // Returns Torn's error when the response body reports a failure, null otherwise. Bodies
     // that are not JSON objects count as success, so an unexpected response shape keeps
