@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Market Filler
 // @namespace    https://github.com/SOLiNARY
-// @version      3.2.1
+// @version      3.2.2
 // @description  Adds a Fill button to every row when you list on the Item Market: one click sets the price and quantity. Price from listings (cheapest minus $1 by default), market value or live bazaars via weav3r.dev, with your own formula, a set price like =1, and min/max ranges. A popup shows the 5 cheapest listings; click one to undercut it. Quantity modes, per-category settings, per-item formulas from the ƒ by the star, favourites with Fill All. Open settings with the cog on the Fill All bar or by holding Fill for 2s. A small chart icon by the star opens item analytics: item-market and bazaar listings on one price ladder (or just one of them), what each keeps after the market fee, whether a bazaar would pay more, where your price lands, stack sizes, and what your formula picked.
 // @author       Silmaril [2665762]
 // @license      MIT License
@@ -11,19 +11,23 @@
 // @run-at       document-idle
 // @grant        GM_addStyle
 // @grant        GM_registerMenuCommand
+// @grant        GM_getValue
+// @grant        GM_setValue
+// @grant        GM_deleteValue
 // @grant        GM_xmlhttpRequest
 // @connect      weav3r.dev
+// @connect      api.torn.com
 // ==/UserScript==
 
 (async function() {
     'use strict';
 
     // Keep in sync with @version above — it keys the "What's new" popup.
-    const SCRIPT_VERSION = "3.2.1";
+    const SCRIPT_VERSION = "3.2.2";
 
     const itemUrl = "https://api.torn.com/torn/{itemId}?selections=items&key={apiKey}&comment=MarketFiller";
-    const marketUrl = "https://api.torn.com/v2/market/{itemId}?selections=itemMarket&key={apiKey}&comment=MarketFiller";
-    const marketUrlV2 = "https://api.torn.com/v2/market?id={itemId}&selections=itemMarket&key={apiKey}&comment=MarketFiller";
+    const marketUrl = "https://api.torn.com/v2/market/{itemId}?selections=itemMarket&comment=MarketFiller";
+    const marketUrlV2 = "https://api.torn.com/v2/market?id={itemId}&selections=itemMarket&comment=MarketFiller";
     // weav3r.dev aggregates live player-bazaar listings. Public and needs no API key, but it is
     // a third-party host, and a request the Torn page issues itself has to satisfy both Torn's
     // Content-Security-Policy and weav3r's CORS headers — which is why a plain fetch to it never
@@ -80,7 +84,13 @@
     // How many units to list per item: "max" (all of them), "max-N" (keep N back), a fixed
     // number, or "skip"/"0" to never list. Defaults to "max" — the behaviour before this existed.
     let quantityModeRaw = localStorage.getItem("silmaril-torn-market-filler-quantity-mode") ?? 'max';
-    let apiKey = localStorage.getItem("silmaril-torn-bazaar-filler-apikey") ?? '###PDA-APIKEY###';
+    const legacyApiKeyName = 'silmaril-torn-bazaar-filler-apikey';
+    const pdaKeyDisabled = 'silmaril-torn-market-filler-disable-pda-key';
+    const pdaApiKey = '###PDA-APIKEY###';
+    // GMforPDA implements GM_setValue with the page's localStorage.
+    const isPda = validApiKey(pdaApiKey) || typeof PDA_httpGet === 'function' ||
+        (typeof GM_info !== 'undefined' && /GMforPDA/i.test(GM_info?.scriptHandler));
+    let apiKey = loadApiKey();
     try {
         GM_registerMenuCommand('Open Settings', openSettingsModal);
         GM_registerMenuCommand("What's new", function(){ openChangelogModal(CHANGELOG); });
@@ -122,6 +132,16 @@
     // Write every line for a player, not a developer: one short sentence, plain words,
     // what changed for them rather than what changed in the code.
     const CHANGELOG = [
+        {
+            version: "3.2.2",
+            date: "2026-11-27",
+            silent: true,
+            changes: [
+                'Your API key now stays in your script manager or in this tab, and you can forget it in Settings.',
+                'Fill leaves the row alone if the price or item in the reply is wrong.',
+                'When you fill two rows quickly, the price popup stays with the last row you clicked.'
+            ]
+        },
         {
             version: "3.2.1",
             date: "2026-11-18",
@@ -375,7 +395,7 @@
     const FILLALL_VIEWPORT_MARGIN_PX = 4;  // keep this gap from the edge when not snapped
     let fillAllState = loadFillAllState();
 
-    let recentFilledInput = null;
+    let popupRequest = 0;
     let popupOffsetX = parseFloat(localStorage.getItem("silmaril-torn-market-filler-popup-offset-x")) || 0;
     let popupOffsetY = parseFloat(localStorage.getItem("silmaril-torn-market-filler-popup-offset-y")) || 100;
     let isDragging = false;
@@ -1348,6 +1368,9 @@
         if (payload == null || payload.error != null){
             return weav3rError(0, payload == null ? "empty response" : String(payload.error));
         }
+        if (payload.item_id != null && String(payload.item_id) !== String(itemId)){
+            return weav3rError(0, 'unexpected item in the bazaar reply');
+        }
         weav3rItemCache.set(itemId, { ts: Date.now(), payload: payload });
         return payload;
     }
@@ -1402,7 +1425,7 @@
                 lastChecked: Number(listing.last_checked ?? 0)
             };
         }).filter(function(listing){
-            return listing.sponsored !== 1 && Number.isFinite(listing.price) && Number.isFinite(listing.amount) && listing.price >= floor;
+            return listing.sponsored !== 1 && Number.isSafeInteger(listing.price) && listing.price > 0 && Number.isSafeInteger(listing.amount) && listing.amount > 0 && listing.price >= floor;
         });
         let fresh = usable.filter(function(listing){
             return (Date.now() - listing.lastChecked * 1000) <= WEAV3R_STALE_LISTING_MS;
@@ -1414,8 +1437,40 @@
 
     // The PDA placeholder is not a key: an un-substituted '###PDA-APIKEY###' would only ever
     // earn a code-2 error from Torn.
+    function validApiKey(value){
+        return typeof value === 'string' && value.length === 16 && !value.includes('PDA-APIKEY');
+    }
+
     function hasUsableApiKey(){
-        return typeof apiKey === 'string' && apiKey.indexOf('PDA-APIKEY') === -1 && apiKey.length === 16;
+        return validApiKey(apiKey);
+    }
+
+    function loadApiKey(){
+        // Older releases shared this key through the page. Each manager script now has its own store.
+        const legacy = localStorage.getItem(legacyApiKeyName);
+        localStorage.removeItem(legacyApiKeyName);
+        try {
+            const stored = !isPda && typeof GM_getValue === 'function' ? GM_getValue('apiKey', '') : '';
+            if (validApiKey(stored)) return stored;
+            if (!isPda && validApiKey(legacy) && typeof GM_setValue === 'function') GM_setValue('apiKey', legacy);
+        } catch {
+            // Managers without private storage can still use the migrated key in this tab.
+        }
+        if (validApiKey(legacy)) return legacy;
+        return !localStorage.getItem(pdaKeyDisabled) && validApiKey(pdaApiKey) ? pdaApiKey : '';
+    }
+
+    function setApiKey(value){
+        apiKey = value;
+        if (value) localStorage.removeItem(pdaKeyDisabled);
+        else localStorage.setItem(pdaKeyDisabled, '1');
+        if (isPda) return;
+        try {
+            if (!value && typeof GM_deleteValue === 'function') GM_deleteValue('apiKey');
+            else if (typeof GM_setValue === 'function') GM_setValue('apiKey', value);
+        } catch {
+            // The choice still applies to this tab.
+        }
     }
 
     // A bazaar-only setup never calls Torn, so it must never be asked for a key, and nor does a
@@ -1485,7 +1540,19 @@
         return session.reads.get(key);
     }
 
-    function fetchSource(source, formula, itemId){
+    function validateMarketData(data, itemId){
+        if (data.error != null) return data;
+        const market = data.itemmarket;
+        if (!market?.item || String(market.item.id) !== String(itemId) || !Array.isArray(market.listings)){
+            return { error: { code: -1, error: 'Torn returned listings for an unexpected item.' } };
+        }
+        if (!market.listings.every(listing => Number.isSafeInteger(listing?.price) && listing.price > 0)){
+            return { error: { code: -1, error: 'Torn returned an invalid listing price.' } };
+        }
+        return data;
+    }
+
+    async function fetchSource(source, formula, itemId){
         // A set price reads nothing, so it costs no call.
         if (source === SOURCE_FIXED){
             return Promise.resolve({});
@@ -1493,7 +1560,12 @@
         if (source === SOURCE_BAZAAR){
             return fetchBazaarData(formula, itemId);
         }
-        return fetchTorn(buildTornPriceUrl(source, itemId));
+        const data = await fetchTorn(buildTornPriceUrl(source, itemId));
+        if (source === SOURCE_ITEM_MARKET) return validateMarketData(data, itemId);
+        if (!data.error && !data.items?.[itemId]){
+            return { error: { code: -1, error: 'Torn returned details for an unexpected item.' } };
+        }
+        return data;
     }
 
     // One Torn API read. Whatever Torn answers in JSON, its own errors included, goes back as it
@@ -1502,14 +1574,17 @@
     // it becomes a Torn-shaped error that says which of the three it was. Without this the row
     // only said "Failed!" and analytics the browser's own "Unexpected end of JSON input".
     async function fetchTorn(url){
+        const requestedKey = apiKey;
+        if (!validApiKey(requestedKey)) return { error: { code: 2, error: 'A Torn API key is required.' } };
         let failure = null;
         for (let attempt = 0; attempt <= TORN_RETRY_DELAYS_MS.length; attempt++){
             if (attempt > 0){
                 console.warn("[TornMarketFiller] " + failure.text + ", asking again.");
                 await sleep(TORN_RETRY_DELAYS_MS[attempt - 1]);
             }
-            let reply = await readTornReply(attempt === 0 ? url : url + "&timestamp=" + Math.floor(Date.now() / 1000));
+            let reply = await readTornReply(attempt === 0 ? url : url + "&timestamp=" + Math.floor(Date.now() / 1000), requestedKey);
             if (reply.data != null){
+                if (reply.data.error?.code === 2 && requestedKey === apiKey) setApiKey('');
                 return reply.data;
             }
             failure = reply;
@@ -1518,14 +1593,21 @@
     }
 
     // One attempt: {data} for a JSON reply, otherwise {kind, text} saying what came back instead.
-    async function readTornReply(url){
+    async function readTornReply(url, requestedKey){
         let response;
         let body;
         try {
-            response = await fetch(url);
-            body = await response.text();
+            if (url.startsWith('https://api.torn.com/v2/')){
+                response = await fetch(url, { headers: { Authorization: 'ApiKey ' + requestedKey } });
+                body = await response.text();
+            } else {
+                // The legacy items endpoint supplies the categories used by saved formulas.
+                // Send its query through the manager when available to keep it off the page.
+                response = await requestJson(url);
+                body = response.text;
+            }
         } catch (error) {
-            return { kind: 'unreachable', text: "Torn's API could not be reached (" + (error == null ? 'network error' : (error.message ?? String(error))) + ")" };
+            return { kind: 'unreachable', text: "Torn's API could not be reached (" + (error == null ? 'network error' : String(error.message ?? error).replaceAll(requestedKey, '[redacted]')) + ")" };
         }
         if (body.trim() === ''){
             return { kind: 'empty', text: "Torn's API sent an empty reply (HTTP " + response.status + ")" };
@@ -1560,8 +1642,6 @@
         }
         switch (data.error.code){
             case 2:
-                apiKey = null;
-                localStorage.removeItem("silmaril-torn-bazaar-filler-apikey");
                 console.error("[TornMarketFiller] Incorrect Api Key:", data);
                 return {"price": 'Wrong API key!', "amount": 0, "status": 'invalid-key'};
             case 5:
@@ -1589,26 +1669,20 @@
             return {"price": fixedPrice(formula), "amount": 1};
         }
         if (source === SOURCE_MARKET_VALUE){
-            return {"price": data.items[itemId].market_value, "amount": 1};
+            const value = data.items[itemId].market_value;
+            return Number.isSafeInteger(value) && value > 0 ? { price: value, amount: 1 }
+                : { price: 'No valid market value.', amount: 0, status: 'error' };
         }
         if (source === SOURCE_BAZAAR){
             if (bazaarSelector(formula).kind === 'avg'){
                 let average = Number(data.bazaar_average);
-                return data.bazaar_average == null || !Number.isFinite(average) ? null : {"price": average, "amount": 1};
+                return data.bazaar_average == null || !Number.isFinite(average) || average <= 0 ? null : {"price": average, "amount": 1};
             }
             let listings = normaliseBazaarListings(data);
             return listings.length > 0 ? listings : null;
         }
         if (data.itemmarket.listings.length === 0){
             return {"price": 'No listings!', "amount": 0, "status": 'error'};
-        }
-        if (data.itemmarket.listings[0].price == null){
-            console.warn("[TornMarketFiller] The API is temporarily disabled, please try again later");
-            return {"price": 'API is OFF!', "amount": 0, "status": 'error'};
-        }
-        // temporary hotfix to avoid wrong prices
-        if (data.itemmarket.item.id != itemId){
-            return {"price": 'API is BROKEN!', "amount": 0, "status": 'error'};
         }
         return data.itemmarket.listings;
     }
@@ -1795,7 +1869,7 @@
     function branchPrice(result){
         try {
             let price = GetPrice(result.prices, result.formula);
-            return typeof price === 'number' && isFinite(price) ? price : null;
+            return Number.isSafeInteger(price) && price > 0 ? price : null;
         } catch (error) {
             console.warn("[TornMarketFiller] Formula '" + result.formula + "' could not be applied:", error);
             return null;
@@ -1961,6 +2035,7 @@
         if (!isNaN(itemIdNum) && excluded.has(itemIdNum) && target.getAttribute('data-action-flag') == 'fill'){
             showToast("Heads up: this item is marked excluded (⊘). Filling it anyway because you clicked Fill.");
         }
+        if (target.getAttribute('data-action-flag') === 'fill' && !hasUsableApiKey()) checkApiKey();
         await performFill(target, itemId, true);
     }
 
@@ -2136,8 +2211,8 @@
     async function performFill(target, itemId, showPopup){
         let priceInputs = target.parentNode.querySelectorAll('input.input-money');
         const popup = showPopup ? document.querySelector('.silmaril-market-filler-popup') : null;
+        const request = popup ? ++popupRequest : null;
         if (popup) {
-            recentFilledInput = priceInputs;
             if (popupOffsetX === 0) {
                 const rect = target.getBoundingClientRect();
                 popupOffsetX = Math.max(10, rect.left - 300);
@@ -2200,9 +2275,10 @@
                 ? money(prices.price) + ' is a set price, so no listings were read.'
                 : GetPricesBreakdown(prices);
             // Thanks to Rosti [2840742] for the help with the prices popup component
-            showCustomFillPopup(target, breakdown + await marketAgeLine(session, pricing));
+            const age = await marketAgeLine(session, pricing);
+            if (request === popupRequest && target.isConnected) showCustomFillPopup(priceInputs, breakdown + age);
         }
-        if (status === 'unmatched') {
+        if (action === 'fill' && status === 'unmatched') {
             // A stack size or "above" limit left no listing to read: leave the row as it is.
             console.info("[TornMarketFiller] Item " + itemId + " left untouched: " + prices.why + ".");
             if (showPopup) {
@@ -2210,9 +2286,14 @@
             }
             return 'skipped';
         }
-        if (!showPopup && status !== 'ok') {
-            // Auto-fill: leave the row untouched so it can be retried or skipped.
+        if (action === 'fill' && status !== 'ok') {
+            if (showPopup && !showPricesPopup) showToast(String(prices.detail ?? prices.price));
             return status;
+        }
+        const price = action === 'fill' ? branchPrice(pricing) : '';
+        if (price === null) {
+            if (showPopup) showToast('Price left as it is: the formula produced an invalid price.');
+            return 'error';
         }
 
         // Quantity/checkbox handling only exists on the Add Items page. Your Items (view
@@ -2226,8 +2307,7 @@
             }
         }
 
-        let price = action == 'fill' ? GetPrice(prices, pricing.formula) : '';
-        switchActionFlag(target);
+        if (target.getAttribute('data-action-flag') === action) switchActionFlag(target);
         priceInputs.forEach(x => {x.value = price});
         priceInputs[0].dispatchEvent(new Event("input", {bubbles: true}));
         return status;
@@ -2291,13 +2371,15 @@
         return snapshot == null ? '' : '<div class="silmaril-torn-market-filler-popup-age" title="' + escapeHtml(MARKET_SNAPSHOT_TITLE) + '">Item market as of ' + ago(snapshot) + '</div>';
     }
 
-    function showCustomFillPopup(targetElem, contentHTML) {
+    function showCustomFillPopup(priceInputs, contentHTML) {
         const popup = document.querySelector('.silmaril-market-filler-popup');
         popup.querySelector('.silmaril-market-filler-popup-body').innerHTML = contentHTML;
         popup.querySelectorAll('.silmaril-torn-market-filler-popup-price').forEach(row => {
-            row.addEventListener('click', (e) => {
-                recentFilledInput.forEach(x => {x.value = parseInt(e.target.getAttribute('data-price')) - 1});
-                recentFilledInput[0].dispatchEvent(new Event("input", {bubbles: true}));
+            row.addEventListener('click', () => {
+                if (!priceInputs[0]?.isConnected) return;
+                const price = Math.max(1, Number(row.dataset.price) - 1);
+                priceInputs.forEach(input => { input.value = price; });
+                priceInputs[0].dispatchEvent(new Event("input", {bubbles: true}));
             });
         });
     }
@@ -4963,8 +5045,9 @@
                 '<label>Public API key</label>' +
                 '<div class="tmf-modal-key">' +
                     '<input type="password" class="tmf-modal-apikey" placeholder="16-character key" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">' +
-                    '<span class="tmf-modal-key-reveal" title="Show the key">Show</span>' +
+                    '<span class="tmf-modal-key-reveal" title="Show the entered key">Show</span>' +
                 '</div>' +
+                '<label class="tmf-modal-toggle"><input type="checkbox" class="tmf-modal-forget"> Forget current key on Save</label>' +
                 '<label>Per-category overrides</label>' +
                 '<div class="tmf-modal-cat-head"><span>Category</span><span>Price</span><span>Quantity</span><span></span></div>' +
                 '<div class="tmf-modal-cats"></div>' +
@@ -5005,14 +5088,13 @@
             btn.textContent = 'Cleared ✓';
             setTimeout(function(){ btn.textContent = 'Clear exclusions'; }, 1500);
         });
-        // The key is masked like a password so it cannot be read off a shared screen or a
-        // screenshot. "Show" is there for the times you do need to check it.
+        // Show only the replacement the player is currently typing.
         overlay.querySelector('.tmf-modal-key-reveal').addEventListener('click', function(event){
             const keyInput = overlay.querySelector('.tmf-modal-apikey');
             const hidden = keyInput.type === 'password';
             keyInput.type = hidden ? 'text' : 'password';
             event.target.textContent = hidden ? 'Hide' : 'Show';
-            event.target.title = hidden ? 'Hide the key' : 'Show the key';
+            event.target.title = hidden ? 'Hide the entered key' : 'Show the entered key';
         });
         overlay.querySelector('.tmf-modal-save').addEventListener('click', saveSettingsModal);
         attachSettingsHelp(overlay);
@@ -5047,12 +5129,15 @@
         overlay.querySelector('.tmf-modal-delta').value = priceDeltaRaw;
         overlay.querySelector('.tmf-modal-qty').value = quantityModeRaw;
         const keyInput = overlay.querySelector('.tmf-modal-apikey');
-        keyInput.value = (apiKey != null && apiKey.indexOf('PDA-APIKEY') === -1) ? apiKey : '';
+        keyInput.value = '';
+        keyInput.placeholder = hasUsableApiKey() ? 'Key set · type to replace' : '16-character key';
+        overlay.querySelector('.tmf-modal-forget').checked = false;
+        overlay.querySelector('.tmf-modal-forget').disabled = !hasUsableApiKey();
         // However the key was left last time, it is masked again on every open.
         keyInput.type = 'password';
         const keyReveal = overlay.querySelector('.tmf-modal-key-reveal');
         keyReveal.textContent = 'Show';
-        keyReveal.title = 'Show the key';
+        keyReveal.title = 'Show the entered key';
         overlay.querySelector('.tmf-modal-popup').checked = showPricesPopup;
         const list = overlay.querySelector('.tmf-modal-cats');
         list.innerHTML = '';
@@ -5067,6 +5152,7 @@
     function closeSettingsModal(){
         const overlay = document.querySelector('.tmf-settings-overlay');
         if (overlay != null){
+            overlay.querySelector('.tmf-modal-apikey').value = '';
             overlay.classList.remove('tmf-modal-overlay--open');
         }
     }
@@ -5273,8 +5359,9 @@
         localStorage.setItem("silmaril-torn-market-filler-quantity-mode", quantityModeRaw);
         let keyVal = overlay.querySelector('.tmf-modal-apikey').value.trim();
         if (keyVal.length === 16){
-            apiKey = keyVal;
-            localStorage.setItem("silmaril-torn-bazaar-filler-apikey", keyVal);
+            setApiKey(keyVal);
+        } else if (overlay.querySelector('.tmf-modal-forget').checked){
+            setApiKey('');
         }
         showPricesPopup = overlay.querySelector('.tmf-modal-popup').checked;
         localStorage.setItem('silmaril-torn-market-filler-show-prices-popup', showPricesPopup ? '1' : '0');
@@ -5367,8 +5454,7 @@
             // dialog is the one that ends up on screen when the script is being demonstrated.
             let userInput = prompt("Please enter a PUBLIC Api Key, it will be used to get current bazaar prices:", '');
             if (userInput !== null && userInput.length == 16) {
-                apiKey = userInput;
-                localStorage.setItem("silmaril-torn-bazaar-filler-apikey", userInput);
+                setApiKey(userInput);
             } else {
                 console.error("[TornMarketFiller] User cancelled the Api Key input.");
             }

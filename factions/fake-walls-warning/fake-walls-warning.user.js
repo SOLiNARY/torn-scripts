@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Fake Walls Warning
 // @namespace    https://github.com/SOLiNARY
-// @version      0.6.2
+// @version      0.6.3
 // @description  Shows warning label over a fake wall territory war. After an update, a "What's new" popup lists what changed.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT License
@@ -20,7 +20,7 @@
     // shows one panel, not eight. The DOM is the channel because userscript sandboxes cannot see
     // each other's globals, and it needs no grants beyond what each script already asks for.
 
-    const SCRIPT_VERSION = "0.6.2";  // keep in sync with @version above
+    const SCRIPT_VERSION = "0.6.3";  // keep in sync with @version above
     const WHATS_NEW_NAME = "Fake Walls Warning";
     const WHATS_NEW_KEY = "silmaril-fake-walls-warning-last-seen-version";
     // Newest release first. Every release above the version last seen is shown at once, so
@@ -28,6 +28,14 @@
     // `silent: true` is left out of that and never opens the popup by itself; it is listed
     // only when the popup is opened from the menu. Leaving the flag off means false.
     const CHANGELOG = [
+        {
+            version: "0.6.3",
+            date: "2026-11-27",
+            silent: true,
+            changes: [
+                'Wall labels now follow changes to the war list and faction announcement.'
+            ]
+        },
         {
             version: "0.6.2",
             date: "2026-10-20",
@@ -235,14 +243,13 @@
     style.innerHTML = s;
     document.head.appendChild(style);
 };
-    let factionIds;
  
     GM_addStyle(`
-li.warListItem___eE_Ve {
+li[class*="warListItem___"] {
   position: relative;
 }
  
-li.warListItem___eE_Ve div.status-wrap.fake-wall::after {
+li[class*="warListItem___"] div.status-wrap.fake-wall::after {
   content: "Fake Wall" !important;
   position: absolute !important;
   top: 0 !important;
@@ -261,7 +268,7 @@ li.warListItem___eE_Ve div.status-wrap.fake-wall::after {
   border-radius: 0px 5px 0px 0px;
 }
  
-li.warListItem___eE_Ve div.status-wrap.fake-wall::before {
+li[class*="warListItem___"] div.status-wrap.fake-wall::before {
     content: "";
     display: block;
     position: absolute;
@@ -273,7 +280,7 @@ li.warListItem___eE_Ve div.status-wrap.fake-wall::before {
     background-size: contain;
 }
  
-li.warListItem___eE_Ve div.status-wrap.real-wall::after {
+li[class*="warListItem___"] div.status-wrap.real-wall::after {
   content: "Join" !important;
   position: absolute !important;
   top: 0 !important;
@@ -286,7 +293,7 @@ li.warListItem___eE_Ve div.status-wrap.real-wall::after {
   border-radius: 0px 5px 0px 0px;
 }
  
-li.warListItem___eE_Ve div.status-wrap.real-wall::before {
+li[class*="warListItem___"] div.status-wrap.real-wall::before {
     content: "";
     display: block;
     position: absolute;
@@ -299,41 +306,39 @@ li.warListItem___eE_Ve div.status-wrap.real-wall::before {
 }
     `);
  
-    const targetElementSelector = '.f-war-list.war-new';
-    const observerOptions = { childList: true, subtree: true };
- 
-    const observerCallback = async function(mutationsList, observer) {
-        for (const mutation of mutationsList) {
-            if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
-                const targetElement = document.querySelector(targetElementSelector);
-                if (targetElement) {
-                    let territoryWars = mutation.target.querySelectorAll(".f-war-list.war-new div[class^='status-wrap territoryBox']");
-                    if (territoryWars.length > 0) {
-                        territoryWars.forEach(war => {
-                            getFactionIds();
-                            let opponentFactionId = war.querySelectorAll("div > div.name.title___gm45f > span.text.titleText___TTIBz > span:nth-child(1) > a")[0].href.substring(50);
- 
-                            if (factionIds.includes(opponentFactionId)){
-                                war.classList.add("fake-wall");
-                            } else {
-                                war.classList.add("real-wall");
-                            }
-                        });
-                        observer.disconnect();
-                    }
-                }
-            }
+    const warSelector = ".f-war-list.war-new div.status-wrap[class*='territoryBox']";
+    const sourceSelector = '.f-war-list.war-new, .announcement';
+
+    function updateWalls() {
+        const announcement = document.querySelector('#react-root .announcement > p > div:first-child');
+        const fakeIds = new Set((announcement?.textContent ?? '').split(',').map(id => id.trim()));
+        for (const war of document.querySelectorAll(warSelector)) {
+            const opponent = war.querySelector('div.name[class*="title___"] span[class*="titleText___"] > span:first-child > a[href]');
+            const factionId = opponent ? new URL(opponent.href, location.href).searchParams.get('ID') : null;
+            const identified = Boolean(announcement && factionId && /^\d+$/.test(factionId));
+            war.classList.toggle('fake-wall', identified && fakeIds.has(factionId));
+            war.classList.toggle('real-wall', identified && !fakeIds.has(factionId));
         }
-    };
- 
-    const observer = new MutationObserver(observerCallback);
-    observer.observe(document.documentElement, observerOptions);
- 
-    function getFactionIds(){
-        if (factionIds != null){
-            return;
-        }
-        factionIds = document.querySelectorAll("#react-root > div > div > div.announcement > p > div:nth-child(1)")[0].innerText.split(',').map(id => id.trim());
-        console.log(factionIds);
     }
+
+    let scheduled = false;
+    function scheduleUpdate(records) {
+        if (scheduled) return;
+        const relevant = records.some(record => {
+            const target = record.target.nodeType === 1 ? record.target : record.target.parentElement;
+            return target?.closest(sourceSelector) || [...record.addedNodes, ...record.removedNodes].some(node =>
+                node.nodeType === 1 && (node.matches(sourceSelector) || node.querySelector(sourceSelector)));
+        });
+        if (relevant) {
+            scheduled = true;
+            requestAnimationFrame(() => {
+                scheduled = false;
+                updateWalls();
+            });
+        }
+    }
+    new MutationObserver(scheduleUpdate).observe(document.documentElement, {
+        childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['href']
+    });
+    updateWalls();
 })();

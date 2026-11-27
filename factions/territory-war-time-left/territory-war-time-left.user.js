@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Territory War Time Left
 // @namespace    http://tampermonkey.net/
-// @version      0.4.2
+// @version      0.4.3
 // @description  Shows time left until territory is captured given the current or bestcase attackers & defenders count right underneath war timeout ticker. After an update, a "What's new" popup lists what changed.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT License
@@ -20,7 +20,7 @@
     // shows one panel, not eight. The DOM is the channel because userscript sandboxes cannot see
     // each other's globals, and it needs no grants beyond what each script already asks for.
 
-    const SCRIPT_VERSION = "0.4.2";  // keep in sync with @version above
+    const SCRIPT_VERSION = "0.4.3";  // keep in sync with @version above
     const WHATS_NEW_NAME = "Territory War Time Left";
     const WHATS_NEW_KEY = "silmaril-territory-war-time-left-last-seen-version";
     // Newest release first. Every release above the version last seen is shown at once, so
@@ -28,6 +28,14 @@
     // `silent: true` is left out of that and never opens the popup by itself; it is listed
     // only when the popup is opened from the menu. Leaving the flag off means false.
     const CHANGELOG = [
+        {
+            version: "0.4.3",
+            date: "2026-11-27",
+            silent: true,
+            changes: [
+                'War timers now follow the current list when you switch faction views.'
+            ]
+        },
         {
             version: "0.4.2",
             date: "2026-10-20",
@@ -229,98 +237,55 @@
     }
 
  
-    const targetElementSelector = '.f-war-list.war-new';
-    const observerOptions = { childList: true, subtree: true };
- 
-    const observerCallback = async function(mutationsList, observer) {
-        for (const mutation of mutationsList) {
-            if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
-                const targetElement = document.querySelector(targetElementSelector);
-                if (targetElement) {
-                    let territoryWars = mutation.target.querySelectorAll(".f-war-list.war-new div[class^='status-wrap territoryBox']");
-                    if (territoryWars.length > 0) {
-                        console.log('Target element found!');
-                        territoryWars.forEach(war => {
-                            war.querySelector('.info .faction-progress-wrap').style.paddingTop = '0px';
-                            let timeLeftElement = document.createElement('div');
-                            timeLeftElement.classList.add('time-left', 'timer');
-                            let timeLeftBestElement = document.createElement('div');
-                            timeLeftBestElement.classList.add('time-left-best', 'timer');
-                            war.querySelector('.info .faction-progress-wrap').append(timeLeftElement, timeLeftBestElement);
-                        });
-                        territoryWars.forEach(war => {
-                            let enemyCountDiv = war.querySelector('.info .member-count.enemy-count .count');
-                            let allyCountDiv = war.querySelector('.info .member-count.your-count .count');
- 
-                            renderTimeLeft(war);
- 
-                            // Set up a MutationObserver on the added child element
-                            const childObserver = new MutationObserver(function(childMutations) {
-                                childMutations.forEach(function(childMutation) {
-                                    if (childMutation.type === 'characterData') {
-                                        let territoryWar = childMutation.target.parentNode.parentNode.parentNode.parentNode;
-                                        renderTimeLeft(territoryWar);
-                                    }
-                                });
-                            });
- 
-                            setInterval(renderTimeLeft, 1000 + Math.floor(Math.random() * 10) + 1, war);
- 
-                            childObserver.observe(enemyCountDiv, { characterData: true, subtree: true });
-                            childObserver.observe(allyCountDiv, { characterData: true, subtree: true });
-                        });
-                        observer.disconnect();
-                    }
-                }
-            }
+    const warSelector = ".f-war-list.war-new div.status-wrap[class*='territoryBox']";
+    const unknownTime = '??:??:??:??';
+
+    function updateTimer(parent, className, label, value) {
+        let timer = parent.querySelector('.' + className);
+        if (!timer) {
+            timer = document.createElement('div');
+            timer.classList.add(className, 'timer');
+            parent.appendChild(timer);
         }
-    };
- 
-    const observer = new MutationObserver(observerCallback);
-    observer.observe(document.documentElement, observerOptions);
-    console.log('Observer started. Waiting for target element to appear...');
- 
-    function renderTimeLeft(war) {
-        let enemyCountDiv = war.querySelector('.info .member-count.enemy-count .count');
-        let allyCountDiv = war.querySelector('.info .member-count.your-count .count');
-        let enemyCount = Number(enemyCountDiv.innerText);
-        let allyCount = Number(allyCountDiv.innerText);
-        let isAllyAttack = war.querySelector('.info .member-count.your-count .count i').classList.contains('swords-icon');
-        let remainder = isAllyAttack ? allyCount - enemyCount : enemyCount - allyCount;
-        let timeLeft = '??:??:??:??';
-        let timeLeftBest = '??:??:??:??';
-        let scoreText = war.querySelector('.info .faction-progress-wrap .score').innerText;
-        let score = scoreText.replaceAll(',', '').split('/');
-        let pointsLeft = Number(score[1]) - Number(score[0]);
-        let maximumSlots = Number(score[1]) / 50000;
-        if (remainder > 0) {
-            let secondsUntilGoal = pointsLeft / remainder;
-            timeLeft = convertSecondsToDHMS(secondsUntilGoal);
+        if (timer.dataset.time === value) return;
+        if (timer.children.length !== value.length) {
+            const digits = Array.from(value, () => document.createElement('span'));
+            timer.replaceChildren(label, ...digits);
         }
-        timeLeftBest = convertSecondsToDHMS(pointsLeft / maximumSlots);
-        let timeLeftDiv = war.querySelector('.info .faction-progress-wrap .time-left');
-        let timeLeftBestDiv = war.querySelector('.info .faction-progress-wrap .time-left-best');
-        const timeLeftCharacters = timeLeft.split('');
-        const timeLeftBestCharacters = timeLeftBest.split('');
-        const timeLeftSpanArray = ['CURRENT '];
-        timeLeftCharacters.forEach(char => {
-            const span = document.createElement('span');
-            span.textContent = char;
-            timeLeftSpanArray.push(span);
-        });
-        timeLeftDiv.replaceChildren(...timeLeftSpanArray);
-        const timeLeftBestSpanArray = ['BESTCASE '];
-        timeLeftBestCharacters.forEach(char => {
-            const span = document.createElement('span');
-            span.textContent = char;
-            timeLeftBestSpanArray.push(span);
-        });
-        timeLeftBestDiv.replaceChildren(...timeLeftBestSpanArray);
+        for (let i = 0; i < value.length; i++) {
+            if (timer.children[i].textContent !== value[i]) timer.children[i].textContent = value[i];
+        }
+        timer.dataset.time = value;
     }
- 
+
+    function renderTimeLeft(war) {
+        const progress = war.querySelector('.info .faction-progress-wrap');
+        if (!progress) return;
+        const enemy = war.querySelector('.info .member-count.enemy-count .count');
+        const ally = war.querySelector('.info .member-count.your-count .count');
+        const icon = ally?.querySelector('i');
+        const score = progress.querySelector('.score')?.textContent.replaceAll(',', '').match(/(\d+)\s*\/\s*(\d+)/);
+        const enemyCount = Number(enemy?.innerText.trim() || NaN);
+        const allyCount = Number(ally?.innerText.trim() || NaN);
+        const difference = icon?.classList.contains('swords-icon') ? allyCount - enemyCount : enemyCount - allyCount;
+        const target = Number(score?.[2]);
+        const pointsLeft = Math.max(0, target - Number(score?.[1]));
+        const current = icon && difference > 0 ? convertSecondsToDHMS(pointsLeft / difference) : unknownTime;
+        const best = convertSecondsToDHMS(pointsLeft / (target / 50000));
+        if (progress.style.paddingTop !== '0px') progress.style.paddingTop = '0px';
+        updateTimer(progress, 'time-left', 'CURRENT ', current);
+        updateTimer(progress, 'time-left-best', 'BESTCASE ', best);
+    }
+
+    function refreshWars() {
+        document.querySelectorAll(warSelector).forEach(renderTimeLeft);
+    }
+    refreshWars();
+    setInterval(refreshWars, 1000);
+
     function convertSecondsToDHMS(seconds) {
-        if (seconds === Infinity){
-            return '??:??:??:??';
+        if (!Number.isFinite(seconds)){
+            return unknownTime;
         }
  
         const oneDay = 86400; // number of seconds in a day

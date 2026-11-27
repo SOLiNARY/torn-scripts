@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Crimes Rewards Value
 // @namespace    https://github.com/SOLiNARY
-// @version      0.6.6
+// @version      0.6.7
 // @description  Shows the market value of all crime rewards. After an update, a "What's new" popup lists what changed.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT License
@@ -10,6 +10,9 @@
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=torn.com
 // @grant        GM_addStyle
 // @grant        GM_registerMenuCommand
+// @grant        GM_getValue
+// @grant        GM_setValue
+// @grant        GM_deleteValue
 // @run-at       document-idle
 // ==/UserScript==
  
@@ -22,7 +25,7 @@
     // shows one panel, not eight. The DOM is the channel because userscript sandboxes cannot see
     // each other's globals, and it needs no grants beyond what each script already asks for.
 
-    const SCRIPT_VERSION = "0.6.6";  // keep in sync with @version above
+    const SCRIPT_VERSION = "0.6.7";  // keep in sync with @version above
     const WHATS_NEW_NAME = "Crimes Rewards Value";
     const WHATS_NEW_KEY = "silmaril-rewards-value-last-seen-version";
     // Newest release first. Every release above the version last seen is shown at once, so
@@ -30,6 +33,16 @@
     // `silent: true` is left out of that and never opens the popup by itself; it is listed
     // only when the popup is opened from the menu. Leaving the flag off means false.
     const CHANGELOG = [
+        {
+            version: "0.6.7",
+            date: "2026-11-27",
+            silent: true,
+            changes: [
+                "Rewards earned while item prices load now count toward your total.",
+                "Reward values keep working when the crimes page opens slowly or changes.",
+                "Compatible userscript managers now save your API key privately."
+            ]
+        },
         {
             version: "0.6.5",
             date: "2026-10-20",
@@ -231,14 +244,18 @@
     }
 
  
-    let db;
-    let apiKey = localStorage.getItem('silmaril-crimes-rewards-value-apikey');
-    let lastUpdatedDate = localStorage.getItem('silmaril-crimes-rewards-value-last-updated-date');
-    const marketValuesUrl = 'https://api.torn.com/torn/?selections=items&key={apiKey}';
-    const isTampermonkeyEnabled = typeof unsafeWindow !== 'undefined';
+    const keyName = 'silmaril-crimes-rewards-value-apikey';
+    const priceDateKey = 'silmaril-crimes-rewards-value-last-updated-date';
+    const storeName = 'itemMarketValuesStore';
+    // GMforPDA's GM value methods write to Torn's page storage.
+    const isPda = typeof PDA_httpGet === 'function' ||
+        (typeof GM_info !== 'undefined' && /GMforPDA/i.test(GM_info?.scriptHandler));
+    const privateStorage = !isPda && typeof GM_getValue === 'function' &&
+        typeof GM_setValue === 'function' && typeof GM_deleteValue === 'function';
+    let apiKey = loadApiKey();
     const numberPattern = /\/(\d+)\//;
     const rarityScores = { "Uncommon": 850, "Rare": 8_500, "Epic": 85_000, "Legendary": 850_000 };
- 
+
     const styles = `
 /* Torn's reward row has no room under the tile, so the value is a pill hung on the cell's
    bottom edge. Absolute, so it neither grows the cell nor joins Torn's stacked layout. */
@@ -322,7 +339,7 @@ span#silmaril-crimes-rewards-value-total {
 }
 `;
  
-    if (isTampermonkeyEnabled){
+    if (typeof GM_addStyle === 'function'){
         GM_addStyle(styles);
     } else {
         let style = document.createElement("style");
@@ -334,145 +351,202 @@ span#silmaril-crimes-rewards-value-total {
         document.head.appendChild(style);
     }
  
-    try {
-        GM_registerMenuCommand('Set Api Key', function() { checkApiKey(false); });
-    } catch (error) {
-        console.log('[TornCrimesRewardsValue] Tampermonkey not detected!');
-    }
- 
-    openDatabase();
- 
-    if (lastUpdatedDate !== getToday()) {
-        checkApiKey();
-        const requestUrl = marketValuesUrl.replace("{apiKey}", apiKey);
-        fetch(requestUrl)
-            .then(response => response.json())
-            .then(data => {
-            if (data.error != null){
-                if (data.error.code === 2){
-                    apiKey = null;
-                    localStorage.removeItem("silmaril-crimes-rewards-value-apikey");
-                    console.error("[TornCrimesRewardsValue] Incorrect Api Key:", data);
-                } else {
-                    // A rate limit or an API outage leaves the day unmarked, so the next page
-                    // load tries again instead of waiting until tomorrow.
-                    console.error("[TornCrimesRewardsValue] Error fetching market values:", data.error);
-                }
-                return;
-            }
-            putData(data.items);
-            localStorage.setItem("silmaril-crimes-rewards-value-last-updated-date", getToday());
-            lastUpdatedDate = getToday();
-        })
-            .catch(error => {
-            console.error("[TornCrimesRewardsValue] Error fetching data:", error);
-        });
-    }
-    else {
-        console.log('[TornCrimesRewardsValue] Database is up to date!');
-    }
- 
-    const targetNode = document.querySelector("div.crimes-app");
-    const observerConfig = { childList: true, subtree: true };
-    const observer = new MutationObserver(async (mutationsList, observer) => {
-        for (const mutation of mutationsList) {
-            let mutationTarget = mutation.target;
-            if (mutation.type === 'childList' && mutationTarget.className.includes('arrowButton___')) {
-                $("div[class*=currentCrime___]").on("click", "div[class*=topSection___] div[class*=crimeBanner___] div[class*=crimeSliderArrowButtons___] button[class*=arrowButton___]", function(){
-                    observer.disconnect();
-                    setTimeout(function(){
-                        observer.observe(targetNode, observerConfig);
-                    }, 800);
-                });
-            }
-            if (mutationTarget.className.includes('outcomePanel___') || mutationTarget.className.includes('outcomeWrapper___')) {
-                let outcomeDivs = mutationTarget.querySelectorAll('div[class*=outcome___]');
-                let outcomeDiv = outcomeDivs[outcomeDivs.length - 1];
-                if (outcomeDiv == null || outcomeDiv.hasAttribute('data-value-set')) {
-                    continue;
-                }
-                outcomeDiv.setAttribute('data-value-set', '');
-                let rewards = outcomeDiv.querySelectorAll('div[class*=itemCell___]');
-                let totalValue = 0;
-                if (rewards.length > 0) {
-                    const itemIds = [];
-                    rewards.forEach(reward => {
-                        const imageDiv = reward.querySelector('img[class*=image___]');
-                        if (imageDiv == null) {
-                            reward.setAttribute('data-unknown-item', '');
-                            return;
-                        }
-                        const itemId = getItemIdFromImage(imageDiv);
-                        itemIds.push(itemId);
-                    });
- 
-                    const itemsInfo = await getData(itemIds);
-                    // itemsInfo only has entries for rewards with an image, so it gets its own index.
-                    let infoIndex = 0;
- 
-                    rewards.forEach(async (reward) => {
-                        if (reward.hasAttribute('data-unknown-item')) {
-                            return;
-                        }
-                        const itemInfo = itemsInfo[infoIndex++];
-                        // The first number in the count, so "x2", "2" and "1,000" all read right; no number means 1.
-                        const countMatch = (reward.querySelector('span[class*=count___]')?.textContent ?? '').match(/\d[\d,]*/);
-                        const itemQuantity = countMatch ? parseInt(countMatch[0].replaceAll(',', ''), 10) : 1;
-                        const itemMarketValue = itemInfo?.marketValue;
-                        if (itemMarketValue == null) {
-                            return;
-                        }
-                        const itemMarketValueBlock = document.createElement("div");
-                        itemMarketValueBlock.className = "silmaril-crimes-rewards-value";
-                        let totalItemPrice;
-                        if (itemQuantity > 1 && itemMarketValue >= 0) {
-                            totalItemPrice = itemQuantity * itemMarketValue;
-                            totalValue += totalItemPrice;
-                            // Only the total fits in the pill; the price of one sits in its tooltip.
-                            itemMarketValueBlock.textContent = `$${totalItemPrice.toLocaleString()}`;
-                            itemMarketValueBlock.title = `${itemQuantity} x $${itemMarketValue.toLocaleString()}`;
-                        } else {
-                            totalItemPrice = itemMarketValue;
-                            totalValue += totalItemPrice;
-                            itemMarketValueBlock.textContent = itemMarketValue >= 0 ? `$${itemMarketValue.toLocaleString()}` : '???';
-                        }
-                        let rarityClassName = `rarity-${getRarity(totalItemPrice)}`;
- 
-                        reward.classList.add(rarityClassName, 'silmaril-crimes-rewards-cell');
-                        reward.appendChild(itemMarketValueBlock);
-                    });
-                    addToTotal(totalValue);
-                } else {
-                    let moneyGainedSpan = outcomeDiv.querySelector('[class*=reward___]');
-                    if (moneyGainedSpan != null && moneyGainedSpan.textContent.indexOf('$') == 0 && moneyGainedSpan.parentNode.parentNode.querySelector('p[class*=title___]').textContent == 'SUCCESS') {
-                        let moneyGained = Number(moneyGainedSpan.textContent.replace('$', ' ').replaceAll(',', ''));
-                        totalValue += moneyGained;
-                        addToTotal(totalValue);
-                    }
-                }
-                break;
-            }
-        }
+    const database = openDatabase().catch(error => {
+        console.error('[TornCrimesRewardsValue] Unable to open price cache', error);
+        return null;
     });
-    observer.observe(targetNode, observerConfig);
- 
-    function checkApiKey(checkExisting = true) {
-        const keyIsSet = apiKey !== null && apiKey.length == 16;
-        if (!checkExisting || !keyIsSet){
-            // The saved key is never put in the prompt: a browser prompt shows its contents in
-            // plain text, so anyone looking at the screen reads the key. Blank keeps the old one.
-            let userInput = prompt("Please enter a PUBLIC Api Key, it will be used to get today's item market values:" +
-                (keyIsSet ? "\n\nA key is already saved. Leave this blank to keep it." : ""), '');
-            let entered = userInput === null ? '' : userInput.trim();
-            if (entered.length == 16) {
-                apiKey = entered;
-                localStorage.setItem("silmaril-crimes-rewards-value-apikey", entered);
-            } else if (!(keyIsSet && entered === '')) {
-                console.error("[TornCrimesRewardsValue] User cancelled the Api Key input.");
+    let fetchedPrices = null;
+    let priceSync = refreshPrices();
+    if (typeof GM_registerMenuCommand === 'function') {
+        GM_registerMenuCommand('Set API key', () => {
+            const previous = apiKey;
+            promptForKey();
+            if (apiKey && apiKey !== previous) {
+                priceSync = refreshPrices(false);
+                activeRoot?.querySelectorAll(outcomeSelector).forEach(queueOutcome);
+            }
+        });
+        GM_registerMenuCommand('Clear saved API key', () => saveApiKey(null));
+    }
+
+    const outcomeSelector = 'div[class*="outcome___"]';
+    const working = new WeakSet();
+    const changedWhileWorking = new WeakSet();
+    const creditedItems = new WeakMap();
+    const seen = new WeakSet();
+    let switchingUntil = 0;
+    document.addEventListener('click', event => {
+        if (event.target.closest?.('.crimes-app [class*=crimeSliderArrowButtons___] button[class*=arrowButton___]')) {
+            switchingUntil = Date.now() + 800;
+        } else if (event.target.closest?.('.crimes-app .commit-button')) {
+            switchingUntil = 0;
+        }
+    }, true);
+    // Catch outcomes inside newly mounted or replaced roots and those assembled over several renders.
+    let activeRoot = null;
+    const observer = new MutationObserver(mutations => {
+        const changed = new Set();
+        for (const {target, addedNodes} of mutations) {
+            const element = target.nodeType === 1 ? target : target.parentElement;
+            const outcome = element?.closest(outcomeSelector);
+            if (outcome) changed.add(outcome);
+            for (const node of addedNodes) {
+                if (node.nodeType !== 1) continue;
+                if (node.matches(outcomeSelector)) changed.add(node);
+                else if (!outcome) node.querySelectorAll(outcomeSelector).forEach(item => changed.add(item));
+            }
+        }
+        changed.forEach(queueOutcome);
+    });
+    function queueOutcome(outcome) {
+        if (Date.now() < switchingUntil) seen.add(outcome);
+        else processOutcome(outcome).catch(error => console.error('[TornCrimesRewardsValue] Unable to value reward', error));
+    }
+    function attachRoot() {
+        if (activeRoot?.isConnected) return;
+        const root = document.querySelector('.crimes-app');
+        if (root === activeRoot) return;
+        observer.disconnect();
+        activeRoot = root;
+        if (root) {
+            observer.observe(root, {childList: true, subtree: true, characterData: true});
+            root.querySelectorAll(outcomeSelector).forEach(queueOutcome);
+        }
+    }
+    new MutationObserver(attachRoot).observe(document.documentElement, {childList: true, subtree: true});
+    attachRoot();
+
+    async function processOutcome(outcome) {
+        if (seen.has(outcome)) return;
+        if (working.has(outcome)) {
+            changedWhileWorking.add(outcome);
+            return;
+        }
+        working.add(outcome);
+        try {
+            const cells = [...outcome.querySelectorAll('div[class*=itemCell___]')];
+            let totalValue = 0;
+            if (cells.length) {
+                const items = cells.map(cell => {
+                    const image = cell.querySelector('img[class*=image___]');
+                    const id = image?.src.match(numberPattern)?.[1];
+                    const count = cell.querySelector('span[class*=count___]')?.textContent.match(/\d[\d,]*/);
+                    const quantity = count ? Number(count[0].replaceAll(',', '')) : 1;
+                    return {cell, id, quantity};
+                });
+                await priceSync;
+                const prices = await getPrices(items.map(item => item.id).filter(Boolean));
+                if (seen.has(outcome)) return;
+                const credited = creditedItems.get(outcome) ?? new Map();
+                creditedItems.set(outcome, credited);
+                const occurrences = new Map();
+                for (const {cell, id, quantity} of items) {
+                    const price = prices.get(id);
+                    if (price == null) continue;
+                    const ordinal = occurrences.get(id) ?? 0;
+                    occurrences.set(id, ordinal + 1);
+                    const key = id + '/' + ordinal;
+                    const value = price >= 0 ? price * quantity : 0;
+                    let pill = cell.querySelector('.silmaril-crimes-rewards-value');
+                    if (!pill) {
+                        pill = document.createElement('div');
+                        pill.className = 'silmaril-crimes-rewards-value';
+                        cell.appendChild(pill);
+                    }
+                    const label = price >= 0 ? '$' + value.toLocaleString() : '???';
+                    if (pill.textContent !== label) pill.textContent = label;
+                    pill.title = price >= 0 && quantity > 1 ? quantity + ' x $' + price.toLocaleString() : '';
+                    cell.classList.add('rarity-' + getRarity(value), 'silmaril-crimes-rewards-cell');
+                    totalValue += value - (credited.get(key) ?? 0);
+                    credited.set(key, value);
+                }
+                if (!totalValue) return;
+            } else {
+                const money = outcome.querySelector('[class*=reward___]')?.textContent.trim();
+                if (!money || !/^\$[\d,]+$/.test(money) || outcome.querySelector('p[class*=title___]')?.textContent !== 'SUCCESS') return;
+                totalValue = Number(money.slice(1).replaceAll(',', ''));
+                seen.add(outcome);
+            }
+            addToTotal(totalValue);
+        } finally {
+            working.delete(outcome);
+            if (changedWhileWorking.delete(outcome)) queueOutcome(outcome);
+        }
+    }
+
+    function loadApiKey() {
+        let legacy;
+        try {
+            const raw = localStorage.getItem(keyName);
+            const value = raw?.startsWith('GMV2_') ? JSON.parse(raw.slice(5)) : raw;
+            if (typeof value === 'string' && value.length === 16) legacy = value;
+        } catch {}
+        let key = legacy;
+        if (privateStorage) {
+            try {
+                const saved = GM_getValue(keyName, null);
+                if (saved) key = saved;
+                else if (legacy) GM_setValue(keyName, legacy);
+            } catch {
+                // The key can still be used in memory for this page.
+            }
+        }
+        try { localStorage.removeItem(keyName); } catch {}
+        return typeof key === 'string' && key.length === 16 ? key : null;
+    }
+
+    function saveApiKey(key) {
+        apiKey = key;
+        try { localStorage.removeItem(keyName); } catch {}
+        if (privateStorage) {
+            try {
+                if (key) GM_setValue(keyName, key);
+                else GM_deleteValue(keyName);
+            } catch {
+                console.warn('[TornCrimesRewardsValue] Could not update private key storage.');
             }
         }
     }
- 
+
+    function promptForKey() {
+        const value = prompt('Enter a public Torn API key to load item prices.' +
+            (privateStorage ? '' : ' This key is kept only until the page closes.') +
+            (apiKey ? ' Leave blank to keep the current key or type CLEAR to remove it.' : ''), '')?.trim();
+        if (value === 'CLEAR') saveApiKey(null);
+        else if (value?.length === 16) saveApiKey(value);
+    }
+
+    async function refreshPrices(ask = true) {
+        const db = await database;
+        try {
+            if (db && localStorage.getItem(priceDateKey) === getToday()) return;
+        } catch {}
+        if (ask && !apiKey) promptForKey();
+        const requestedKey = apiKey;
+        if (!requestedKey) return;
+        try {
+            const url = new URL('https://api.torn.com/torn/');
+            url.searchParams.set('selections', 'items');
+            url.searchParams.set('key', requestedKey);
+            const response = await fetch(url);
+            const data = await response.json();
+            if (data.error) {
+                if (data.error.code === 2 && apiKey === requestedKey) saveApiKey(null);
+                throw new Error('Torn API error ' + data.error.code);
+            }
+            if (!response.ok || !data.items || typeof data.items !== 'object' || !Object.keys(data.items).length) {
+                throw new Error('Missing item prices');
+            }
+            fetchedPrices = new Map(Object.entries(data.items).map(([id, item]) => [id, item.market_value]));
+            if (db) {
+                await putPrices(db, data.items);
+                localStorage.setItem(priceDateKey, getToday());
+            }
+        } catch (error) {
+            console.error('[TornCrimesRewardsValue] Unable to refresh prices', error);
+        }
+    }
+
     function getToday() {
         const today = new Date();
         const formattedDate = String(today.getDate()).padStart(2, '0') + '/' +
@@ -482,81 +556,64 @@ span#silmaril-crimes-rewards-value-total {
     }
  
     function openDatabase() {
-        const request = indexedDB.open('silmarilCrimesRewardsValue', 1);
-        request.onsuccess = function (event) {
-            db = event.target.result;
-            console.log("[TornCrimesRewardsValue] Database opened successfully", db);
-        };
-        request.onerror = function (event) {
-            console.error("[TornCrimesRewardsValue] Error opening database:", event.target.error);
-        };
-        request.onupgradeneeded = function (event) {
-            const db = event.target.result;
-            const objectStore = db.createObjectStore("itemMarketValuesStore", { keyPath: "itemId" });
- 
-            objectStore.createIndex("itemId", "itemId", { unique: true });
-        };
+        return new Promise((resolve, reject) => {
+            const request = indexedDB.open('silmarilCrimesRewardsValue', 1);
+            let blocked = false;
+            request.onupgradeneeded = () => {
+                const store = request.result.createObjectStore(storeName, {keyPath: 'itemId'});
+                store.createIndex('itemId', 'itemId', {unique: true});
+                try { localStorage.removeItem(priceDateKey); } catch {}
+            };
+            request.onsuccess = () => {
+                const db = request.result;
+                db.onversionchange = () => db.close();
+                if (blocked) db.close();
+                else resolve(db);
+            };
+            request.onerror = () => reject(request.error);
+            request.onblocked = () => {
+                blocked = true;
+                reject(new Error('Price cache is blocked'));
+            };
+        });
     }
- 
-    async function putData(data) {
-        while (db == null) {
-            await sleep(25);
-        }
- 
-        const writeTransaction = db.transaction("itemMarketValuesStore", "readwrite");
-        const writeObjectStore = writeTransaction.objectStore("itemMarketValuesStore");
- 
-        for (const itemId in data) {
-            if (data.hasOwnProperty(itemId)) {
-                const item = data[itemId];
-                const itemProxy = new ItemProxy(itemId, item.market_value, item.circulation);
-                const request = await writeObjectStore.put(itemProxy);
- 
-                request.onerror = function (event) {
-                    console.error("[TornCrimesRewardsValue] Error adding/updating data:", event.target.error);
+
+    function putPrices(db, items) {
+        return new Promise((resolve, reject) => {
+            const transaction = db.transaction(storeName, 'readwrite');
+            transaction.oncomplete = resolve;
+            transaction.onabort = () => reject(transaction.error || new Error('Price update aborted'));
+            const store = transaction.objectStore(storeName);
+            try {
+                for (const [itemId, item] of Object.entries(items)) {
+                    store.put({itemId, marketValue: item.market_value, circulation: item.circulation});
+                }
+            } catch (error) {
+                transaction.abort();
+                reject(error);
+            }
+        });
+    }
+
+    async function getPrices(ids) {
+        if (fetchedPrices) return fetchedPrices;
+        const db = await database;
+        if (!db || !ids.length) return new Map();
+        return new Promise((resolve, reject) => {
+            const prices = new Map();
+            const transaction = db.transaction(storeName, 'readonly');
+            transaction.oncomplete = () => resolve(prices);
+            transaction.onabort = () => reject(transaction.error || new Error('Price lookup aborted'));
+            const store = transaction.objectStore(storeName);
+            for (const id of new Set(ids)) {
+                const request = store.get(id);
+                request.onsuccess = () => {
+                    if (request.result) prices.set(id, request.result.marketValue);
                 };
             }
-        }
- 
-    }
- 
-    async function getData(itemIds) {
-        while (db == null) {
-            await sleep(25);
-        }
- 
-        const transaction = db.transaction("itemMarketValuesStore", "readonly");
-        const objectStore = transaction.objectStore("itemMarketValuesStore");
- 
-        const results = [];
- 
-        const promises = itemIds.map((itemId, index) => {
-            return new Promise((resolve, reject) => {
-                const request = objectStore.get(itemId);
-                request.onsuccess = function (e) {
-                    // By position, not arrival order, so each result stays with its item.
-                    results[index] = e.target.result;
-                    resolve();
-                };
-                request.onerror = function (e) {
-                    reject(e.target.error);
-                };
-            });
         });
- 
-        await Promise.all(promises);
- 
-        transaction.oncomplete = function () {
-            console.log("[TornCrimesRewardsValue] All get queries completed.");
-        };
- 
-        transaction.onerror = function (event) {
-            console.error("[TornCrimesRewardsValue] Error during transaction:", event.target.error);
-        };
- 
-        return results;
     }
- 
+
     function getRarity(totalPrice){
         let rarity;
         if (totalPrice < rarityScores.Uncommon) {
@@ -573,21 +630,12 @@ span#silmaril-crimes-rewards-value-total {
         return rarity;
     }
  
-    function getItemIdFromImage(image){
-        let match = image.src.match(numberPattern);
-        if (match) {
-            return match[1];
-        } else {
-            console.error("[TornCrimesRewardsValue] ItemId not found!");
-        }
-    }
- 
     function addToTotal(sumToAdd){
-        let counter = getTotalCounter();
         let prevTotal = Number(sessionStorage.getItem('silmaril-crimes-rewards-value-total') ?? 0);
         let newTotal = prevTotal + sumToAdd;
         sessionStorage.setItem('silmaril-crimes-rewards-value-total', newTotal);
-        counter.textContent = `$${newTotal.toLocaleString()}`;
+        const counter = getTotalCounter();
+        if (counter) counter.textContent = `$${newTotal.toLocaleString()}`;
     }
  
     function getTotalCounter(){
@@ -596,6 +644,7 @@ span#silmaril-crimes-rewards-value-total {
             return totalElement;
         }
         let elementToClone = document.querySelector('.crimes-app .crime-root [class*=resultCount___][class*=successes___] span[class*=count___]');
+        if (!elementToClone) return null;
         totalElement = elementToClone.cloneNode(true);
         totalElement.id = 'silmaril-crimes-rewards-value-total';
         let rawSessionTotal = sessionStorage.getItem('silmaril-crimes-rewards-value-total') ?? 0;
@@ -613,11 +662,4 @@ span#silmaril-crimes-rewards-value-total {
         return new Promise(resolve => setTimeout(resolve, ms));
     }
  
-    class ItemProxy {
-        constructor(itemId, marketValue, circulation) {
-            this.itemId = itemId;
-            this.marketValue = marketValue;
-            this.circulation = circulation;
-        }
-    }
 })();

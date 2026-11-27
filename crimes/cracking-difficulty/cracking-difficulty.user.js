@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Crimes Cracking Difficulty
 // @namespace    https://github.com/SOLiNARY
-// @version      0.1.6
+// @version      0.1.7
 // @description  Shows difficulty of cracking targets in cycles & nerve to be spent. After an update, a "What's new" popup lists what changed.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT License
@@ -22,7 +22,7 @@
     // shows one panel, not eight. The DOM is the channel because userscript sandboxes cannot see
     // each other's globals, and it needs no grants beyond what each script already asks for.
 
-    const SCRIPT_VERSION = "0.1.6";  // keep in sync with @version above
+    const SCRIPT_VERSION = "0.1.7";  // keep in sync with @version above
     const WHATS_NEW_NAME = "Crimes Cracking Difficulty";
     const WHATS_NEW_KEY = "silmaril-cracking-difficulty-last-seen-version";
     // Newest release first. Every release above the version last seen is shown at once, so
@@ -30,6 +30,14 @@
     // `silent: true` is left out of that and never opens the popup by itself; it is listed
     // only when the popup is opened from the menu. Leaving the flag off means false.
     const CHANGELOG = [
+        {
+            version: "0.1.7",
+            date: "2026-11-27",
+            silent: true,
+            changes: [
+                "Difficulty labels now appear when the cracking page loads late or you return to it."
+            ]
+        },
         {
             version: "0.1.6",
             date: "2026-10-20",
@@ -234,7 +242,6 @@
     const crackingHash = '#/cracking';
     const difficultyInfoTemplate = '{cycles} cycles, {attempts} attempts, {nerve} nerve needed';
     const isTampermonkeyEnabled = typeof unsafeWindow !== 'undefined';
-    const isMobileView = window.innerWidth <= 784;
     const difficultyColorMap = {
         "OneAttempt": "#37b24d",
         "ThreeOrLess": "#74b816",
@@ -243,7 +250,6 @@
         "TenOrLess": "#f03e3e",
         "MoreThanTen": "#7048e8",
     };
-    let isOnCrackingPage = false;
     let bruteForceStrength = 0;
  
     const styles = `
@@ -270,59 +276,44 @@
         document.head.appendChild(style);
     }
  
-    checkURLChange();
- 
-    setInterval(checkURLChange, 750);
- 
-    const targetNode = document.querySelector("div.crimes-app");
-    const observerConfig = { childList: true, subtree: true };
-    const observer = new MutationObserver(async (mutationsList, observer) => {
-        for (const mutation of mutationsList) {
-            if (!isOnCrackingPage) {
-                break;
+    // The crimes app and its virtual rows may mount again without a document navigation.
+    // Reconnect when the root changes. Batch React mutations before reading the rig.
+    let observedRoot = null;
+    let frame = 0;
+    const observer = new MutationObserver(scheduleDifficulty);
+    function scheduleDifficulty() {
+        if (!frame) frame = requestAnimationFrame(() => {
+            frame = 0;
+            const root = observedRoot;
+            if (!root || !root.isConnected) return;
+            const strength = root.querySelector('div[class^=rig___] div[class^=statistics___] div[class*=strength___] span[class^=value___]');
+            bruteForceStrength = parseFloat(strength?.textContent);
+            if (!(bruteForceStrength > 0)) return;
+            for (const target of root.querySelectorAll('div[class^=currentCrime___] div[class^=virtualList___] div.crime-option')) {
+                calculateDifficulty(target);
             }
- 
-            let mutationTarget = mutation.target;
-            if (mutation.type === 'childList' && mutationTarget.className.indexOf('outcomeWrapper___') >= 0) {
-                let outcomeDiv = mutationTarget.querySelector('div[class*=outcome___]');
-                if (outcomeDiv == null || outcomeDiv.hasAttribute('data-cracking-difficulty-value-set')) {
-                    continue;
-                }
-                outcomeDiv.setAttribute('data-cracking-difficulty-value-set', '');
- 
-                const crimeOption = mutationTarget.parentNode.querySelector('div.crime-option');
-                if (crimeOption.classList.contains('crime-option')){
-                    setTimeout(function() {calculateDifficulty(crimeOption)}, 500);
-                }
-                break;
-            }
-        }
-    });
-    observer.observe(targetNode, observerConfig);
- 
-    async function addDifficulty() {
-        while (document.querySelector('div.crime-root.cracking-root div[class^=currentCrime___]') == null) {
-            if (!isOnCrackingPage) {
-                break;
-            }
-            await sleep(50);
-        }
-        if (!isOnCrackingPage) {
-            return;
-        }
- 
-        const targets = document.querySelectorAll('div[class^=currentCrime___] div[class^=virtualList___] div[class^=crimeOptionWrapper___] div.crime-option');
-        while (document.querySelector('div[class^=rig___]') == null){
-            await sleep(50);
-        }
-        bruteForceStrength = parseFloat(document.querySelector('div[class^=rig___] div[class^=statistics___] div[class*=strength___] span[class^=value___]').innerText);
- 
-        targets.forEach(target => calculateDifficulty(target));
+        });
     }
- 
+
+    function connect() {
+        const root = window.location.hash.includes(crackingHash)
+            ? document.querySelector('div.crimes-app div.crime-root.cracking-root') : null;
+        if (root === observedRoot) return;
+        observer.disconnect();
+        observedRoot = root;
+        if (root) {
+            observer.observe(root, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['aria-label'] });
+            scheduleDifficulty();
+        }
+    }
+    window.addEventListener('hashchange', connect);
+    connect();
+    setInterval(connect, 750);
+
     function calculateDifficulty(target) {
         const targetDescription = target.querySelector('div[class*=targetSection___]');
  
+        if (!targetDescription) return;
         let cyclesNeeded = 0;
         const characters = target.querySelectorAll('div[class^=sections___] div[class^=charSlot___]');
         characters.forEach(character => {
@@ -362,28 +353,13 @@
                 difficultyInfoSpan.style.color = difficultyColorMap.MoreThanTen;
                 break;
         }
-        difficultyInfoSpan.innerText = difficultyInfoTemplate.replace('{cycles}', cyclesNeeded).replace('{attempts}', attemptsNeeded).replace('{nerve}', nerveNeeded);
-        if (isMobileView) {
-            targetDescription.querySelector('div[class^=typeAndServiceWrapper___]').append(difficultyInfoSpan);
-        } else {
-            targetDescription.querySelector('div[class^=typeAndService___]').append(difficultyInfoSpan);
-        }
- 
+        const text = difficultyInfoTemplate.replace('{cycles}', cyclesNeeded).replace('{attempts}', attemptsNeeded).replace('{nerve}', nerveNeeded);
+        if (difficultyInfoSpan.textContent !== text) difficultyInfoSpan.textContent = text;
+        const parent = (window.innerWidth <= 784 && targetDescription.querySelector('div[class^=typeAndServiceWrapper___]')) ||
+            targetDescription.querySelector('div[class^=typeAndService___]') || targetDescription;
+        if (difficultyInfoSpan.parentNode !== parent) parent.append(difficultyInfoSpan);
     }
- 
-    function checkURLChange() {
-        const currentURL = window.location.href;
-        if (currentURL !== checkURLChange.previousURL) {
-            if (window.location.href.includes(crackingHash)) {
-                isOnCrackingPage = true;
-                addDifficulty();
-            } else {
-                isOnCrackingPage = false;
-            }
-        }
-        checkURLChange.previousURL = currentURL;
-    }
- 
+
     function parseDifficulty(element) {
         const label = element.getAttribute('aria-label');
         if (label == null) {
