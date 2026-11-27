@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Rigs Layout Switcher
 // @namespace    https://github.com/SOLiNARY
-// @version      0.7.7
+// @version      0.7.8
 // @description  Adds "Save current rig layout" & "Empty rig layout" quick actions to a Cracking crime. After an update, a "What's new" popup lists what changed.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT License
@@ -26,7 +26,7 @@
     // shows one panel, not eight. The DOM is the channel because userscript sandboxes cannot see
     // each other's globals, and it needs no grants beyond what each script already asks for.
 
-    const SCRIPT_VERSION = "0.7.7";  // keep in sync with @version above
+    const SCRIPT_VERSION = "0.7.8";  // keep in sync with @version above
     const WHATS_NEW_NAME = "Rigs Layout Switcher";
     const WHATS_NEW_KEY = "silmaril-cracking-rigs-layout-switcher-last-seen-version";
     // Newest release first. Every release above the version last seen is shown at once, so
@@ -34,6 +34,15 @@
     // `silent: true` is left out of that and never opens the popup by itself; it is listed
     // only when the popup is opened from the menu. Leaving the flag off means false.
     const CHANGELOG = [
+        {
+            version: "0.7.8",
+            date: "2026-11-27",
+            silent: true,
+            changes: [
+                "Shared rig links import again.",
+                "Each click waits for Torn to confirm the last rig change before the next one becomes available."
+            ]
+        },
         {
             version: "0.7.6",
             date: "2026-10-20",
@@ -250,7 +259,6 @@
     }
     let rigLayouts = localStorage.getItem("silmaril-rigs-layout-switcher-layouts") ?? "";
     let rigLayoutsArray = rigLayouts.split(',');
-    checkUrlForImport();
  
     class ComponentInfo {
         constructor(x = null, y = null, item = null, x2 = null, y2 = null, action = null) {
@@ -263,6 +271,8 @@
         }
     }
  
+    checkUrlForImport();
+
     const rfcvArg = "rfcv=";
     let rfcv = localStorage.getItem("silmaril-rigs-layout-switcher-rfcv") ?? null;
     const crimesReadUrl = '/page.php?sid=crimesData&step=crimesList&';
@@ -274,9 +284,19 @@
     let currentRig = 0;
     let rigsInfo = {0: [], 1: [], 2: []};
     let requestsQueue = [];
+    let applyingStep = false;
  
     const { fetch: originalFetch } = isTampermonkeyEnabled ? unsafeWindow : window;
  
+    function rememberRigs(chassis) {
+        chassis.forEach((rig, index) => {
+            rigsInfo[index] = (rig.components ?? []).filter(cell => Number(cell.ID) !== 0).map(cell => {
+                const [first, second] = cell.coords;
+                return new ComponentInfo(first.x, first.y, Number(cell.ID), second?.x, second?.y);
+            });
+        });
+    }
+
     const customFetch = async (...args) => {
         let [resource, config] = args;
         let response = await originalFetch(resource, config);
@@ -287,30 +307,7 @@
             try {
                 const jsonData = await response.clone().json();
                 const rig = fetchUrl.indexOf(crimesReadUrl) >= 0 ? jsonData.DB.crimesByType.rig : jsonData.DB.additionalInfo.prepareInfo.rig;
-                IS_DEBUG ? console.log('rig.chassis', rig.chassis) : null;
-                rig.chassis.forEach((rigData, rigId) => {
-                    IS_DEBUG ? console.log('rigData', rigData) : null;
-                    IS_DEBUG ? console.log('rigId', rigId) : null;
-                    IS_DEBUG ? console.log('rigData.components', rigData.components) : null;
-                    let items = [];
-                    if (rigData.components == null) {
-                        rigsInfo[rigId] = [];
-                        return;
-                    }
-                    rigData.components.forEach((componentData) => {
-                        if (componentData.ID == 0) {
-                            return;
-                        }
-                        let componentInfo = new ComponentInfo(componentData.coords[0].x, componentData.coords[0].y, componentData.ID);
-                        if (componentData.coords[1] != null) {
-                            componentInfo.x2 = componentData.coords[1].x;
-                            componentInfo.y2 = componentData.coords[1].y;
-                        }
-                        items.push(componentInfo);
-                    });
-                    rigsInfo[rigId] = items;
-                });
-                IS_DEBUG ? console.log('rigsInfo', rigsInfo) : null;
+                rememberRigs(rig.chassis);
             } catch (error) {
                 console.log('[TornRigsLayoutSwitcher] No targets, skipping the script init', error);
             }
@@ -416,22 +413,9 @@
                 spamButton.type = 'button';
                 spamButton.className = 'torn-btn non-deletable disabled';
                 spamButton.textContent = 'No layout chosen';
-                spamButton.addEventListener('click', async event => {
-                    if (event.target.classList.contains('disabled')){
-                        return;
-                    }
-                    const poppedItems = requestsQueue.shift();
-                    const urlToProcess = poppedItems[0];
-                    const layoutUrl = poppedItems[1];
-                    await sendSetLayoutRequest(urlToProcess, layoutUrl);
-                    if (requestsQueue.length == 0) {
-                        event.target.classList.add('disabled');
-                        event.target.textContent = 'All requests completed!';
-                    } else {
-                        event.target.textContent = `Spam click ${requestsQueue.length} more times!`;
-                    }
-                });
- 
+                spamButton.disabled = true;
+                spamButton.addEventListener('click', applyNextStep);
+
                 if (!panelAdded){
                     document.querySelector('div[class*=currentCrime___]').append(getRigChoices(), getLayoutActions(document.querySelector('div[class*=cracking-root]')), buttonContainer, spamButton);
                     panelAdded = true;
@@ -474,9 +458,6 @@
             if (importString === null || importString.length < 75) {
                 return;
             };
- 
-            removeUrlParameter('rig-import');
-            console.log('Updated URL:', window.location.href);
  
             let rigsToImport = {};
             for (let i = 0; i < 3; i++) {
@@ -533,7 +514,9 @@
                 }
             }
             console.log('rigsToImport', rigsToImport);
-            importLayout(rigsToImport);
+            if (importLayout(rigsToImport)) {
+                removeUrlParameter('rig-import');
+            }
         }
         catch (e) {
             console.error('[TornRigsLayoutSwitcher] Failed to import from URL!', e);
@@ -833,6 +816,7 @@
     function importLayout(allLayoutsToImport) {
         IS_DEBUG ? console.log('allLayoutsToImport', allLayoutsToImport) : null;
         const allLayoutNamesToImport = Object.keys(allLayoutsToImport);
+        let saved = 0;
         rigLayouts = localStorage.getItem("silmaril-rigs-layout-switcher-layouts") ?? "";
         rigLayoutsArray = rigLayouts.split(',');
  
@@ -851,10 +835,11 @@
                 return;
             }
             try {
+                localStorage.setItem(`silmaril-rigs-layout-switcher-layout-${layoutName}`, JSON.stringify(layout, customReplacer));
                 if (!rigLayoutsArray.includes(layoutName)) {
                     rigLayoutsArray.push(layoutName);
                 }
-                localStorage.setItem(`silmaril-rigs-layout-switcher-layout-${layoutName}`, JSON.stringify(layout, customReplacer));
+                saved++;
                 IS_DEBUG ? console.log('layougetLayout', localStorage.getItem(`silmaril-rigs-layout-switcher-layout-${layoutName}`)) : null;
             } catch (e) {
                 console.error("[TornRigsLayoutSwitcher] Error while importing Layout", e);
@@ -864,6 +849,7 @@
  
         rigLayouts = rigLayoutsArray.join(',');
         localStorage.setItem("silmaril-rigs-layout-switcher-layouts", rigLayouts);
+        return saved > 0 && saved === allLayoutNamesToImport.length;
     }
  
     async function handleLoadoutClick(event, root, layoutName = null){
@@ -915,7 +901,7 @@
                         } else {
                             IS_DEBUG ? console.log(`[${x},${y}] adding new cell`) : null;
                             IS_DEBUG ? console.log('newCell[0]', newCell[0]) : null;
-                            let clonedCell = newCell[0];
+                            let clonedCell = { ...newCell[0] };
                             clonedCell.action = 'add';
                             layoutItemsToBeAdded.push(clonedCell);
                         }
@@ -923,7 +909,7 @@
                         if (newCell.length == 0) {
                             IS_DEBUG ? console.log(`[${x},${y}] removing old cell`) : null;
                             IS_DEBUG ? console.log('currentCell[0]', currentCell[0]) : null;
-                            let clonedCell = currentCell[0];
+                            let clonedCell = { ...currentCell[0] };
                             clonedCell.action = 'remove';
                             layoutItemsToBeRemoved.push(clonedCell);
                         } else {
@@ -935,10 +921,10 @@
                                 continue;
                             } else {
                                 IS_DEBUG ? console.log(`[${x},${y}] diff cells, remove & add`) : null;
-                                let oldClonedCell = currentCell[0];
+                                let oldClonedCell = { ...currentCell[0] };
                                 oldClonedCell.action = 'remove';
                                 layoutItemsToBeRemoved.push(oldClonedCell);
-                                let newClonedCell = newCell[0];
+                                let newClonedCell = { ...newCell[0] };
                                 newClonedCell.action = 'add';
                                 layoutItemsToBeAdded.push(newClonedCell);
                             }
@@ -955,48 +941,74 @@
     }
  
     function saveSetLayoutRequestsToQueue(action, rig, items, root, resetQueue = true){
-        // console.log('items', items);
-        if (resetQueue) {
-            requestsQueue = [];
-        }
-        const urlWithRfcv = setLayoutUrl.replace("{rfcv}", rfcv);
-        if (action == 'resetRig') {
-            const layoutUrl = buildLayoutRequest('resetRig', rig, null);
-            const url = urlWithRfcv.replace("{layout}", layoutUrl);
-            requestsQueue.push([url, layoutUrl]);
+        if (applyingStep) return;
+        if (resetQueue) requestsQueue = [];
+        if (action === 'resetRig') {
+            requestsQueue.push(buildLayoutRequest('resetRig', rig, null));
         } else {
-            items.forEach((item) => {
-                const layoutUrl = buildLayoutRequest(item.action === null ? action : item.action, rig, item);
-                const url = urlWithRfcv.replace("{layout}", layoutUrl);
-                requestsQueue.push([url, layoutUrl]);
-            });
-        }
-        let spamButton = document.getElementById('silmaril-rigs-layout-switcher-spam-button');
-        spamButton.textContent = `Spam click ${requestsQueue.length} more times!`;
-        spamButton.classList.remove('disabled');
-    }
- 
-    async function sendSetLayoutRequest(url, layoutItems){
-        let formData = new FormData();
-        formData.append('typeID', 10);
-        formData.append('crimeID', 204);
-        formData.append('value1', encodeURIComponent(layoutItems));
-        await fetch(url, {
-            method: 'POST',
-            body: formData
-        })
-            .then(response => {
-            if (response.ok) {
-                // console.log('component change request OK');
-            } else {
-                console.error("[TornRigsLayoutSwitcher] Set Layout request failed:", response);
+            for (const item of items) {
+                requestsQueue.push(buildLayoutRequest(item.action ?? action, rig, item));
             }
-        })
-            .catch(error => {
-            console.error("[TornRigsLayoutSwitcher] Error setting Layout:", error);
-        });
+        }
+        const button = document.getElementById('silmaril-rigs-layout-switcher-spam-button');
+        updateStepButton(button, 'No changes needed');
     }
- 
+
+    function updateStepButton(button, emptyMessage) {
+        button.disabled = applyingStep || requestsQueue.length === 0;
+        button.classList.toggle('disabled', button.disabled);
+        button.textContent = applyingStep ? 'Applying change…' : requestsQueue.length
+            ? 'Apply next change (' + requestsQueue.length + ' left)' : emptyMessage;
+    }
+
+    async function applyNextStep(event) {
+        if (applyingStep || !requestsQueue.length) return;
+        const button = event.currentTarget;
+        applyingStep = true;
+        updateStepButton(button);
+        let message = 'All changes applied';
+        try {
+            const request = requestsQueue[0];
+            if (!rfcv) throw new Error('Missing request token');
+            const form = new FormData();
+            form.append('typeID', 10);
+            form.append('crimeID', 204);
+            form.append('value1', encodeURIComponent(request));
+            const response = await fetch(setLayoutUrl.replace('{rfcv}', encodeURIComponent(rfcv)), { method: 'POST', body: form });
+            if (!response.ok) throw new Error('HTTP ' + response.status);
+            const data = await response.json();
+            const chassis = data?.DB?.additionalInfo?.prepareInfo?.rig?.chassis;
+            if (data?.error || data?.success === false || !Array.isArray(chassis)) {
+                throw new Error('Torn did not confirm the rig change');
+            }
+            // A prepare response includes the resulting rig, even when a requested placement
+            // could not be made. Verify that particular component before advancing.
+            const change = JSON.parse(request);
+            const updated = chassis[change.chassisID];
+            if (!updated || (updated.components != null && !Array.isArray(updated.components))) {
+                throw new Error('Missing chassis');
+            }
+            const components = (updated.components ?? []).filter(component => Number(component.ID) !== 0);
+            const matches = component => Number(component.ID) === change.ID &&
+                component.coords?.length === change.coords.length &&
+                change.coords.every(cell => component.coords.some(other => Number(other.x) === cell.x && Number(other.y) === cell.y));
+            const applied = change.step === 'resetRig' ? components.length === 0 :
+                components.some(matches) === (change.step === 'add');
+            if (!applied) throw new Error('Component change was not confirmed');
+            rememberRigs(chassis);
+            requestsQueue.shift();
+        } catch (error) {
+            // A lost reply may follow a successful change. Start from the live rig on the
+            // next selection instead of replaying a possibly completed step.
+            requestsQueue = [];
+            message = 'Change unconfirmed. Refresh and choose the layout again.';
+            console.warn('[TornRigsLayoutSwitcher]', error.message);
+        } finally {
+            applyingStep = false;
+            updateStepButton(button, message);
+        }
+    }
+
     function customReplacer(key, value) {
         // Omit properties with null values or specific strings
         if (value === null || value === 'add' || value === 'remove' || value === 'move') {

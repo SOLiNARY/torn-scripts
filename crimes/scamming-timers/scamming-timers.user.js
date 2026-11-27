@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Crimes Scamming Timers
 // @namespace    https://github.com/SOLiNARY
-// @version      0.3.4
+// @version      0.3.5
 // @description  Show how much cooldown & expiration is left for targets After an update, a "What's new" popup lists what changed.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT License
@@ -24,7 +24,7 @@
     // shows one panel, not eight. The DOM is the channel because userscript sandboxes cannot see
     // each other's globals, and it needs no grants beyond what each script already asks for.
 
-    const SCRIPT_VERSION = "0.3.4";  // keep in sync with @version above
+    const SCRIPT_VERSION = "0.3.5";  // keep in sync with @version above
     const WHATS_NEW_NAME = "Crimes Scamming Timers";
     const WHATS_NEW_KEY = "silmaril-scamming-timers-last-seen-version";
     // Newest release first. Every release above the version last seen is shown at once, so
@@ -32,6 +32,14 @@
     // `silent: true` is left out of that and never opens the popup by itself; it is listed
     // only when the popup is opened from the menu. Leaving the flag off means false.
     const CHANGELOG = [
+        {
+            version: "0.3.5",
+            date: "2026-11-27",
+            silent: true,
+            changes: [
+                "Scamming timers update more smoothly when many targets are visible."
+            ]
+        },
         {
             version: "0.3.4",
             date: "2026-10-20",
@@ -237,10 +245,7 @@
     const showCooldown = true;
     const timeElementsToShow = 2; // Options: 1,2,3,4
     const scammingCrimesUrl = 'loader.php?sid=crimesData&step=crimesList&rfcv='
-    const observerConfig = { childList: true, subtree: true };
-    let foundTargets = false;
-    let noTargets = false;
-    let targets = {};
+    let targets = new Map();
     const isTampermonkeyEnabled = typeof unsafeWindow !== 'undefined';
     const isMobileView = window.innerWidth <= 784;
     const { fetch: originalFetch } = isTampermonkeyEnabled ? unsafeWindow : window;
@@ -248,26 +253,23 @@
         let [resource, config] = args;
         let response = await originalFetch(resource, config);
         if (response.url.indexOf(scammingCrimesUrl) >= 0 && window.location.href.includes('crimes#/scamming')) {
-            targets = {};
             try {
                 const jsonData = await response.clone().json();
-                jsonData.DB.crimesByType.targets.forEach((target, index) => {
+                const nextTargets = new Map();
+                jsonData.DB.crimesByType.targets.forEach(target => {
                     let expireTimestamp = target.expire.toString().length == 10 ? target.expire : target.expire.toString().substr(0, 10); // Fix for Torn's long timestamps bug
                     let cooldownTimestamp = null;
                     if (target.cooldown > 0){
                         cooldownTimestamp = target.cooldown.toString().length == 10 ? target.cooldown : target.cooldown.toString().substr(0, 10); // Fix for Torn's long timestamps bug
                     }
-                    targets[index] = {
-                        email: target.email,
+                    nextTargets.set(target.email, {
                         expire: expireTimestamp,
                         cooldown: cooldownTimestamp
-                    };
+                    });
                 });
  
-                response.json = async () => jsonData;
-                response.text = async () => JSON.stringify(jsonData);
+                targets = nextTargets;
             } catch (error) {
-                noTargets = true;
                 console.log('[TornCrimesScammingTimers] No targets, skipping the script init', error);
             }
         }
@@ -296,36 +298,32 @@
     setInterval(addTimeSpans, 2 * 1_000);
  
     function addTimeSpans(){
-        let targetEmailSpans = document.querySelectorAll('div.crimes-app div.crime-root.scamming-root div[class^=virtualList___] div[class^=virtualItem___] span[class^=email___]');
-        Object.values(targets).forEach(target => {
-            var match = Object.values(targetEmailSpans).find(targetRow => targetRow.innerText == target.email);
-            if (match != null) {
-                if (showCooldown){
-                    let timeElement = match.parentNode.querySelector('span.silmaril-torn-crimes-scamming-timers-cooldown');
-                    if (timeElement == null) {
-                        timeElement = document.createElement('span');
-                        timeElement.className = 'silmaril-torn-crimes-scamming-timers-cooldown';
-                        timeElement.innerText = calculateTimeDelta(target.cooldown, timeDeltas.After, timerTypes.Cooldown, !isMobileView);
-                        match.insertAdjacentElement('afterEnd', timeElement);
-                    } else {
-                        timeElement.innerText = calculateTimeDelta(target.cooldown, timeDeltas.After, timerTypes.Cooldown, !isMobileView);
-                    }
-                }
-                if (showExpiration){
-                    let timeElement = match.parentNode.querySelector('span.silmaril-torn-crimes-scamming-timers-expiration');
-                    if (timeElement == null) {
-                        timeElement = document.createElement('span');
-                        timeElement.className = 'silmaril-torn-crimes-scamming-timers-expiration';
-                        timeElement.innerText = calculateTimeDelta(target.expire, timeDeltas.After, timerTypes.Expiration, !isMobileView);
-                        match.insertAdjacentElement('afterEnd', timeElement);
-                    } else {
-                        timeElement.innerText = calculateTimeDelta(target.expire, timeDeltas.After, timerTypes.Expiration, !isMobileView);
-                    }
-                }
-            }
-        })
+        const rows = document.querySelectorAll('div.crimes-app div.crime-root.scamming-root div[class^=virtualList___] div[class^=virtualItem___] span[class^=email___]');
+        for (const row of rows) {
+            const target = targets.get(row.textContent.trim());
+            if (showCooldown) updateTimer(row, 'cooldown', target, timerTypes.Cooldown);
+            if (showExpiration) updateTimer(row, 'expiration', target, timerTypes.Expiration);
+        }
     }
- 
+
+    function updateTimer(row, name, target, type) {
+        const className = 'silmaril-torn-crimes-scamming-timers-' + name;
+        let label = row.parentNode.querySelector('.' + className);
+        if (!target) {
+            if (label) label.remove();
+            return;
+        }
+        const timestamp = type === timerTypes.Cooldown ? target.cooldown : target.expire;
+        const text = calculateTimeDelta(timestamp, timeDeltas.After, type, !isMobileView);
+        if (!label) {
+            if (!text) return;
+            label = document.createElement('span');
+            label.className = className;
+            row.insertAdjacentElement('afterend', label);
+        }
+        if (label.textContent !== text) label.textContent = text;
+    }
+
     function calculateTimeDelta(timestamp, timeDeltaType, timerType, isDesktopView) {
         const now = Math.floor(Date.now() / 1000); // Current timestamp in seconds
         let timeDelta = timestamp - now; // Time remaining in seconds

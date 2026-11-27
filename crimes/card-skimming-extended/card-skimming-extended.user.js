@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Crimes Card Skimming Extended
 // @namespace    https://github.com/SOLiNARY
-// @version      0.6.3
+// @version      0.6.4
 // @description  Sorts all installed card skimmers by location, time installed, score or cards skimmed. Adds card/hour stat. Remembers your choice. After an update, a "What's new" popup lists what changed.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT License
@@ -22,7 +22,7 @@
     // shows one panel, not eight. The DOM is the channel because userscript sandboxes cannot see
     // each other's globals, and it needs no grants beyond what each script already asks for.
 
-    const SCRIPT_VERSION = "0.6.3";  // keep in sync with @version above
+    const SCRIPT_VERSION = "0.6.4";  // keep in sync with @version above
     const WHATS_NEW_NAME = "Crimes Card Skimming Extended";
     const WHATS_NEW_KEY = "silmaril-card-skimming-extended-last-seen-version";
     // Newest release first. Every release above the version last seen is shown at once, so
@@ -30,6 +30,14 @@
     // `silent: true` is left out of that and never opens the popup by itself; it is listed
     // only when the popup is opened from the menu. Leaving the flag off means false.
     const CHANGELOG = [
+        {
+            version: "0.6.4",
+            date: "2026-11-27",
+            silent: true,
+            changes: [
+                "Scrolling keeps the installed skimmer count steady. If the total is unknown, the panel labels the visible count."
+            ]
+        },
         {
             version: "0.6.3",
             date: "2026-10-20",
@@ -365,11 +373,12 @@
         if (!stats) {
             stats = document.createElement('span');
             stats.className = ROW_STATS_CLASS;
+            stats.style.cssText = 'display:block;line-height:1;opacity:.85;font-weight:normal;';
             locationDiv.appendChild(stats);
         }
         const mobile = isMobileView();
-        const desiredStyle = `display:block;font-size:${mobile ? '.58rem' : '.65rem'};line-height:1;opacity:.85;font-weight:normal;`;
-        if (stats.style.cssText !== desiredStyle) stats.style.cssText = desiredStyle;
+        const fontSize = mobile ? '0.58rem' : '0.65rem';
+        if (stats.style.fontSize !== fontSize) stats.style.fontSize = fontSize;
         const label = mobile ? 'c/h' : 'card/hour';
         const text = `${score.toFixed(2)} ${label}`;
         if (stats.textContent !== text) stats.textContent = text;
@@ -397,24 +406,20 @@
         return [...rows].sort(cmp);
     }
 
+    function rowOffset(item) {
+        const match = item.style.transform.match(/^translateY\(([-\d.]+)px\)$/);
+        return match ? Number(match[1]) : NaN;
+    }
+
     function applyPositions(originalRows, sortedRows) {
-        if (sortedRows.length === 0) return;
-        let baseY = Infinity;
-        for (const rd of originalRows) {
-            const t = rd.item.style.transform;
-            if (!t) continue;
-            const m = t.match(/translateY\(([-\d.]+)px\)/);
-            if (m) {
-                const y = parseFloat(m[1]);
-                if (y < baseY) baseY = y;
-            }
-        }
-        if (!Number.isFinite(baseY)) return;
+        // React owns the slot transform and can recycle the same element at a new index.
+        // Apply a separate visual offset so the next count still sees the native slots.
+        const slots = originalRows.map(rd => rowOffset(rd.item)).sort((a, b) => a - b);
+        const canSort = slots.every(Number.isFinite);
         sortedRows.forEach((rd, idx) => {
-            const desired = `translateY(${baseY + idx * SKIMMER_ROW_HEIGHT}px)`;
-            if (rd.item.style.transform !== desired) {
-                rd.item.style.transform = desired;
-            }
+            const delta = canSort ? slots[idx] - rowOffset(rd.item) : 0;
+            const translate = delta ? '0px ' + delta + 'px' : '';
+            if (rd.item.style.translate !== translate) rd.item.style.translate = translate;
         });
     }
 
@@ -477,22 +482,29 @@
         }
     }
 
+    const skimmerStartOffsets = new WeakMap();
+
     function getTotalSkimmerCount(virtualList, skimmerItems) {
-        if (!virtualList) return 0;
-        const totalHeight = virtualList.offsetHeight;
-        let firstSkimmerY = Infinity;
-        for (const item of skimmerItems) {
-            const t = item.style.transform;
-            if (!t) continue;
-            const m = t.match(/translateY\(([-\d.]+)px\)/);
-            if (m) {
-                const y = parseFloat(m[1]);
-                if (y < firstSkimmerY) firstSkimmerY = y;
+        // Installation controls may precede the skimmers. Measure their space when the
+        // top is mounted and reuse that origin as the virtualizer scrolls or changes height.
+        const rows = Array.from(virtualList.querySelectorAll('div[class*=virtualItem___]'));
+        const skimmers = new Set(skimmerItems);
+        const slots = rows.map(row => ({ row, y: rowOffset(row) }))
+            .filter(slot => Number.isFinite(slot.y)).sort((a, b) => a.y - b.y);
+        let nextY = 0;
+        for (const { row, y } of slots) {
+            // A pinned control can remain at zero while the first skimmer is offscreen.
+            // Only learn the origin from a contiguous run of rows at the top.
+            if (Math.abs(y - nextY) > 1) break;
+            if (skimmers.has(row)) {
+                skimmerStartOffsets.set(virtualList, y);
+                break;
             }
+            nextY = y + row.offsetHeight;
         }
-        if (!Number.isFinite(firstSkimmerY)) return skimmerItems.length;
-        const inferred = Math.round((totalHeight - firstSkimmerY) / SKIMMER_ROW_HEIGHT);
-        return Math.max(skimmerItems.length, inferred);
+        const start = skimmerStartOffsets.get(virtualList);
+        return start == null ? null : Math.max(skimmerItems.length,
+            Math.round((virtualList.offsetHeight - start) / SKIMMER_ROW_HEIGHT));
     }
 
     function updateTotalStats(root, visibleScore, visibleCount, totalCount) {
@@ -502,6 +514,7 @@
         if (!totalStatsEl) {
             totalStatsEl = document.createElement('div');
             totalStatsEl.className = TOTAL_STATS_CLASS;
+            totalStatsEl.style.cssText = 'opacity:.85;align-self:center;white-space:nowrap;flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;';
             const title = titleBar.querySelector('[class*=title___]');
             if (title) {
                 title.parentNode.insertBefore(totalStatsEl, title.nextSibling);
@@ -510,15 +523,18 @@
             }
         }
         const mobile = isMobileView();
-        const desiredStyle = `margin-left:${mobile ? '6' : '10'}px;font-size:${mobile ? '.65' : '.75'}rem;opacity:.85;align-self:center;white-space:nowrap;flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;`;
-        if (totalStatsEl.style.cssText !== desiredStyle) totalStatsEl.style.cssText = desiredStyle;
-        const isEstimate = totalCount > visibleCount && visibleCount > 0;
+        const margin = mobile ? '6px' : '10px';
+        const fontSize = mobile ? '0.65rem' : '0.75rem';
+        if (totalStatsEl.style.marginLeft !== margin) totalStatsEl.style.marginLeft = margin;
+        if (totalStatsEl.style.fontSize !== fontSize) totalStatsEl.style.fontSize = fontSize;
+        const isEstimate = totalCount != null && totalCount > visibleCount && visibleCount > 0;
         const displayedScore = isEstimate ? (visibleScore / visibleCount) * totalCount : visibleScore;
         const prefix = isEstimate ? '~' : '';
         const scoreText = displayedScore.toFixed(2);
+        const countText = totalCount == null ? visibleCount + ' visible' : totalCount + '/20';
         const text = mobile
-            ? `${prefix}${scoreText} c/h · ${totalCount}/20`
-            : `${prefix}${scoreText} card/hour with ${totalCount}/20 skimmers`;
+            ? `${prefix}${scoreText} c/h · ${countText}`
+            : `${prefix}${scoreText} card/hour with ${countText} skimmers`;
         if (totalStatsEl.textContent !== text) totalStatsEl.textContent = text;
     }
 
@@ -552,7 +568,9 @@
             let totalScore = 0;
             let totalCount = 0;
 
-            if (Array.isArray(apiSkimmers) && apiSkimmers.length > 0) {
+            const inferredCount = getTotalSkimmerCount(virtualList, items);
+            const useApi = apiSkimmers?.length > 0 && (inferredCount == null || inferredCount === apiSkimmers.length);
+            if (useApi) {
                 for (const apiObj of apiSkimmers) {
                     const {score, location} = extractApiRowScore(apiObj);
                     const locationName = location || 'Unknown';
@@ -579,8 +597,7 @@
             }
 
             updateDropdownStats(root, byLocation);
-            const inferredCount = getTotalSkimmerCount(virtualList, items);
-            const displayTotalCount = Math.max(totalCount, inferredCount);
+            const displayTotalCount = useApi ? totalCount : inferredCount;
             updateTotalStats(root, totalScore, totalCount, displayTotalCount);
         } finally {
             isSetupInProgress = false;

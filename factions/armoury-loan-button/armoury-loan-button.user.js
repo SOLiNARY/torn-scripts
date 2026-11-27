@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Armoury Loan Button
 // @namespace    https://github.com/SOLiNARY
-// @version      0.7.0
+// @version      0.7.1
 // @description  Caches loanable faction armoury items and adds a "Loan" chip to every organized crime role that needs one, loaning the item to whoever holds that role. Your own role loans in one click, any other role confirms first. Give it a limited API key and it reads the armoury straight from Torn, so weapon and armour counts stay right without opening the armoury tab. After an update, a "What's new" popup lists what changed.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT License
@@ -9,6 +9,9 @@
 // @match        https://torn.com/factions.php*
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=torn.com
 // @grant        GM_registerMenuCommand
+// @grant        GM_getValue
+// @grant        GM_setValue
+// @grant        GM_deleteValue
 // @grant        unsafeWindow
 // @run-at       document-end
 // ==/UserScript==
@@ -22,7 +25,7 @@
     // shows one panel, not eight. The DOM is the channel because userscript sandboxes cannot see
     // each other's globals, and it needs no grants beyond what each script already asks for.
 
-    const SCRIPT_VERSION = "0.7.0";  // keep in sync with @version above
+    const SCRIPT_VERSION = "0.7.1";  // keep in sync with @version above
     const WHATS_NEW_NAME = "Armoury Loan Button";
     const WHATS_NEW_KEY = "silmaril-armoury-loan-button-last-seen-version";
     // Newest release first. Every release above the version last seen is shown at once, so
@@ -30,6 +33,16 @@
     // `silent: true` is left out of that and never opens the popup by itself; it is listed
     // only when the popup is opened from the menu. Leaving the flag off means false.
     const CHANGELOG = [
+        {
+            version: "0.7.1",
+            date: "2026-11-27",
+            silent: true,
+            changes: [
+                'Loan confirmations now check who still holds the role and whether they still need the item.',
+                'Armoury refreshes remove depleted stock, and a loan only counts after Torn confirms it.',
+                'Your API key uses private script storage where available.'
+            ]
+        },
         {
             version: "0.7.0",
             date: "2026-10-27",
@@ -116,6 +129,7 @@
 
     try {
         GM_registerMenuCommand("Set up API key", function(){ if (promptForApiKey()) { syncArmoury(true); syncCrimes(true); } });
+        GM_registerMenuCommand("Forget API key", function(){ forgetApiKey(); scheduleScan(); });
         GM_registerMenuCommand("Refresh armoury now", function(){ syncArmoury(true); });
         GM_registerMenuCommand("What's new", function(){ showWhatsNew(CHANGELOG); });
     } catch (error) {
@@ -297,7 +311,6 @@
     const LOG_PREFIX = '[TornArmouryLoanButton]';
     const ITEMS_KEY = 'silmaril-armoury-loan-items';
     const SLOT_ITEMS_KEY = 'silmaril-armoury-loan-slots';
-    const USER_KEY = 'silmaril-armoury-loan-user';
     const RFCV_KEY = 'silmaril-armoury-loan-rfcv';
     const RFCV_ARG = 'rfcv=';
     const ITEM_CATS_KEY = 'silmaril-armoury-loan-cats';
@@ -935,7 +948,7 @@
         const stored = getStoredItems();
         let changed = false;
         for (const itemId of Object.keys(seen)) {
-            if (!itemsEqual(stored[itemId], seen[itemId])) {
+            if (!itemsEqual(stored[itemId], seen[itemId]) || stored[itemId].source === 'api') {
                 stored[itemId] = { ...seen[itemId], source: 'page', updated: Date.now() };
                 changed = true;
             }
@@ -968,7 +981,12 @@
         }
     }
 
-    let apiKey = readStored(API_KEY_KEY);
+    // GMforPDA implements the value functions with Torn's page storage.
+    const isPda = typeof PDA_httpGet === 'function' ||
+        (typeof GM_info !== 'undefined' && /GMforPDA/i.test(GM_info?.scriptHandler));
+    const privateKeyStorage = !isPda && typeof GM_getValue === 'function' && typeof GM_setValue === 'function' &&
+        typeof GM_deleteValue === 'function';
+    let apiKey = loadApiKey();
     // Why the last sync had nothing to show, so a missing key or a refused call reaches
     // the player instead of only the console.
     let apiNote = null;
@@ -979,16 +997,34 @@
         return typeof apiKey === 'string' && apiKey.length === API_KEY_LENGTH;
     }
 
+    function loadApiKey() {
+        const legacy = readStored(API_KEY_KEY);
+        let key = legacy;
+        try {
+            if (privateKeyStorage) {
+                key = GM_getValue(API_KEY_KEY, null) || legacy;
+                if (key && key === legacy) GM_setValue(API_KEY_KEY, key);
+            }
+        } catch (e) { /* The key can still be used in this tab. */ }
+        try { localStorage.removeItem(API_KEY_KEY); } catch (e) { /* Storage may be blocked. */ }
+        return key;
+    }
+
     function promptForApiKey() {
         // The saved key is never put in the prompt: a browser prompt shows its contents in plain
         // text, so anyone looking at the screen reads the key. Blank keeps the saved one.
         const keyIsSet = hasApiKey();
         const entered = prompt('Please enter a LIMITED Api Key. It is used to read your ' +
-            'faction armoury without opening it. The key stays in this browser and is only ' +
-            'sent to api.torn.com; nothing is stored or shared anywhere else:' +
-            (keyIsSet ? '\n\nA key is already saved. Leave this blank to keep it.' : ''), '');
+            'faction armoury and organized crimes. The key is only sent to api.torn.com. ' +
+            (privateKeyStorage ? 'It is saved in private script storage.' : 'It is kept only in this tab.') +
+            (keyIsSet ? '\n\nLeave this blank to keep your key, or type REMOVE to forget it.' : ''), '');
         if (entered == null) return false;
         const trimmed = entered.trim();
+        if (keyIsSet && trimmed.toUpperCase() === 'REMOVE') {
+            forgetApiKey();
+            scheduleScan();
+            return false;
+        }
         if (keyIsSet && trimmed === '') return false;
         if (trimmed.length !== API_KEY_LENGTH) {
             console.error(`${LOG_PREFIX} That is not a Torn API key.`);
@@ -999,13 +1035,14 @@
         apiNote = null;
         apiRetryAt = 0;
         try {
-            localStorage.setItem(API_KEY_KEY, trimmed);
-        } catch (e) { /* ignore quota errors */ }
+            if (privateKeyStorage) GM_setValue(API_KEY_KEY, trimmed);
+        } catch (e) { /* The key stays available in memory for this tab. */ }
         return true;
     }
 
     function forgetApiKey() {
         apiKey = null;
+        try { if (privateKeyStorage) GM_deleteValue(API_KEY_KEY); } catch (e) { /* Storage may be blocked. */ }
         try {
             localStorage.removeItem(API_KEY_KEY);
         } catch (e) { /* ignore */ }
@@ -1027,7 +1064,6 @@
             cat: category,
             limit: String(API_PAGE_SIZE),
             offset: String(offset),
-            key: apiKey,
             comment: 'ArmouryLoanButton'
         });
         // A sync the player asked for by hand says so, which is the documented way to
@@ -1052,6 +1088,17 @@
         return typeof error.error === 'string' && error.error !== ''
             ? 'Torn said: ' + error.error
             : 'Torn turned the armoury read down.';
+    }
+
+    async function fetchApiPayload(url, requestedKey = apiKey) {
+        if (!requestedKey || requestedKey !== apiKey) throw new Error('The API key changed during the read.');
+        const response = await fetch(url, { headers: { Authorization: 'ApiKey ' + requestedKey } });
+        const payload = await response.json();
+        if (requestedKey !== apiKey) throw new Error('The API key changed during the read.');
+        const failure = apiError(payload);
+        if (failure) throw new Error(failure);
+        if (!response.ok) throw new Error('The Torn API returned HTTP ' + response.status + '.');
+        return payload;
     }
 
     // One item arrives as several entries: the copies nobody has taken, and one more for
@@ -1094,8 +1141,17 @@
     // than the one the player was looking at a minute ago. Anything this script watched
     // happen after that - a row on the armoury page, a loan it sent itself - is the
     // better record and is left alone until Torn's own copy catches up.
-    function storeInventory(folded, snapshotAt, category) {
+    function storeInventory(folded, snapshotAt, category, complete) {
         const store = getStoredItems();
+        const categories = getCategoryMemory();
+        let categoriesChanged = false;
+        if (complete) {
+            for (const [itemId, current] of Object.entries(store)) {
+                if (categories[itemId] === category && !folded[itemId]) {
+                    folded[itemId] = { name: current.name, type: current.type, free: 0, armoryIds: [], holders: [] };
+                }
+            }
+        }
         let changed = false;
         for (const itemId of Object.keys(folded)) {
             const current = store[itemId];
@@ -1103,40 +1159,48 @@
             // Where an item lives is the one thing about it that cannot go stale, and it is
             // what keeps the next read down to a single call, so it is written down even
             // when the rest of the answer is ignored or says nothing new.
-            rememberCategory(itemId, category);
-            if (current != null && current.source !== 'api' && (current.updated ?? 0) > snapshotAt) continue;
+            if (categories[itemId] !== category) {
+                categories[itemId] = category;
+                categoriesChanged = true;
+            }
+            if ((current?.source === 'api' ? current.snapshotAt : current?.updated) > snapshotAt) continue;
             // A stacked item is named by the armoury page and by nothing else, so an id
             // learned there is the only one there will ever be. It is carried over for as
             // long as Torn still says copies are free.
             if (fresh.armoryIds.length === 0 && fresh.free > 0 && current?.armoryIds?.length) {
                 fresh.armoryIds = current.armoryIds.slice();
             }
-            if (itemsEqual(current, fresh)) continue;
-            store[itemId] = { ...fresh, source: 'api', updated: Date.now() };
+            if (itemsEqual(current, fresh) && current.source === 'api' && current.snapshotAt === snapshotAt) continue;
+            store[itemId] = { ...fresh, source: 'api', updated: Date.now(), snapshotAt };
             changed = true;
         }
         if (changed) saveItems(store);
+        if (categoriesChanged) {
+            try { localStorage.setItem(ITEM_CATS_KEY, JSON.stringify(categories)); } catch (e) { /* Storage may be full. */ }
+        }
     }
 
-    async function fetchCategory(category, force) {
+    async function fetchCategory(category, force, requestedKey = apiKey) {
         const items = [];
         // Torn stamps every answer with the moment its cached copy was built. Without one
         // the answer is taken at face value, which is the only thing left to do with it.
         let snapshotAt = Date.now();
+        let complete = false;
         for (let page = 0; page < API_MAX_PAGES; page++) {
-            const response = await fetch(inventoryUrl(category, page * API_PAGE_SIZE, force));
-            const payload = await response.json();
-            const failure = apiError(payload);
-            if (failure != null) throw new Error(failure);
+            const payload = await fetchApiPayload(inventoryUrl(category, page * API_PAGE_SIZE, force), requestedKey);
             if (Number.isFinite(payload?.inventory_timestamp)) {
                 snapshotAt = payload.inventory_timestamp * 1000;
             }
-            const batch = payload?.inventory ?? [];
+            const batch = payload?.inventory;
+            if (!Array.isArray(batch)) throw new Error('The API did not return faction inventory.');
             items.push(...batch);
-            if (batch.length < API_PAGE_SIZE) break;
+            if (batch.length < API_PAGE_SIZE) {
+                complete = true;
+                break;
+            }
             await delay(API_GAP_MS);
         }
-        return { items: items, snapshotAt: snapshotAt };
+        return { items, snapshotAt, complete };
     }
 
     // The items the chips on screen are waiting on. Kept by the crimes scan so a read
@@ -1228,18 +1292,21 @@
         }
         const plan = planRead(wanted);
         if (plan.categories.length === 0) return;
+        const requestedKey = apiKey;
         apiSyncing = true;
         scheduleScan();
         try {
             const read = [];
             let stoppedEarly = false;
+            let allComplete = true;
             // Stored a category at a time rather than all of them at the end: an item never
             // spans two categories, so folding them separately loses nothing, chips light
             // up as their own category lands instead of waiting on the rest, and a read
             // that fails half way keeps what already arrived.
             for (const category of plan.categories) {
-                const answer = await fetchCategory(category, force);
-                storeInventory(foldInventory(answer.items), answer.snapshotAt, category);
+                const answer = await fetchCategory(category, force, requestedKey);
+                storeInventory(foldInventory(answer.items), answer.snapshotAt, category, answer.complete);
+                if (!answer.complete) allComplete = false;
                 read.push(category);
                 scheduleScan();
                 // A sweep is only running because something had not been found yet. Once
@@ -1254,7 +1321,7 @@
             // A sweep that ran to the end has been everywhere there is to look, so an item
             // still missing is one the faction does not hold. Saying so keeps the next read
             // from sweeping all nine categories again for the same answer.
-            if (plan.sweeping && !stoppedEarly) {
+            if (plan.sweeping && !stoppedEarly && allComplete) {
                 for (const itemId of wanted) {
                     if (categoryOf(itemId) == null) rememberCategory(itemId, '');
                 }
@@ -1311,8 +1378,6 @@
 
     // --- current user ----------------------------------------------------------
 
-    let cachedUser = null;
-
     function deepFindUser(node, depth) {
         if (!node || typeof node !== 'object' || depth > 4) return null;
         const idKey = USER_ID_KEYS.find((key) => node[key] != null && /^\d+$/.test(String(node[key])));
@@ -1328,7 +1393,7 @@
     }
 
     function findUserInJsonScripts() {
-        const scripts = document.querySelectorAll('#websocketConnectionData, script[type="application/json"]');
+        const scripts = document.querySelectorAll('#websocketConnectionData');
         for (const script of scripts) {
             try {
                 const found = deepFindUser(JSON.parse(script.textContent), 0);
@@ -1350,23 +1415,7 @@
     }
 
     function getUser() {
-        if (cachedUser) return cachedUser;
-        const found = findUserInJsonScripts() ?? findUserInHeader();
-        if (found) {
-            cachedUser = found;
-            try {
-                localStorage.setItem(USER_KEY, JSON.stringify(found));
-            } catch (e) { /* ignore quota errors */ }
-            return found;
-        }
-        try {
-            const stored = JSON.parse(localStorage.getItem(USER_KEY));
-            if (stored?.id && stored?.name) {
-                cachedUser = stored;
-                return stored;
-            }
-        } catch (e) { /* ignore */ }
-        return null;
+        return findUserInJsonScripts() ?? findUserInHeader();
     }
 
     // --- organized crimes page -------------------------------------------------
@@ -1583,8 +1632,7 @@
         } catch (e) { /* ignore quota errors */ }
     }
 
-    function getSlotItemId(slot) {
-        const cache = getSlotItemCache();
+    function getSlotItemId(slot, cache) {
         const own = cache[slot.ocKey];
         if (own === NO_ITEM) return NO_ITEM;
         return own ?? (slot.scenarioKey != null ? cache[slot.scenarioKey] : null) ?? null;
@@ -1606,8 +1654,7 @@
         return changed;
     }
 
-    function discoverSlotItems() {
-        const cache = getSlotItemCache();
+    function discoverSlotItems(cache) {
         let changed = false;
 
         // When the requirement is rendered inside the slot itself, the role it belongs
@@ -1791,7 +1838,6 @@
             // Recruiting and planning together: the only crimes a loan can still help.
             cat: 'available',
             limit: '100',
-            key: apiKey,
             comment: 'ArmouryLoanButton'
         }).toString();
     }
@@ -1873,10 +1919,7 @@
         // match - and repeating it every minute would never do better.
         const awaitingBefore = slotsAwaitingItems;
         try {
-            const response = await fetch(crimesUrl());
-            const payload = await response.json();
-            const failure = apiError(payload);
-            if (failure != null) throw new Error(failure);
+            const payload = await fetchApiPayload(crimesUrl());
             const crimes = Array.isArray(payload?.crimes) ? payload.crimes : [];
             const changed = ingestApiCrimes(crimes);
             crimesNextAt = Date.now() + (awaitingBefore && !changed ? CRIMES_IDLE_MS : CRIMES_TTL_MS);
@@ -1915,9 +1958,9 @@
 
     // The armoury is the authority on who is holding what; a loan this script sent is
     // only remembered until the armoury has been looked at again.
-    function isHeld(itemId, userId) {
-        if (getStoredItems()[itemId]?.holders?.includes(userId)) return true;
-        const at = getHeld()[itemId + ':' + userId];
+    function isHeld(itemId, userId, entry, held) {
+        if (entry?.holders?.includes(userId)) return true;
+        const at = held[itemId + ':' + userId];
         return at != null && Date.now() - at < HELD_TTL_MS;
     }
 
@@ -1952,30 +1995,33 @@
     }
 
     // true, false, or null for "the tooltip has never been opened on this role".
-    function getPossession(slot) {
+    function getPossession(slot, store) {
         const key = possessionKey(slot);
         if (key == null) return null;
-        const entry = getPossessionStore()[key];
+        const entry = store[key];
         if (entry == null || Date.now() - entry.at > POSSESSION_TTL_MS) return null;
         return entry.has === true;
     }
 
     // --- chip state -------------------------------------------------------------
 
-    function computeState(slot) {
+    function readLoanState() {
+        return { items: getStoredItems(), held: getHeld(), possession: getPossessionStore() };
+    }
+
+    function computeState(slot, itemId, data) {
         if (slot.occupant == null) return null;
-        const itemId = getSlotItemId(slot);
         // No cached item means either the role needs none or its tooltip has never been
         // opened. The two are indistinguishable from here, so nothing is drawn - a chip
         // on a role that needs no item would be worse than no chip at all.
         if (itemId == null || itemId === NO_ITEM) return null;
-        const entry = getStoredItems()[itemId] ?? null;
+        const entry = data.items[itemId] ?? null;
         const failure = slotFailures.get(slot.ocKey);
         if (failure != null) return { kind: 'fail', itemId: itemId, entry: entry, message: failure };
         // Torn saying they have it settles the matter. Torn saying they have not outranks
         // the armoury's list of who is holding what, which can be a page-load out of date.
-        const known = getPossession(slot);
-        const held = isHeld(itemId, slot.occupant.id);
+        const known = getPossession(slot, data.possession);
+        const held = isHeld(itemId, slot.occupant.id, entry, data.held);
         if (known === true || (known == null && held)) {
             return { kind: 'out', itemId: itemId, entry: entry, onLoan: held };
         }
@@ -2156,7 +2202,7 @@
             // Retrying clears the old verdict and takes the normal route again, which
             // means another player's retry still confirms.
             if (state.kind === 'fail') slotFailures.delete(slot.ocKey);
-            if (isMine) {
+            if (isMine && getUser()?.id === slot.occupant.id) {
                 startLoan(slot, state.itemId, wrap);
                 return;
             }
@@ -2267,7 +2313,7 @@
         });
         commit.addEventListener('click', function (event) {
             event.stopPropagation();
-            const wrap = anchor.closest('.silmaril-chip-wrap');
+            const wrap = slot.wrapper.querySelector('.silmaril-chip-wrap');
             closeConfirm();
             if (wrap != null) startLoan(slot, state.itemId, wrap);
         });
@@ -2408,7 +2454,7 @@
                 return;
             }
             if (result.ok) slotFailures.delete(candidate.slot.ocKey);
-            else slotFailures.set(candidate.slot.ocKey, result.message);
+            else if (!result.stale) slotFailures.set(candidate.slot.ocKey, result.message);
             entry.row.classList.add(result.ok ? 'silmaril-ok' : 'silmaril-fail');
             entry.mark.innerHTML = result.ok ? ICON_CHECK : ICON_ALERT;
             if (!result.ok) {
@@ -2438,35 +2484,39 @@
     }
 
     function parseLoanResponse(response, text) {
-        if (!response.ok) {
+        if (!response.ok || response.redirected) {
             return { success: false, message: 'Torn turned the loan down. Reload the page and try again.' };
         }
+        let message;
+        let confirmed = false;
         try {
             const json = JSON.parse(text);
-            const message = stripHtml(String(json.message ?? json.text ?? json.error ?? ''));
-            const success = json.success !== false && json.error == null;
-            return { success: success, message: message };
+            message = stripHtml(json?.message ?? json?.text ?? json?.error ?? (typeof json?.success === 'string' ? json.success : ''));
+            if (json?.success === false || json?.success === 0 || json?.error) return { success: false, message };
+            confirmed = json?.success === true || json?.success === 1;
         } catch (e) {
-            const message = stripHtml(text);
-            const lower = message.toLowerCase();
-            const failed = lower.includes('error') || lower.includes('you cannot') || lower.includes("you can't");
-            return { success: !failed, message: message };
+            message = stripHtml(text);
         }
+        const affirmative = /^(?:you (?:have )?(?:successfully )?(?:loaned|lent)\b.+\bto\s+\S|(?:the |your )?(?:item|loan) (?:has been |was )?(?:successfully )?(?:loaned|lent|completed)(?:\s+to\s|[.!]?$))/i;
+        return { success: !looksDenied(message) && (confirmed || affirmative.test(message)), message };
     }
 
     // Sends one loan. The only thing that changes between loaning to yourself and
     // loaning to a crew member is this user field.
+    const pendingLoans = new Set();
+
     async function performLoan(itemId, recipient, slot) {
-        const entry = getStoredItems()[itemId];
-        if (!entry) {
-            return { ok: false, message: 'Open the armoury once so this can see what is loanable.' };
+        const current = slot.wrapper.isConnected ? readSlot(slot.wrapper) : null;
+        if (loansDenied || !crimesTabIsActionable() || !current || current.ocKey !== slot.ocKey ||
+                current.occupant?.id !== recipient.id || getSlotItemId(current, getSlotItemCache()) !== itemId) {
+            return { ok: false, stale: true, message: 'This role changed. Check its current occupant and item.' };
         }
-        if (!entry.armoryIds?.length) {
-            return {
-                ok: false,
-                message: 'No ' + (entry.name || 'item') + ' free right now. Open the armoury to refresh this.'
-            };
+        const data = readLoanState();
+        const state = computeState(current, itemId, data);
+        if (state?.kind !== 'ready' || pendingLoans.has(itemId)) {
+            return { ok: false, stale: true, message: 'This loan is no longer available. Check the current role and armoury.' };
         }
+        const entry = state.entry;
         const rfcv = getRfcv();
         if (!rfcv) {
             return { ok: false, message: 'Torn turned the loan down. Reload the page and try again.' };
@@ -2480,11 +2530,12 @@
             item: armoryId,
             itemID: itemId,
             type: entry.type ?? '',
-            user: recipient.name + ' [' + recipient.id + ']',
+            user: current.occupant.name + ' [' + current.occupant.id + ']',
             quantity: '1'
         });
 
         console.log(`${LOG_PREFIX} Loaning item ${itemId} (armoury id ${armoryId}) to ${recipient.name} [${recipient.id}]`);
+        pendingLoans.add(itemId);
         try {
             const response = await fetch(`/factions.php?rfcv=${encodeURIComponent(rfcv)}`, {
                 method: 'POST',
@@ -2531,6 +2582,8 @@
         } catch (error) {
             console.error(`${LOG_PREFIX} Loan request error:`, error);
             return { ok: false, message: 'The request did not get through. Try again in a moment.' };
+        } finally {
+            pendingLoans.delete(itemId);
         }
     }
 
@@ -2568,7 +2621,7 @@
             return;
         }
         if (result.ok) slotFailures.delete(slot.ocKey);
-        else slotFailures.set(slot.ocKey, result.message);
+        else if (!result.stale) slotFailures.set(slot.ocKey, result.message);
         wrap.remove();
         scanCrimes();
     }
@@ -2586,7 +2639,8 @@
             bar?.remove();
             return;
         }
-        const signature = [entries.length, kitted, missing.length].join('|');
+        const signature = JSON.stringify([entries.length, kitted, ownId, missing.map(e =>
+            [e.slot.ocKey, e.slot.occupant.id, e.slot.occupant.name, e.state.itemId])]);
         if (bar != null && bar.dataset.silmarilSig === signature) return;
         if (bar == null) {
             bar = document.createElement('div');
@@ -2612,7 +2666,21 @@
             button.addEventListener('click', function (event) {
                 event.preventDefault();
                 event.stopPropagation();
-                openBatch(missing, ownId);
+                const currentRow = bar.nextElementSibling;
+                const data = readLoanState();
+                const slotItems = getSlotItemCache();
+                const currentMissing = [];
+                if (!loansDenied && crimesTabIsActionable()) {
+                    for (const wrapper of findAllSlotWrappers()) {
+                        if (wrapper.parentElement !== currentRow) continue;
+                        const slot = readSlot(wrapper);
+                        if (!slot?.occupant) continue;
+                        const state = computeState(slot, getSlotItemId(slot, slotItems), data);
+                        if (state?.kind === 'ready') currentMissing.push({ slot, state });
+                    }
+                }
+                if (currentMissing.length) openBatch(currentMissing, getUser()?.id ?? null);
+                else scanCrimes();
             });
             bar.appendChild(button);
         }
@@ -2639,7 +2707,8 @@
     }
 
     function scanCrimes() {
-        discoverSlotItems();
+        const slotItems = getSlotItemCache();
+        discoverSlotItems(slotItems);
 
         if (loansDenied) {
             document.querySelectorAll('.silmaril-chip-wrap, .silmaril-itembar').forEach(function (el) { el.remove(); });
@@ -2656,17 +2725,20 @@
         wantedItems.clear();
         slotsAwaitingItems = false;
         slotsOnScreen = false;
-        for (const wrapper of findAllSlotWrappers()) {
+        const wrappers = findAllSlotWrappers();
+        const data = wrappers.length ? readLoanState() : null;
+        for (const wrapper of wrappers) {
             const slot = readSlot(wrapper);
             if (slot == null) continue;
+            const itemId = getSlotItemId(slot, slotItems);
             if (slot.occupant != null) {
                 slotsOnScreen = true;
                 // Still unexplained: either it needs an item and nobody has said which, or
                 // it needs none and nobody has said that either. Only used to decide how
                 // hard to keep asking.
-                if (getSlotItemId(slot) == null) slotsAwaitingItems = true;
+                if (itemId == null) slotsAwaitingItems = true;
             }
-            const state = computeState(slot);
+            const state = computeState(slot, itemId, data);
             const isMine = slot.occupant != null && ownId != null && slot.occupant.id === ownId;
             applyChip(slot, state, isMine);
             if (state == null) continue;

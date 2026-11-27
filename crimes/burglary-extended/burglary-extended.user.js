@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Crimes Burglary Extended
 // @namespace    https://github.com/SOLiNARY
-// @version      0.7.4
+// @version      0.7.5
 // @description  Sorts all scouted by target, created date, expire date, confidence, risk or uniques number. Remembers your choice. After an update, a "What's new" popup lists what changed.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT License
@@ -24,7 +24,7 @@
     // shows one panel, not eight. The DOM is the channel because userscript sandboxes cannot see
     // each other's globals, and it needs no grants beyond what each script already asks for.
 
-    const SCRIPT_VERSION = "0.7.4";  // keep in sync with @version above
+    const SCRIPT_VERSION = "0.7.5";  // keep in sync with @version above
     const WHATS_NEW_NAME = "Crimes Burglary Extended";
     const WHATS_NEW_KEY = "silmaril-burglary-extended-last-seen-version";
     // Newest release first. Every release above the version last seen is shown at once, so
@@ -32,6 +32,15 @@
     // `silent: true` is left out of that and never opens the popup by itself; it is listed
     // only when the popup is opened from the menu. Leaving the flag off means false.
     const CHANGELOG = [
+        {
+            version: "0.7.5",
+            date: "2026-11-27",
+            silent: true,
+            changes: [
+                "Target times refresh when you return to Burglary.",
+                "Sorting keeps scrolled targets inside the visible list."
+            ]
+        },
         {
             version: "0.7.4",
             date: "2026-10-20",
@@ -234,20 +243,15 @@
 
  
     const isSortingEnabled = true;
-    const burglaryCrimesUrl = 'loader.php?sid=crimesData&step=crimesList&typeID=7&';
-    const scoutResidentialUrl = 'loader.php?sid=crimesData&step=attempt&typeID=7&crimeID=66&';
-    const scoutCommercialUrl = 'loader.php?sid=crimesData&step=attempt&typeID=7&crimeID=67&';
-    const scoutIndustrialUrl = 'loader.php?sid=crimesData&step=attempt&typeID=7&crimeID=68&';
-    const observerConfig = { childList: true, subtree: true };
     const VIRTUAL_LIST_SELECTOR = 'div[class*=virtualList___]';
     const VIRTUAL_ITEM_SELECTOR = 'div[class*=virtualItem___]';
     const SCOUT_ITEM_HEIGHT = 61;
     const TARGET_ITEM_HEIGHT = 51;
-    let foundTargets = false;
-    let noTargets = false;
-    let targets = {};
+    let targets = [];
     let burgledPlaces;
-    let isApplyingVirtualSort = false;
+    let refreshMountedList = () => {};
+    let pendingScout = null;
+    let lastListRequest = 0;
 
     function getVirtualList(root) {
         return (root || document).querySelector(VIRTUAL_LIST_SELECTOR);
@@ -262,26 +266,22 @@
             .filter(item => !item.querySelector('[class*=propertyTypeSection___]'));
     }
 
+    function nativeRowY(row) {
+        const match = /^translateY\(([-\d.]+)px\)$/.exec(row.style.transform);
+        return match ? Number(match[1]) : NaN;
+    }
+
     function applyVirtualSortPositions(items) {
+        // Leave the virtualizer's transform intact. Sort only inside its actual mounted slots.
+        const slots = items.map(nativeRowY).sort((a, b) => a - b);
+        const canSort = slots.every(Number.isFinite) && isSortingEnabled;
         items.forEach((item, idx) => {
-            const newY = SCOUT_ITEM_HEIGHT + TARGET_ITEM_HEIGHT * idx;
-            const desired = `translateY(${newY}px)`;
-            // Skip no-op writes — each style mutation is something React's reactive chain reacts to,
-            // and writing the same value would otherwise trigger pointless re-render cycles.
-            if (item.style.transform === desired) return;
-            item.style.transform = desired;
+            const delta = canSort ? slots[idx] - nativeRowY(item) : 0;
+            const translate = delta ? '0px ' + delta + 'px' : '';
+            if (item.style.translate !== translate) item.style.translate = translate;
         });
     }
 
-    async function waitForVirtualList(root, maxAttempts = 100) {
-        let attempts = 0;
-        let virtualList;
-        while (!(virtualList = getVirtualList(root)) && attempts < maxAttempts) {
-            await sleep(50);
-            attempts++;
-        }
-        return virtualList;
-    }
     const safetyAssessments = {
         "Apartment": {
             "type": "Residential",
@@ -650,92 +650,50 @@
     const delimiter = document.createElement('div');
     delimiter.className = 'sectionDelimiter___NpsSC';
  
-    const { fetch: originalFetch } = isTampermonkeyEnabled ? unsafeWindow : window;
- 
-    const customFetch = async (...args) => {
-        let [resource, config] = args;
-        let response = await originalFetch(resource, config);
- 
-        if (!foundTargets && response.url.indexOf(burglaryCrimesUrl) >= 0) {
-            foundTargets = true;
- 
-            try {
-                const jsonData = await response.clone().json();
-                jsonData.DB.crimesByType.properties.forEach((property, index) => {
-                    let createdFixed = property.created.toString().length == 10 ? property.created : property.created.toString().substr(0, 10); // Hotfix for Torn's bug
-                    targets[index] = {
-                        created: createdFixed,
-                        expire: property.expire
-                    };
-                });
- 
-                response.json = async () => jsonData;
-                response.text = async () => JSON.stringify(jsonData);
-            } catch (error) {
-                noTargets = true;
-                console.log('[TornCrimesBurglaryExtended] No targets, skipping the script init', error);
+    const fetchHost = isTampermonkeyEnabled ? unsafeWindow : window;
+    const originalFetch = fetchHost.fetch;
+    let requestSerial = 0;
+    fetchHost.fetch = async function (...args) {
+        const serial = ++requestSerial;
+        const response = await originalFetch.apply(this, args);
+        try {
+            const url = new URL(response.url, window.location.href);
+            const params = url.searchParams;
+            if (!['/loader.php', '/page.php'].includes(url.pathname) ||
+                params.get('sid') !== 'crimesData' || params.get('typeID') !== '7') return response;
+            const list = params.get('step') === 'crimesList';
+            const scout = params.get('step') === 'attempt' && ['66', '67', '68'].includes(params.get('crimeID'));
+            if (!list && !scout) return response;
+            const data = await response.clone().json();
+            const properties = data.DB?.crimesByType?.properties;
+            if (Array.isArray(properties) && serial >= lastListRequest) {
+                lastListRequest = serial;
+                targets = properties.map(property => ({
+                    id: property.id ?? property.propertyId ?? property.propertyID,
+                    name: property.name ?? property.title,
+                    created: secondsTimestamp(property.created),
+                    expire: secondsTimestamp(property.expire)
+                }));
+                pendingScout = null;
+                refreshMountedList();
+            } else if (scout && serial >= lastListRequest && data.DB?.outcome?.result === 'success') {
+                // Some scouting responses only confirm success. Estimate the appended target once.
+                const now = Math.floor(Date.now() / 1000);
+                pendingScout = {created: now, expire: now + 3 * 86400, detected: Date.now()};
+                refreshMountedList();
             }
+        } catch (error) {
+            console.debug('[TornCrimesBurglaryExtended] Could not read burglary data', error);
         }
- 
-        if (response.url.indexOf(scoutResidentialUrl) >= 0 || response.url.indexOf(scoutCommercialUrl) >= 0 || response.url.indexOf(scoutIndustrialUrl) >= 0) {
-            try {
-                const jsonData = await response.clone().json();
-                if (jsonData.DB.outcome.result === 'success') {
-                    const targetsNode = await waitForVirtualList(document, 40);
-                    const targetsObserver = new MutationObserver((mutationsList, observer) => {
-                        for (const mutation of mutationsList) {
-                            if (mutation.type === 'childList') {
-                                let newTargets = getTargetItems(targetsNode).filter(item => !item.hasAttribute('data-created-time'));
-                                if (newTargets.length === 0) continue;
-                                newTargets.forEach((element) => {
-                                    const nowTimestamp = (Date.now()/1000).toFixed(0);
-                                    const threeDaysAfterTimestamp = (Date.now()/1000 + 3*86400 - 1).toFixed(0);
-                                    element.setAttribute('data-created-time', nowTimestamp);
-                                    element.setAttribute('data-expire-time', threeDaysAfterTimestamp);
-                                    addSafetyAssessment(element);
-                                    if (isMobileView) {
-                                        let expireDiv = addExpireDiv(element);
-                                        expireDiv.innerText = 'In 3 days';
-                                    } else {
-                                        let createdDiv = addCreatedAndExpireDivs(element);
-                                        let expireDiv = element.querySelector('div[class*=sections___] > div.expireTime');
-                                        createdDiv.innerText = 'Just now';
-                                        expireDiv.innerText = 'In 3 days';
-                                    }
-                                });
-                                const burglaryRoot = document.querySelector('div.crime-root.burglary-root');
-                                if (burglaryRoot) {
-                                    sortChildElements(burglaryRoot, currentSortBy, currentSortDirection);
-                                }
-                                observer.disconnect();
-                                break;
-                            }
-                        }
-                    });
-
-                    if (targetsNode) {
-                        targetsObserver.observe(targetsNode, observerConfig);
-                        setTimeout(() => targetsObserver.disconnect(), 5000);
-                    }
-                }
- 
-                response.json = async () => jsonData;
-                response.text = async () => JSON.stringify(jsonData);
-            } catch (error) {
-                noTargets = true;
-                console.error('[TornCrimesBurglaryExtended] Failed to register scouting attempt', error);
-            }
-        }
- 
         return response;
     };
- 
-    if (isTampermonkeyEnabled){
-        unsafeWindow.fetch = customFetch;
-    } else {
-        window.fetch = customFetch;
+
+    function secondsTimestamp(value) {
+        if (value == null) return null;
+        const digits = String(value);
+        return /^\d{10,}$/.test(digits) ? Number(digits.slice(0, 10)) : null;
     }
- 
+
     await addStyle();
  
     const sortBy = {
@@ -765,70 +723,60 @@
     let currentSortDirection = localStorage.getItem("silmaril-torn-crimes-burglary-sorting-direction") ?? sortDirection.Descending;
     currentSortDirection = parseInt(currentSortDirection);
  
-    while (document.querySelector("html") == null) {
-        await sleep(50);
+    let resortDebounceTimer;
+    let activeRoot = null;
+    let activeList = null;
+    let listObserver = null;
+    function scheduleResort() {
+        if (resortDebounceTimer != null) return;
+        resortDebounceTimer = setTimeout(() => {
+            resortDebounceTimer = null;
+            if (activeRoot?.isConnected) sortChildElements(activeRoot, currentSortBy, currentSortDirection);
+        }, 50);
     }
-    const targetNode = document.querySelector("html");
- 
-    let isSetupInProgress = false;
-    async function setupBurglaryView(burglaryRoot) {
-        if (isSetupInProgress) return;
-        isSetupInProgress = true;
-        try {
-            getBurgledPlaces();
+    refreshMountedList = scheduleResort;
 
-            document.querySelectorAll("div[class*=currentCrime___]").forEach((div) => {
-                if (div.dataset.silmarilBurglaryListener === '1') return;
-                div.dataset.silmarilBurglaryListener = '1';
-                div.addEventListener("click", function (event) {
-                    const sortEl = event.target.closest('.silmaril-crimes-burglary-sorting');
-                    if (sortEl) {
-                        const sortName = sortEl.getAttribute("data-sort-name");
-                        const newSortBy = sortBy[sortName];
-                        const newSortDirection = newSortBy === currentSortBy ? currentSortDirection * -1 : currentSortDirection;
-                        const root = document.querySelector('div.crime-root.burglary-root');
-                        if (root) sortChildElements(root, newSortBy, newSortDirection);
-                        currentSortBy = newSortBy;
-                        currentSortDirection = newSortDirection;
-                        localStorage.setItem("silmaril-torn-crimes-burglary-sorting-by", newSortBy);
-                        localStorage.setItem("silmaril-torn-crimes-burglary-sorting-direction", newSortDirection);
-                    }
-                });
+    function findMountedList() {
+        const root = document.querySelector('div.crime-root.burglary-root');
+        const list = root && getVirtualList(root);
+        if (root === activeRoot && list === activeList) return;
+        listObserver?.disconnect();
+        activeRoot = root;
+        activeList = list;
+        if (!list) return;
+        getBurgledPlaces();
+        if (isSortingEnabled) addHeader(root);
+        listObserver = new MutationObserver(mutations => {
+            const changed = mutations.some(m => {
+                if (m.type === 'attributes') return m.target.matches(VIRTUAL_ITEM_SELECTOR);
+                return m.type === 'childList' || m.type === 'characterData';
             });
-
-            const virtualList = await waitForVirtualList(burglaryRoot, 100);
-            if (!virtualList) return;
-
-            if (isSortingEnabled) {
-                addHeader(burglaryRoot);
-            }
-
-            await addTimestamps();
-            sortChildElements(burglaryRoot, currentSortBy, currentSortDirection);
-            attachVirtualListObserver(burglaryRoot);
-        } finally {
-            isSetupInProgress = false;
-        }
+            if (changed) scheduleResort();
+        });
+        listObserver.observe(list, {childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['style']});
+        scheduleResort();
     }
 
-    const observer = new MutationObserver(async (mutationsList) => {
-        for (const mutation of mutationsList) {
-            if (mutation.type === 'childList' && mutation.target.className === 'crime-root burglary-root') {
-                if (noTargets) break;
-                await setupBurglaryView(mutation.target);
-                break;
-            }
-        }
+    document.addEventListener('click', event => {
+        const button = event.target.closest?.('.silmaril-crimes-burglary-sorting');
+        if (!button || !activeRoot?.contains(button)) return;
+        const next = sortBy[button.dataset.sortName];
+        if (next === currentSortBy) currentSortDirection *= -1;
+        currentSortBy = next;
+        localStorage.setItem('silmaril-torn-crimes-burglary-sorting-by', currentSortBy);
+        localStorage.setItem('silmaril-torn-crimes-burglary-sorting-direction', currentSortDirection);
+        scheduleResort();
     });
+    const observer = new MutationObserver(() => {
+        if (!activeList?.isConnected) findMountedList();
+    });
+    observer.observe(document.documentElement, {childList: true, subtree: true});
+    findMountedList();
+    setInterval(() => {
+        if (!activeList?.isConnected) return;
+        applyBurgledStatus();
+    }, 1000);
 
-    observer.observe(targetNode, observerConfig);
-
-    const existingBurglaryRoot = document.querySelector('div.crime-root.burglary-root');
-    if (existingBurglaryRoot && !noTargets) {
-        setupBurglaryView(existingBurglaryRoot);
-    }
-    setInterval(applyBurgledStatus, 1000);
- 
     function getBurgledPlaces() {
         const stats = document.querySelectorAll("button[class^=statistic___]");
         burgledPlaces = [...stats].map(button => button.querySelector("span[class*=label___]"))
@@ -865,62 +813,6 @@
         }
     }
  
-    let virtualListObserver = null;
-    let resortDebounceTimer = null;
-    function scheduleResort(burglaryRoot) {
-        if (resortDebounceTimer) clearTimeout(resortDebounceTimer);
-        resortDebounceTimer = setTimeout(() => {
-            resortDebounceTimer = null;
-            sortChildElements(burglaryRoot, currentSortBy, currentSortDirection);
-        }, 80);
-    }
-
-    // A node is a "target row" if it's a virtualItem and doesn't contain a propertyTypeSection
-    // (which is unique to the scout-for-targets row). Works without third-party scripts.
-    function isTargetRow(n) {
-        return n.matches && n.matches(VIRTUAL_ITEM_SELECTOR)
-            && !n.querySelector('[class*=propertyTypeSection___]');
-    }
-
-    function attachVirtualListObserver(burglaryRoot) {
-        const virtualList = getVirtualList(burglaryRoot);
-        if (!virtualList) return;
-        if (virtualListObserver) virtualListObserver.disconnect();
-
-        virtualListObserver = new MutationObserver((mutations) => {
-            if (isApplyingVirtualSort) return;
-
-            let hasAdded = false;
-            mutations.forEach(m => {
-                m.addedNodes.forEach(n => {
-                    if (isTargetRow(n)) hasAdded = true;
-                });
-            });
-
-            if (hasAdded) {
-                // New items need data attributes set up.
-                const items = getTargetItems(virtualList);
-                items.filter(item => !item.hasAttribute('data-target-name')).forEach((item) => {
-                    addSafetyAssessment(item);
-                    if (isMobileView) {
-                        const expireDiv = addExpireDiv(item);
-                        if (expireDiv) expireDiv.innerText = 'In 3 days';
-                    } else {
-                        const createdDiv = addCreatedAndExpireDivs(item);
-                        const expireDiv = item.querySelector('div[class*=sections___] > div.expireTime');
-                        if (createdDiv) createdDiv.innerText = 'Just now';
-                        if (expireDiv) expireDiv.innerText = 'In 3 days';
-                    }
-                });
-            }
-
-            // Debounce: collapse cascading mutations into one resort to avoid feedback loops
-            // with React/state libraries that re-evaluate on each style mutation we make.
-            scheduleResort(burglaryRoot);
-        });
-        virtualListObserver.observe(virtualList, { childList: true });
-    }
-
     function applyBurgledStatus(){
         try {
             const burglaryRoot = document.querySelector('div.crime-root.burglary-root');
@@ -940,9 +832,9 @@
                 }
                 if (!titleDiv) return;
                 if (burgledPlaces.includes(targetName)) {
-                    titleDiv.style.color = "var(--crimes-stats-successes-color)";
+                    if (titleDiv.style.color !== 'var(--crimes-stats-successes-color)') titleDiv.style.color = 'var(--crimes-stats-successes-color)';
                 } else {
-                    titleDiv.style.color = "var(--crimes-stats-criticalFails-color)";
+                    if (titleDiv.style.color !== 'var(--crimes-stats-criticalFails-color)') titleDiv.style.color = 'var(--crimes-stats-criticalFails-color)';
                 }
             });
         } catch (e) {
@@ -952,34 +844,31 @@
  
     // Function to sort child elements
     function sortChildElements(element, sortByProperty, sortDirection) {
-        if (isApplyingVirtualSort) return;
-        const parentElement = element.querySelector(VIRTUAL_LIST_SELECTOR);
-        if (!parentElement) return;
+        const parentElement = getVirtualList(element);
         const childElements = getTargetItems(parentElement);
-        if (childElements.length === 0) return;
- 
-        if (isMobileView) {
-            childElements.forEach((child) => {
-                if (child.querySelector('div[class*=sections___] > div[class*=crimeOptionSection___] > div.safetyAssessment') === null) {
-                    addSafetyAssessment(child);
-                }
-                let expireDiv = child.querySelector('div[class^="sections___"] > div[class^="crimeOptionSection___"] > div[class^="confidenceSectionTablet___"] div[class^="titleAndProgress___"] > div.expireTime') === null
-                ? addExpireDiv(child)
-                : child.querySelector('div[class^="sections___"] > div[class^="crimeOptionSection___"] > div[class^="confidenceSectionTablet___"] div[class^="titleAndProgress___"] > div.expireTime');
-                expireDiv.innerText = child.getAttribute('data-expire-time') === null ? 'Expires in 3 d' : calculateTimeDelta(child.getAttribute('data-expire-time'), timeDeltas.After, isMobileView);
-            });
-        } else {
-            childElements.forEach((child) => {
-                let createdDiv = child.querySelector('div[class*=sections___] > div.createdTime') === null ? addCreatedAndExpireDivs(child) : child.querySelector('div[class*=sections___] > div.createdTime');
-                let expireDiv = child.querySelector('div[class*=sections___] > div.expireTime');
-                createdDiv.innerText = child.getAttribute('data-created-time') === null ? 'Just now' : calculateTimeDelta(child.getAttribute('data-created-time'), timeDeltas.Ago, isMobileView);
-                expireDiv.innerText = child.getAttribute('data-expire-time') === null ? 'In 3 days' : calculateTimeDelta(child.getAttribute('data-expire-time'), timeDeltas.After, isMobileView);
-                if (child.querySelector('div[class*=sections___] > div[class*=crimeOptionSection___] > div.safetyAssessment') === null) {
-                    addSafetyAssessment(child);
-                }
-            });
+        if (!childElements.length) return;
+        for (const child of childElements) {
+            const titleCard = getTitleCard(child);
+            if (!titleCard) continue;
+            const targetName = getTargetName(titleCard);
+            const badge = titleCard.querySelector('.safetyAssessment');
+            if (!badge || child.getAttribute('data-target-name') !== targetName) {
+                badge?.remove();
+                if (targetName) addSafetyAssessment(child, titleCard, targetName);
+            }
+            applyTargetTimestamps(child, targetName);
+            let created = child.querySelector('.createdTime');
+            let expiry = child.querySelector('.expireTime');
+            if (isMobileView) {
+                if (!expiry) expiry = addExpireDiv(child);
+            } else if (!created || !expiry) {
+                created = addCreatedAndExpireDivs(child);
+                expiry = child.querySelector('.expireTime');
+            }
+            updateTimeLabel(created, child.getAttribute('data-created-time'), timeDeltas.Ago);
+            updateTimeLabel(expiry, child.getAttribute('data-expire-time'), timeDeltas.After);
         }
- 
+
         if (isSortingEnabled) {
             // Sort properties based on the filter
             switch (sortByProperty){
@@ -1044,21 +933,20 @@
             }
         }
 
-        isApplyingVirtualSort = true;
-        try {
-            applyVirtualSortPositions(childElements);
-        } finally {
-            // Hold the guard past the synchronous writes so the reactive chain
-            // (React render + any state-library notifications) has time to settle
-            // before we accept another mutation as "real".
-            setTimeout(() => { isApplyingVirtualSort = false; }, 50);
-        }
+        applyVirtualSortPositions(childElements);
     }
- 
+
+    function updateTimeLabel(label, timestamp, direction) {
+        if (!label) return;
+        const text = timestamp ? calculateTimeDelta(timestamp, direction, isMobileView) : '';
+        if (label.textContent !== text) label.textContent = text;
+    }
+
     function addExpireDiv(element) {
         const expireTimeDiv = document.createElement('div');
         expireTimeDiv.className = 'expireTime';
         const titleDiv = element.querySelector('div[class^="sections___"] > div[class^="crimeOptionSection___"] > div[class^="confidenceSectionTablet___"] div[class^="titleAndProgress___"] > div[class^="title___"]');
+        if (!titleDiv) return null;
         titleDiv.parentNode.insertBefore(expireTimeDiv, titleDiv.nextSibling);
         return titleDiv.parentNode.querySelector('div.expireTime');
     }
@@ -1069,7 +957,8 @@
         const expireTimeDiv = document.createElement('div');
         expireTimeDiv.className = 'crimeOptionSection___hslpu flexGrow___S5IUQ expireTime';
         const innerDiv = element.querySelector('div[class*=sections___]');
-        const targetDiv = innerDiv.querySelector('div[class*=crimeOptionSection___]');
+        const targetDiv = innerDiv?.querySelector('div[class*=crimeOptionSection___]');
+        if (!targetDiv) return null;
         const tempDelimiter = delimiter.cloneNode();
         const tempDelimiter2 = delimiter.cloneNode();
  
@@ -1082,12 +971,12 @@
         return innerDiv.querySelector('div.createdTime');
     }
  
-    function addSafetyAssessment(element) {
-        const titleCard = element.querySelector('[class*=crimeOptionSection___][class*=flexGrow___]')
-            || element.querySelector('[class*=crimeOptionSection___]');
-        if (!titleCard) {
-            return;
-        }
+    function getTitleCard(element) {
+        return element.querySelector('[class*=crimeOptionSection___][class*=flexGrow___]:not(.createdTime):not(.expireTime)')
+            || element.querySelector('[class*=crimeOptionSection___]:not(.createdTime):not(.expireTime)');
+    }
+
+    function getTargetName(titleCard) {
         // Mobile/tablet view nests the name as `confidenceSectionTablet___ > titleAndProgress___ > title___`.
         // Desktop puts the name as a direct text node of the title card. Read the mobile structure first
         // because falling through to `textContent` would also pick up siblings like the cm-bg-lifetime "71h"
@@ -1100,9 +989,10 @@
             const firstTextNode = [...titleCard.childNodes].find(n => n.nodeType === Node.TEXT_NODE && n.nodeValue.trim());
             targetName = firstTextNode ? firstTextNode.nodeValue.trim() : titleCard.textContent.trim();
         }
-        if (!targetName) {
-            return;
-        }
+        return targetName;
+    }
+
+    function addSafetyAssessment(element, titleCard, targetName) {
         element.setAttribute('data-target-name', targetName);
         if (safetyAssessments[targetName] === undefined) {
             element.setAttribute('data-safety-level', safetyLevels['Not Found']);
@@ -1170,26 +1060,30 @@
         virtualList.parentNode.insertBefore(header, virtualList);
     }
  
-    async function addTimestamps() {
-        const start = Date.now();
-        while (Object.keys(targets).length === 0 && Date.now() - start < 5000){
-            await sleep(50);
+    function applyTargetTimestamps(row, name) {
+        const id = row.getAttribute('data-property-id') ?? row.getAttribute('data-cm-id');
+        const slot = (nativeRowY(row) - SCOUT_ITEM_HEIGHT) / TARGET_ITEM_HEIGHT;
+        let target = id == null ? null : targets.find(property => property.id != null && String(property.id) === id);
+        if (!target && Number.isInteger(slot)) {
+            const candidate = targets[slot];
+            if (candidate && (!name || !candidate.name || candidate.name === name) &&
+                (id == null || candidate.id == null || String(candidate.id) === id)) target = candidate;
         }
-        if (Object.keys(targets).length === 0) return;
-
-        const virtualList = await waitForVirtualList(document, 60);
-        if (!virtualList) return;
-        const childElements = getTargetItems(virtualList);
-
-        childElements.forEach((element, index) => {
-            if (element.hasAttribute('data-created-time')) return;
-            if (targets[index]) {
-                element.setAttribute('data-created-time', targets[index].created);
-                element.setAttribute('data-expire-time', targets[index].expire);
-            }
-        });
+        if (!target && name) {
+            const matches = targets.filter(property => property.name === name && (id == null || property.id == null));
+            if (matches.length === 1) target = matches[0];
+        }
+        if (!target && pendingScout && Date.now() - pendingScout.detected < 5000 && slot === targets.length && name) {
+            target = {...pendingScout, id, name};
+            targets.push(target);
+            pendingScout = null;
+        }
+        for (const [attribute, value] of [['data-created-time', target?.created], ['data-expire-time', target?.expire]]) {
+            if (value == null) row.removeAttribute(attribute);
+            else if (row.getAttribute(attribute) !== String(value)) row.setAttribute(attribute, value);
+        }
     }
- 
+
     function calculateTimeDelta(timestamp, timeDeltaType, mobile) {
         const now = Math.floor(Date.now() / 1000); // Current timestamp in seconds
         let timeDelta = timestamp - now; // Time remaining in seconds

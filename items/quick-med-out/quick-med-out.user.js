@@ -1,13 +1,17 @@
 // ==UserScript==
 // @name         Torn Quick Med Out
 // @namespace    https://github.com/SOLiNARY
-// @version      1.2.0
+// @version      1.2.1
 // @description  On the Items page, shows your hospital time and medical cooldown, works out which meds get you out of hospital for the least cooldown (faction armoury first), and uses the next one in one click. An optional API key keeps it up to date on its own. After an update, a "What's new" popup lists what changed.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT
 // @match        https://www.torn.com/item.php*
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=torn.com
 // @grant        GM_registerMenuCommand
+// @grant        GM_info
+// @grant        GM_getValue
+// @grant        GM_setValue
+// @grant        GM_deleteValue
 // @grant        unsafeWindow
 // @run-at       document-start
 // ==/UserScript==
@@ -21,7 +25,7 @@
     // shows one panel, not eight. The DOM is the channel because userscript sandboxes cannot see
     // each other's globals, and it needs no grants beyond what each script already asks for.
 
-    const SCRIPT_VERSION = "1.2.0";  // keep in sync with @version above
+    const SCRIPT_VERSION = "1.2.1";  // keep in sync with @version above
     const WHATS_NEW_NAME = "Quick Med Out";
     const WHATS_NEW_KEY = "silmaril-quick-med-out-last-seen-version";
     // Newest release first. Every release above the version last seen is shown at once, so
@@ -29,6 +33,15 @@
     // `silent: true` is left out of that and never opens the popup by itself; it is listed
     // only when the popup is opened from the menu. Leaving the flag off means false.
     const CHANGELOG = [
+        {
+            version: "1.2.1",
+            date: "2026-11-27",
+            silent: true,
+            changes: [
+                "Planning with a large stock of meds is faster.",
+                "Your script manager can store your key privately. You can replace or forget it in Settings."
+            ]
+        },
         {
             version: "1.2.0",
             date: "2026-10-27",
@@ -272,7 +285,7 @@
     const API_URL = 'https://api.torn.com/v2';
     const API_COMMENT = 'QuickMedOut';
     const PERKS_URLS = [
-        'https://api.torn.com/v2/user/perks?key={key}&comment=QuickMedOut',
+        'https://api.torn.com/v2/user/perks?comment=QuickMedOut',
         'https://api.torn.com/user/?selections=perks&key={key}&comment=QuickMedOut'
     ];
     // Torn's own cap before any faction upgrade. The live cap, faction upgrades included, comes
@@ -337,6 +350,11 @@
 
     const settings = loadJson(SETTINGS_KEY, DEFAULT_SETTINGS);
     const ui = loadJson(UI_KEY, DEFAULT_UI);
+    const pdaApiKey = '###PDA-APIKEY###';
+    // GMforPDA implements GM_setValue using the page's localStorage.
+    const privateKeyStore = !validApiKey(pdaApiKey) && typeof PDA_httpGet !== 'function' &&
+        !(typeof GM_info !== 'undefined' && /GMforPDA/i.test(GM_info?.scriptHandler || '')) &&
+        typeof GM_getValue === 'function' && typeof GM_setValue === 'function' && typeof GM_deleteValue === 'function';
     let apiKey = readApiKey();
 
     const state = {
@@ -413,30 +431,48 @@
     }
 
     function readApiKey() {
+        let legacy = '';
+        let injected = pdaApiKey;
         try {
-            return localStorage.getItem(API_KEY_KEY) ?? '###PDA-APIKEY###';
-        } catch (error) {
-            return '###PDA-APIKEY###';
-        }
+            legacy = localStorage.getItem(API_KEY_KEY) || '';
+            localStorage.removeItem(API_KEY_KEY);
+            if (localStorage.getItem(API_KEY_KEY + '-disabled')) injected = '';
+            if (legacy.startsWith('GMV2_')) legacy = JSON.parse(legacy.slice(5));
+        } catch (error) { /* Page storage may be blocked. */ }
+        try {
+            const saved = privateKeyStore ? GM_getValue(API_KEY_KEY, '') : '';
+            if (validApiKey(saved)) return saved;
+            if (privateKeyStore && validApiKey(legacy)) GM_setValue(API_KEY_KEY, legacy);
+        } catch (error) { /* Without manager storage the key lasts for this page. */ }
+        return validApiKey(legacy) ? legacy : injected;
     }
 
-    // Torn PDA swaps the placeholder above for the player's own key when it injects the script.
-    // Anywhere else an un-substituted placeholder is not a key.
+    function validApiKey(key) {
+        return typeof key === 'string' && key.indexOf('PDA-APIKEY') === -1 && key.length === 16;
+    }
+
     function hasApiKey() {
-        return typeof apiKey === 'string' && apiKey.indexOf('PDA-APIKEY') === -1 && apiKey.length === 16;
+        return validApiKey(apiKey);
     }
 
     function keyUsable() {
         return hasApiKey() && !state.keyProblem;
     }
 
-    function forgetApiKey() {
+    function setApiKey(key) {
+        apiKey = key;
+        try {
+            if (privateKeyStore) {
+                if (key) GM_setValue(API_KEY_KEY, key);
+                else GM_deleteValue(API_KEY_KEY);
+            }
+        } catch (error) { /* PDA keeps the key in memory. */ }
         try {
             localStorage.removeItem(API_KEY_KEY);
-        } catch (error) {
-            // Nothing stored means nothing to forget.
-        }
-        apiKey = '';
+            // Remember an explicit opt-out even when PDA supplies a key at every startup.
+            if (key) localStorage.removeItem(API_KEY_KEY + '-disabled');
+            else localStorage.setItem(API_KEY_KEY + '-disabled', '1');
+        } catch (error) { /* The choice still applies to this page. */ }
     }
 
     // Meds used through the panel, kept across reloads, so a count the API cached before them
@@ -634,12 +670,14 @@
     // Torn answers a refused call with 200 and an error body, so that becomes a throw carrying
     // Torn's code.
     async function apiGet(path, params) {
-        const query = new URLSearchParams(Object.assign({}, params, { key: apiKey, comment: API_COMMENT }));
-        const response = await fetch(API_URL + path + '?' + query.toString());
+        const requestedKey = apiKey;
+        const query = new URLSearchParams(Object.assign({}, params, { comment: API_COMMENT }));
+        const response = await fetch(API_URL + path + '?' + query.toString(), { headers: { Authorization: 'ApiKey ' + requestedKey } });
         if (!response.ok) {
             throw new Error('HTTP ' + response.status);
         }
         const data = await response.json();
+        if (requestedKey !== apiKey) throw new Error('API key changed during the read');
         if (data && data.error) {
             const error = new Error(data.error.error || ('API error ' + data.error.code));
             error.code = data.error.code;
@@ -653,7 +691,7 @@
     function noteApiFailure(error) {
         const code = error && error.code;
         if (code === 2) {
-            forgetApiKey();
+            setApiKey('');
             state.keyProblem = 'Torn did not accept your API key, so it was removed. Add it again in settings.';
         } else if (code === 16) {
             state.keyProblem = 'Your API key\'s access level is too low. A Minimal key is the least that works.';
@@ -936,7 +974,9 @@
         let lastError = null;
         for (const template of PERKS_URLS) {
             try {
-                const response = await fetch(template.replace('{key}', encodeURIComponent(key)));
+                const response = template.includes('{key}')
+                    ? await fetch(template.replace('{key}', encodeURIComponent(key)))
+                    : await fetch(template, { headers: { Authorization: 'ApiKey ' + key } });
                 const data = await response.json();
                 if (data && data.error) {
                     const code = data.error.code;
@@ -1106,38 +1146,63 @@
             }
             return false;
         };
-        const walk = function(index, cleared, cooldown, biggest){
-            if (index === groups.length) {
-                if (cleared > 0) {
-                    const plan = describe(cleared, cooldown);
-                    if (!result.partial || better(['-cleared', 'cooldown', 'own', 'clicks'], plan, result.partial)) {
-                        result.partial = plan;
-                    }
-                }
-                return;
+        // The remaining groups have a best possible clearance per cooldown second.
+        // Even allowing the biggest last med to cross the cap, branches below this
+        // upper bound cannot improve the current plan.
+        const suffixRate = Array(groups.length + 1).fill(0);
+        const suffixLargest = Array(groups.length + 1).fill(0);
+        for (let i = groups.length - 1; i >= 0; i--) {
+            suffixRate[i] = Math.max(suffixRate[i + 1], groups[i].hospital / groups[i].cooldown);
+            suffixLargest[i] = Math.max(suffixLargest[i + 1], groups[i].cooldown);
+        }
+
+        function record(cleared, cost, full) {
+            const current = full ? result.full : result.partial;
+            if (!full && current && cleared < current.cleared - EPSILON) return;
+            if (full && current && cost > current.cooldown + EPSILON) return;
+            const candidate = describe(cleared, cost);
+            const keys = full ? ['cooldown', 'own', 'clicks', 'cleared'] : ['-cleared', 'cooldown', 'own', 'clicks'];
+            if (!current || better(keys, candidate, current)) {
+                if (full) result.full = candidate;
+                else result.partial = candidate;
             }
+        }
+
+        function walk(index, cleared, cooldown, biggest) {
             const group = groups[index];
-            for (let n = 0; n <= bounds[index]; n++) {
-                const cost = cooldown + n * group.cooldown;
-                const top = n > 0 ? Math.max(biggest, group.cooldown) : biggest;
-                // Adding meds never brings "everything but the biggest" back under the cap.
-                if (n > 0 && cost - top >= budget - EPSILON) {
-                    break;
+            const room = budget - cooldown + Math.max(biggest, suffixLargest[index]);
+            const upper = cleared + room * suffixRate[index];
+            if (upper < remaining - EPSILON && result.partial && upper < result.partial.cleared - EPSILON) return;
+            const top = Math.max(biggest, group.cooldown);
+            // Strictly below the cap before the last dose, including at exact boundaries.
+            let maxCount = Math.max(0, Math.min(bounds[index], Math.ceil((budget + top - cooldown) / group.cooldown)));
+            // Check in the same order as Torn's cap rule. Fractional cooldown cuts can
+            // round differently when the inequality is rearranged into a division.
+            while (maxCount > 0 && (cooldown + maxCount * group.cooldown) - top >= budget - EPSILON) maxCount--;
+            const needed = Math.max(0, Math.ceil((remaining - EPSILON - cleared) / group.hospital));
+            if (index === groups.length - 1) {
+                // For the last med only two counts matter: the smallest complete dose
+                // and the largest available dose below it.
+                const partial = Math.min(maxCount, needed - 1);
+                if (partial >= 0 && cleared + partial * group.hospital > 0) {
+                    counts[index] = partial;
+                    record(cleared + partial * group.hospital, cooldown + partial * group.cooldown, false);
                 }
-                counts[index] = n;
-                const total = cleared + n * group.hospital;
-                if (total >= remaining - EPSILON) {
-                    const plan = describe(total, cost);
-                    if (!result.full || better(['cooldown', 'own', 'clicks', 'cleared'], plan, result.full)) {
-                        result.full = plan;
-                    }
-                    // Any more of this med only adds cooldown.
-                    break;
+                if (needed <= maxCount) {
+                    counts[index] = needed;
+                    record(cleared + needed * group.hospital, cooldown + needed * group.cooldown, true);
                 }
-                walk(index + 1, total, cost, top);
+            } else {
+                for (let n = 0; n <= Math.min(maxCount, needed); n++) {
+                    counts[index] = n;
+                    const total = cleared + n * group.hospital;
+                    const cost = cooldown + n * group.cooldown;
+                    if (n === needed) record(total, cost, true);
+                    else walk(index + 1, total, cost, n ? top : biggest);
+                }
             }
             counts[index] = 0;
-        };
+        }
         walk(0, 0, 0, 0);
         return result;
     }
@@ -1175,8 +1240,14 @@
         if (state.stock.own == null) {
             return;
         }
-        const plan = planMedOut(buildGroups(), Infinity, cooldownCap() - cooldownLeft());
-        state.reserve = plan.partial ? plan.partial.cleared : 0;
+        const groups = buildGroups();
+        const budget = cooldownCap() - cooldownLeft();
+        const signature = JSON.stringify([budget, groups.map(g => [g.total, g.hospital, g.cooldown])]);
+        if (signature !== state.reserveSignature) {
+            const plan = planMedOut(groups, Infinity, budget);
+            state.reserve = plan.partial ? plan.partial.cleared : 0;
+            state.reserveSignature = signature;
+        }
         state.reserveAt = Date.now();
     }
 
@@ -1796,6 +1867,7 @@
                     '<div class="qmo-field"><span class="qmo-field-name">Torn API key (optional)</span>' +
                         '<div class="qmo-row"><input type="password" class="qmo-f-key" placeholder="16-character key" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">' +
                         '<button type="button" class="qmo-small qmo-f-read">Read perks</button></div>' +
+                        '<label class="qmo-check"><input type="checkbox" class="qmo-f-forget"> Forget current key on save</label>' +
                         '<small class="qmo-f-key-note">With a Minimal key the panel keeps your hospital time, cooldown, perks and meds up to date on its own; ' +
                             'a Limited key also counts your faction armoury. The key and what it reads stay in this browser: ' +
                             'the key is only sent to api.torn.com and nothing is shared anywhere else.</small></div>' +
@@ -1812,7 +1884,14 @@
             find('.qmo-f-cut').value = String(settings.cooldownCutAuto ? state.bookCut : cooldownCut());
             find('.qmo-f-cut').disabled = !!settings.cooldownCutAuto;
             find('.qmo-f-wait').value = String(clamp(Number(settings.waitMinutes) || 0, 0, 60));
-            find('.qmo-f-key').value = hasApiKey() ? apiKey : '';
+            const keyInput = find('.qmo-f-key');
+            const forget = find('.qmo-f-forget');
+            forget.disabled = !hasApiKey();
+            keyInput.placeholder = hasApiKey() ? 'Leave blank to keep current key' : '16-character key';
+            forget.addEventListener('change', function(){
+                keyInput.disabled = forget.checked;
+                if (forget.checked) keyInput.value = '';
+            });
             const describeSource = function(){
                 find('.qmo-f-eff-note').textContent = effectivenessSource === 'api' && settings.perksReadAt
                     ? 'Read from your perks; kept up to date while the key is set. Typing a number turns that off.'
@@ -1830,7 +1909,7 @@
                 }
             });
             find('.qmo-f-read').addEventListener('click', function(){
-                const key = find('.qmo-f-key').value.trim();
+                const key = keyInput.value.trim() || (forget.checked ? '' : apiKey);
                 const keyNote = find('.qmo-f-key-note');
                 if (key.length !== 16) {
                     keyNote.textContent = 'That is not a 16-character key.';
@@ -1850,6 +1929,11 @@
             find('.qmo-x').addEventListener('click', closeSettings);
             find('.qmo-f-cancel').addEventListener('click', closeSettings);
             find('.qmo-f-save').addEventListener('click', function(){
+                const key = keyInput.value.trim();
+                if (key && !validApiKey(key)) {
+                    find('.qmo-f-key-note').textContent = 'Enter a 16-character key.';
+                    return;
+                }
                 settings.bloodType = find('.qmo-f-blood').value;
                 settings.useArmoury = find('.qmo-f-armoury').checked;
                 settings.effectiveness = clamp(parseInt(find('.qmo-f-eff').value, 10) || 0, 0, 200);
@@ -1865,17 +1949,7 @@
                         settings.knownCap = BASE_COOLDOWN_CAP + readCap * 60;
                     }
                 }
-                const key = find('.qmo-f-key').value.trim();
-                try {
-                    if (key) {
-                        localStorage.setItem(API_KEY_KEY, key);
-                    } else {
-                        localStorage.removeItem(API_KEY_KEY);
-                    }
-                } catch (error) {
-                    // Without storage the key lasts until the page reloads.
-                }
-                apiKey = key;
+                if (key || forget.checked) setApiKey(key);
                 saveJson(SETTINGS_KEY, settings);
                 state.calibration = null;
                 closeSettings();
@@ -1894,6 +1968,7 @@
     function closeSettings() {
         const overlay = document.getElementById(MODAL_ID);
         if (overlay) {
+            overlay.querySelector('.qmo-f-key').value = '';
             overlay.classList.remove('qmo-open');
         }
     }

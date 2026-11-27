@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn SpyParse
 // @namespace    https://github.com/SOLiNARY
-// @version      0.3.9.pda
+// @version      0.3.10.pda
 // @description  Parse spy reports & save them in local storage After an update, a "What's new" popup lists what changed.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT License
@@ -21,7 +21,7 @@
     // shows one panel, not eight. The DOM is the channel because userscript sandboxes cannot see
     // each other's globals, and it needs no grants beyond what each script already asks for.
 
-    const SCRIPT_VERSION = "0.3.9.pda";  // keep in sync with @version above
+    const SCRIPT_VERSION = "0.3.10.pda";  // keep in sync with @version above
     const WHATS_NEW_NAME = "SpyParse";
     const WHATS_NEW_KEY = "silmaril-spy-parse-last-seen-version";
     // Newest release first. Every release above the version last seen is shown at once, so
@@ -29,6 +29,14 @@
     // `silent: true` is left out of that and never opens the popup by itself; it is listed
     // only when the popup is opened from the menu. Leaving the flag off means false.
     const CHANGELOG = [
+        {
+            version: "0.3.10.pda",
+            date: "2026-11-27",
+            silent: true,
+            changes: [
+                'Television Network spy reports now show the correct stats.'
+            ]
+        },
         {
             version: "0.3.8.pda",
             date: "2026-10-20",
@@ -232,19 +240,7 @@
  
     const isTampermonkeyEnabled = typeof unsafeWindow !== 'undefined';
  
-    const SpyJobs = {
-        Army: 10,
-        LawFirm: 20,
-        TelevisionNetwork: 30,
-        None: 0
-    }
-    const SpyJobsMapping = {
-        "Type: Army": SpyJobs.Army,
-        "Type: Law Firm": SpyJobs.LawFirm,
-        "Type: Television Network": SpyJobs.TelevisionNetwork
-    }
-    // Army spies report on jobs.php; on companies.php the company type still defaults to Law Firm.
-    let playerJob = location.pathname.startsWith("/jobs.php") ? SpyJobs.Army : SpyJobs.LawFirm;
+    const isArmySpy = location.pathname.startsWith("/jobs.php");
     let spyReports = {};
  
     const viewPortWidthPx = window.innerWidth;
@@ -344,25 +340,6 @@ div#spy-parse-container {
     document.getElementById("spy-parse-btn").addEventListener("click", GetSpyResult, false);
     document.getElementById("spy-copy-btn").addEventListener("click", CopySpyResults, false);
  
-//     if (location.pathname.startsWith("/jobs.php")) {
-//         playerJob = SpyJobs.Army;
-//     } else if (location.pathname.startsWith("/companies.php")) {
-//         let jobTitleBlock = document.querySelector("#mainContainer > div.content-wrapper > div.company-wrap > div.company-details-wrap > ul.company-stats-list.company-info > li:nth-child(1) > div.details-wrap.t-first.t-first-row");
-//         if (jobTitleBlock) {
-//             try {
-//                 playerJob = SpyJobsMapping[jobTitleBlock.innerText];
-//             } catch (error) {
-//                 playerJob = SpyJobs.None;
-//             }
-//         }
-//     } else {
-//         playerJob = SpyJobs.None;
-//     }
-    console.log("Player job: %s", playerJob);
-    if (spyReports == undefined) {
-        spyReports = {};
-    }
- 
     function CopySpyResults(zEvent) {
         zEvent.preventDefault();
         let copyBtn = zEvent.target;
@@ -398,7 +375,6 @@ Total: ${x.TotalPrettified}
     }
  
     function GetSpyResult(zEvent) {
-        console.log('playerJob', playerJob);
         zEvent.preventDefault();
         let parseBtn = zEvent.target;
         let parseBtnHtml = parseBtn.innerHTML;
@@ -420,23 +396,14 @@ Total: ${x.TotalPrettified}
     function GetSpyProfile() {
         console.log('get spy profile begin');
         let jobSpecialBlock, userLink, levelSpan;
-        switch (playerJob) {
-            default:
-            case SpyJobs.Army:
-                jobSpecialBlock = document.getElementsByName("jobspecial")[0];
-                userLink = jobSpecialBlock.querySelector("div > div:nth-child(3) > div > span.desc > a");
-                levelSpan = jobSpecialBlock.querySelector("div > div:nth-child(3) > div:nth-child(2) > span.desc");
-                break;
-            case SpyJobs.LawFirm:
-            case SpyJobs.TelevisionNetwork:
-                console.log('jobSpecialBlock1', document.getElementsByClassName("specials-cont-wrap")[0]);
-                console.log('jobSpecialBlock2', document.getElementsByClassName("specials-cont-wrap")[0].querySelector("div.specials-confirm-cont"));
-                jobSpecialBlock = document.getElementsByClassName("specials-cont-wrap")[0].querySelector("div.specials-confirm-cont");
-                console.log('userLink', jobSpecialBlock.querySelector("div > div:nth-child(2) > div > span.desc > a"));
-                userLink = jobSpecialBlock.querySelector("div > div:nth-child(2) > div > span.desc > a");
-                console.log('levelSpan', jobSpecialBlock.querySelector("div > div:nth-child(2) > div:nth-child(2) > span.desc"));
-                levelSpan = jobSpecialBlock.querySelector("div > div:nth-child(2) > div:nth-child(2) > span.desc");
-                break;
+        if (isArmySpy) {
+            jobSpecialBlock = document.getElementsByName("jobspecial")[0];
+            userLink = jobSpecialBlock.querySelector("div > div:nth-child(3) > div > span.desc > a");
+            levelSpan = jobSpecialBlock.querySelector("div > div:nth-child(3) > div:nth-child(2) > span.desc");
+        } else {
+            jobSpecialBlock = document.querySelector(".specials-cont-wrap .specials-confirm-cont");
+            userLink = jobSpecialBlock.querySelector("div > div:nth-child(2) > div > span.desc > a");
+            levelSpan = jobSpecialBlock.querySelector("div > div:nth-child(2) > div:nth-child(2) > span.desc");
         }
         console.log('constructing spy profile');
  
@@ -448,20 +415,18 @@ Total: ${x.TotalPrettified}
         let speed = 0;
         let dexterity = 0;
         let total = 0;
-        if (playerJob == SpyJobs.TelevisionNetwork || playerJob == SpyJobs.LawFirm) {
-            let statOffset = playerJob == SpyJobs.TelevisionNetwork ? 1 : 0;
-            let statsBlock = jobSpecialBlock.querySelector("div > ul");
-            strength = Number(statsBlock.children[0 + statOffset].innerText.substr(10).replaceAll(',', ''));
-            if (isNaN(strength)) strength = 0;
-            defense = Number(statsBlock.children[3 + statOffset].innerText.substr(9).replaceAll(',', ''));
-            if (isNaN(defense)) defense = 0;
-            speed = Number(statsBlock.children[1 + statOffset].innerText.substr(7).replaceAll(',', ''));
-            if (isNaN(speed)) speed = 0;
-            dexterity = Number(statsBlock.children[2 + statOffset].innerText.substr(11).replaceAll(',', ''));
-            if (isNaN(dexterity)) dexterity = 0;
-            total = Number(statsBlock.children[4 + statOffset].innerText.substr(7).replaceAll(',', ''));
-            if (isNaN(total)) total = 0;
-        } else if (playerJob == SpyJobs.Army) {
+        if (!isArmySpy) {
+            const stats = {};
+            for (const row of jobSpecialBlock.querySelector("div > ul").children) {
+                const match = row.innerText.trim().match(/^(Strength|Speed|Dexterity|Defense|Defence|Total)\s*:\s*([\d,]+)$/i);
+                if (match) stats[match[1].toLowerCase()] = Number(match[2].replaceAll(',', ''));
+            }
+            strength = stats.strength ?? 0;
+            defense = stats.defense ?? stats.defence ?? 0;
+            speed = stats.speed ?? 0;
+            dexterity = stats.dexterity ?? 0;
+            total = stats.total ?? 0;
+        } else {
             let statsBlock = jobSpecialBlock.querySelector("div.specials-confirm-cont > div:nth-child(5) > ul");
             let strengthBlock = statsBlock.querySelector("li.left.t-c-border");
             if (strengthBlock.innerText.search("Strength:") > -1) {

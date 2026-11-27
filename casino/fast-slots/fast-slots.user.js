@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Fast Slots
 // @namespace    https://github.com/SOLiNARY
-// @version      0.5.1
+// @version      0.5.2
 // @description  Makes slots stop instantly, first spin included, without leaving the barrels blurred. After an update, a "What's new" popup lists what changed.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT
@@ -20,7 +20,7 @@
     // shows one panel, not eight. The DOM is the channel because userscript sandboxes cannot see
     // each other's globals, and it needs no grants beyond what each script already asks for.
 
-    const SCRIPT_VERSION = "0.5.1";  // keep in sync with @version above
+    const SCRIPT_VERSION = "0.5.2";  // keep in sync with @version above
     const WHATS_NEW_NAME = "Fast Slots";
     const WHATS_NEW_KEY = "silmaril-fast-slots-last-seen-version";
     // Newest release first. Every release above the version last seen is shown at once, so
@@ -28,6 +28,14 @@
     // `silent: true` is left out of that and never opens the popup by itself; it is listed
     // only when the popup is opened from the menu. Leaving the flag off means false.
     const CHANGELOG = [
+        {
+            version: "0.5.2",
+            date: "2026-11-27",
+            silent: true,
+            changes: [
+                'Torn can show the reason a spin was rejected.'
+            ]
+        },
         {
             version: "0.5.1",
             date: "2026-10-20",
@@ -241,9 +249,7 @@
     // spin that the old document-idle $.ajax hook missed. Idea by alesgrbec [2064983].
     jsonHost.JSON.parse = function (text, reviver) {
         const data = originalParse.call(this, text, reviver);
-        if (data != null && typeof data === 'object' && 'barrelsAnimationSpeed' in data) {
-            if (data.error) delete data.error;
-            if (data.errorMsg) delete data.errorMsg;
+        if (data != null && typeof data === 'object' && !data.error && !data.errorMsg && 'barrelsAnimationSpeed' in data) {
             data.barrelsAnimationSpeed = spinAnimationSpeed;
         }
         return data;

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Loadout Switcher
 // @namespace    https://github.com/SOLiNARY
-// @version      0.8.0
+// @version      0.8.1
 // @description  Adds customisable quick loadout change buttons on Items page, and number keys 1-9 to switch with. After an update, a "What's new" popup lists what changed.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT
@@ -22,7 +22,7 @@
     // shows one panel, not eight. The DOM is the channel because userscript sandboxes cannot see
     // each other's globals, and it needs no grants beyond what each script already asks for.
 
-    const SCRIPT_VERSION = "0.8.0";  // keep in sync with @version above
+    const SCRIPT_VERSION = "0.8.1";  // keep in sync with @version above
     const WHATS_NEW_NAME = "Loadout Switcher";
     const WHATS_NEW_KEY = "silmaril-loadout-switcher-last-seen-version";
     // Newest release first. Every release above the version last seen is shown at once, so
@@ -30,6 +30,14 @@
     // `silent: true` is left out of that and never opens the popup by itself; it is listed
     // only when the popup is opened from the menu. Leaving the flag off means false.
     const CHANGELOG = [
+        {
+            version: "0.8.1",
+            date: "2026-11-27",
+            silent: true,
+            changes: [
+                "The switcher highlights a loadout only after Torn confirms the change."
+            ]
+        },
         {
             version: "0.8.0",
             date: "2026-11-25",
@@ -723,6 +731,7 @@ body:not(.dark-mode) .silmaril-ls-chips .silmaril-ls-active .silmaril-ls-num {
     // moment. Torn's header can keep the old name until its own next poll, so for as long as
     // it does, the click - not the stale name - decides which button is lit. It also settles
     // which button to light when two loadouts share a name.
+    let switchInFlight = false;
     let switchedTo = null;
     let nameAtSwitch = null;
 
@@ -1182,7 +1191,7 @@ body:not(.dark-mode) .silmaril-ls-chips .silmaril-ls-active .silmaril-ls-num {
     // Shared by the buttons and the number keys, so a key press shows the same spinner, tick
     // or red on its button as a click does.
     async function switchLoadout(button) {
-        if (button.classList.contains('disabled') || button.classList.contains('silmaril-ls-busy')) {
+        if (switchInFlight || button.classList.contains('disabled') || button.classList.contains('silmaril-ls-busy')) {
             return;
         }
         const loadout = button.getAttribute('data-loadout-number');
@@ -1197,7 +1206,30 @@ body:not(.dark-mode) .silmaril-ls-chips .silmaril-ls-active .silmaril-ls-num {
             return;
         }
         let url = setLoadoutUrl.replace("{loadoutId}", loadout).replace("{rfcv}", token);
-        showResult(button, loadout, await sendSetLoadoutRequest(url));
+        switchInFlight = true;
+        try {
+            const title = findTitleElement();
+            const previousName = title ? headerName(title) : '';
+            const reply = await sendSetLoadoutRequest(url);
+            let confirmed = reply === true;
+            // Older replies may omit a success flag. A uniquely named loadout appearing
+            // in Torn's own header also confirms the switch, without another API call.
+            const expectedName = loadoutTitles[loadout];
+            if (reply === null && expectedName && expectedName !== previousName &&
+                Object.values(loadoutTitles).filter(name => name === expectedName).length === 1) {
+                for (let attempt = 0; attempt < 10; attempt++) {
+                    const liveTitle = findTitleElement();
+                    if (liveTitle && headerName(liveTitle) === expectedName) {
+                        confirmed = true;
+                        break;
+                    }
+                    await sleep(200);
+                }
+            }
+            showResult(button, loadout, confirmed);
+        } finally {
+            switchInFlight = false;
+        }
     }
 
     async function sendSetLoadoutRequest(url) {
@@ -1205,19 +1237,14 @@ body:not(.dark-mode) .silmaril-ls-chips .silmaril-ls-active .silmaril-ls-num {
             const response = await fetch(url, {
                 method: 'GET',
             });
-            if (!response.ok) {
+            if (!response.ok || response.redirected) {
                 console.error("[TornLoadoutSwitcher] Set Loadout request failed:", response);
                 return false;
             }
             // Torn answers a rejected request - a stale rfcv token above all - with HTTP 200
             // and the error inside the JSON body, so response.ok on its own reports success
             // for a loadout that never actually changed.
-            const error = extractResponseError(await response.text());
-            if (error) {
-                console.error("[TornLoadoutSwitcher] Set Loadout rejected by Torn:", error);
-                return false;
-            }
-            return true;
+            return readSwitchResult(await response.text());
         } catch (e) {
             console.error("[TornLoadoutSwitcher] Error setting loadout:", e);
             return false;
@@ -1310,20 +1337,18 @@ body:not(.dark-mode) .silmaril-ls-chips .silmaril-ls-active .silmaril-ls-num {
 
     document.addEventListener('keydown', onNumberKey);
 
-    // Returns Torn's error when the response body reports a failure, null otherwise. Bodies
-    // that are not JSON objects count as success, so an unexpected response shape keeps
-    // behaving the way it did before this check existed.
-    function extractResponseError(body) {
+    function readSwitchResult(body) {
         let payload;
         try {
             payload = JSON.parse(body);
-        } catch (e) {
+        } catch (error) {
             return null;
         }
         if (!payload || typeof payload !== 'object') return null;
-        if (payload.success === false || payload.error || payload.errorMessage) {
-            return payload.error || payload.errorMessage || payload.message || "request rejected";
-        }
+        if (payload.error || payload.errorMessage || payload.success === false ||
+            payload.success === 0 || payload.success === 'false') return false;
+        if (payload.success === true || payload.success === 1 || payload.success === 'true' ||
+            payload.status === 'success') return true;
         return null;
     }
 
