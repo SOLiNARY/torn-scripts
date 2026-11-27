@@ -1212,20 +1212,20 @@ body:not(.dark-mode) .silmaril-ls-chips .silmaril-ls-active .silmaril-ls-num {
 
     // Takes the event as an argument rather than reading the implicit `event` global,
     // which is a non-standard leftover that no isolated-world userscript engine has to provide.
-    async function handleLoadoutClick(clickEvent) {
-        const button = clickEvent.currentTarget;
-        // Reloading needs no token, so it works even before the buttons are enabled.
-        if (button.classList.contains('silmaril-ls-active')) {
-            location.reload();
-            return;
-        }
-        await switchLoadout(button);
+    function handleLoadoutClick(clickEvent) {
+        return switchLoadout(clickEvent.currentTarget);
     }
 
     // Shared by the buttons and the number keys, so a key press shows the same spinner, tick
     // or red on its button as a click does.
     async function switchLoadout(button) {
-        if (switchInFlight || button.classList.contains('disabled') || button.classList.contains('silmaril-ls-busy')) {
+        // Wait for the reply before another click or key can switch or reload the page.
+        if (switchInFlight) return;
+        if (button.classList.contains('silmaril-ls-active')) {
+            location.reload();
+            return;
+        }
+        if (button.classList.contains('disabled') || button.classList.contains('silmaril-ls-busy')) {
             return;
         }
         const loadout = button.getAttribute('data-loadout-number');
@@ -1357,11 +1357,6 @@ body:not(.dark-mode) .silmaril-ls-chips .silmaril-ls-active .silmaril-ls-num {
         if (!button) return;
         event.preventDefault();
         if (event.repeat) return;
-        // As with a click, the key of the loadout that is already on reloads the page.
-        if (button.classList.contains('silmaril-ls-active')) {
-            location.reload();
-            return;
-        }
         switchLoadout(button);
     }
 
