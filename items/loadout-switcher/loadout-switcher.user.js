@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Loadout Switcher
 // @namespace    https://github.com/SOLiNARY
-// @version      0.8.1
+// @version      0.8.2
 // @description  Adds customisable quick loadout change buttons on Items page, and number keys 1-9 to switch with. After an update, a "What's new" popup lists what changed.
 // @author       Ramin Quluzade, Silmaril [2665762]
 // @license      MIT
@@ -22,7 +22,7 @@
     // shows one panel, not eight. The DOM is the channel because userscript sandboxes cannot see
     // each other's globals, and it needs no grants beyond what each script already asks for.
 
-    const SCRIPT_VERSION = "0.8.1";  // keep in sync with @version above
+    const SCRIPT_VERSION = "0.8.2";  // keep in sync with @version above
     const WHATS_NEW_NAME = "Loadout Switcher";
     const WHATS_NEW_KEY = "silmaril-loadout-switcher-last-seen-version";
     // Newest release first. Every release above the version last seen is shown at once, so
@@ -30,6 +30,14 @@
     // `silent: true` is left out of that and never opens the popup by itself; it is listed
     // only when the popup is opened from the menu. Leaving the flag off means false.
     const CHANGELOG = [
+        {
+            version: "0.8.2",
+            date: "2026-11-27",
+            silent: true,
+            changes: [
+                "Switching loadouts now highlights the slot Torn equipped, even when the page still shows the old name."
+            ]
+        },
         {
             version: "0.8.1",
             date: "2026-11-27",
@@ -540,6 +548,11 @@ div.silmaril-ls-chips {
     font-weight: bold;
 }
 
+.silmaril-ls-chips .silmaril-ls-unconfirmed::after {
+    content: "?";
+    margin-left: 6px;
+}
+
 .silmaril-ls-chips .silmaril-ls-btn.silmaril-ls-fail {
     border-color: #d33;
 }
@@ -734,10 +747,12 @@ body:not(.dark-mode) .silmaril-ls-chips .silmaril-ls-active .silmaril-ls-num {
     let switchInFlight = false;
     let switchedTo = null;
     let nameAtSwitch = null;
+    let pendingSwitch = null;
 
     function headerName(titleEl) {
         return [...titleEl.childNodes]
-            .filter((node) => node.nodeType === Node.TEXT_NODE)
+            .filter((node) => node.nodeType === Node.TEXT_NODE ||
+                (node.nodeType === Node.ELEMENT_NODE && !node.classList.contains(containerClass)))
             .map((node) => node.textContent)
             .join('')
             .trim();
@@ -746,23 +761,38 @@ body:not(.dark-mode) .silmaril-ls-chips .silmaril-ls-active .silmaril-ls-num {
     function activeLoadout(titleEl) {
         const name = headerName(titleEl);
         if (switchedTo !== null) {
-            if (name === nameAtSwitch || name === loadoutTitles[switchedTo]) return switchedTo;
+            if (name === loadoutTitles[switchedTo]) nameAtSwitch = name;
+            if (name === nameAtSwitch || !name) return switchedTo;
             switchedTo = null;
         }
-        if (name === '') return null;
-        return selectedLoadoutsArray.find((loadout) => loadoutTitles[loadout] === name) ?? null;
+        if (!name || name === pendingSwitch?.previousName) return null;
+        const matches = Object.keys(loadoutTitles).filter((slot) => loadoutTitles[slot] === name);
+        return matches.length === 1 ? matches[0] : null;
     }
 
     function refreshActive(titleEl) {
         const container = titleEl.querySelector(`div.${containerClass}`);
         if (!container) return;
         const active = activeLoadout(titleEl);
+        if (pendingSwitch && active !== null) {
+            if (pendingSwitch.slot === active) {
+                const button = container.querySelector(`button[data-loadout-number="${CSS.escape(active)}"]`);
+                if (button) flashResult(button, true);
+            }
+            pendingSwitch = null;
+        }
         container.querySelectorAll('button[data-loadout-number]').forEach((button) => {
-            button.classList.toggle('silmaril-ls-active', button.getAttribute('data-loadout-number') === active);
+            const slot = button.getAttribute('data-loadout-number');
+            button.classList.toggle('silmaril-ls-active', slot === active);
+            const waiting = slot === pendingSwitch?.slot;
+            if (waiting !== button.classList.contains('silmaril-ls-unconfirmed')) {
+                button.classList.toggle('silmaril-ls-unconfirmed', waiting);
+                setButtonTitle(button, slot);
+            }
         });
         // Hide Torn's own copy of the name only while a button stands in for it; a loadout
         // that has no button here still needs its name shown.
-        titleEl.classList.toggle('silmaril-ls-hide-name', active !== null);
+        titleEl.classList.toggle('silmaril-ls-hide-name', active !== null && selectedLoadoutsArray.includes(active));
     }
 
     let attachScheduled = false;
@@ -1155,15 +1185,19 @@ body:not(.dark-mode) .silmaril-ls-chips .silmaril-ls-active .silmaril-ls-num {
         save.focus();
     }
 
-    function setButtonLabel(button, loadout) {
-        const title = loadoutTitles[loadout];
-        // The number is on the button already, so a tooltip only earns its place when the
-        // name is not.
-        if (!showTitles && title) {
-            button.title = title;
+    function setButtonTitle(button, loadout) {
+        if (pendingSwitch?.slot === loadout) {
+            button.title = 'Waiting for Torn to confirm the equipped loadout';
+        } else if (!showTitles && loadoutTitles[loadout]) {
+            button.title = loadoutTitles[loadout];
         } else {
             button.removeAttribute('title');
         }
+    }
+
+    function setButtonLabel(button, loadout) {
+        const title = loadoutTitles[loadout];
+        setButtonTitle(button, loadout);
         const number = document.createElement('span');
         number.className = 'silmaril-ls-num';
         number.textContent = loadout;
@@ -1178,23 +1212,24 @@ body:not(.dark-mode) .silmaril-ls-chips .silmaril-ls-active .silmaril-ls-num {
 
     // Takes the event as an argument rather than reading the implicit `event` global,
     // which is a non-standard leftover that no isolated-world userscript engine has to provide.
-    async function handleLoadoutClick(clickEvent) {
-        const button = clickEvent.currentTarget;
-        // Reloading needs no token, so it works even before the buttons are enabled.
-        if (button.classList.contains('silmaril-ls-active')) {
-            location.reload();
-            return;
-        }
-        await switchLoadout(button);
+    function handleLoadoutClick(clickEvent) {
+        return switchLoadout(clickEvent.currentTarget);
     }
 
     // Shared by the buttons and the number keys, so a key press shows the same spinner, tick
     // or red on its button as a click does.
     async function switchLoadout(button) {
-        if (switchInFlight || button.classList.contains('disabled') || button.classList.contains('silmaril-ls-busy')) {
+        // Wait for the reply before another click or key can switch or reload the page.
+        if (switchInFlight) return;
+        if (button.classList.contains('silmaril-ls-active')) {
+            location.reload();
+            return;
+        }
+        if (button.classList.contains('disabled') || button.classList.contains('silmaril-ls-busy')) {
             return;
         }
         const loadout = button.getAttribute('data-loadout-number');
+        clearTimeout(button.silmarilResultTimer);
         button.classList.remove('silmaril-ls-ok', 'silmaril-ls-fail');
         button.classList.add('silmaril-ls-busy');
         // Re-read the cookie on every click: Torn rotates the token, and a stale one is
@@ -1202,32 +1237,35 @@ body:not(.dark-mode) .silmaril-ls-chips .silmaril-ls-active .silmaril-ls-num {
         const token = refreshRfcv();
         if (!token) {
             console.error("[TornLoadoutSwitcher] No rfcv token available yet.");
-            showResult(button, loadout, false);
+            button.classList.remove('silmaril-ls-busy');
+            flashResult(button, false);
             return;
         }
-        let url = setLoadoutUrl.replace("{loadoutId}", loadout).replace("{rfcv}", token);
+        const url = setLoadoutUrl.replace("{loadoutId}", loadout).replace("{rfcv}", token);
         switchInFlight = true;
         try {
             const title = findTitleElement();
             const previousName = title ? headerName(title) : '';
             const reply = await sendSetLoadoutRequest(url);
-            let confirmed = reply === true;
-            // Older replies may omit a success flag. A uniquely named loadout appearing
-            // in Torn's own header also confirms the switch, without another API call.
-            const expectedName = loadoutTitles[loadout];
-            if (reply === null && expectedName && expectedName !== previousName &&
-                Object.values(loadoutTitles).filter(name => name === expectedName).length === 1) {
-                for (let attempt = 0; attempt < 10; attempt++) {
-                    const liveTitle = findTitleElement();
-                    if (liveTitle && headerName(liveTitle) === expectedName) {
-                        confirmed = true;
-                        break;
-                    }
-                    await sleep(200);
-                }
+            const liveTitle = findTitleElement();
+            const liveButton = liveTitle?.querySelector(`button[data-loadout-number="${CSS.escape(loadout)}"]`) ?? button;
+            const equipped = reply.equipped ?? (reply.success ? loadout : null);
+            if (equipped !== null) {
+                pendingSwitch = null;
+                switchedTo = equipped;
+                nameAtSwitch = liveTitle ? headerName(liveTitle) : previousName;
+                flashResult(liveButton, equipped === loadout);
+            } else if (reply.success === false) {
+                if (pendingSwitch?.slot === loadout) pendingSwitch = null;
+                flashResult(liveButton, false);
+            } else {
+                // Leave the outcome open until Torn updates its header, however long that takes.
+                switchedTo = null;
+                pendingSwitch = {slot: loadout, previousName};
             }
-            showResult(button, loadout, confirmed);
+            if (liveTitle) refreshActive(liveTitle);
         } finally {
+            button.classList.remove('silmaril-ls-busy');
             switchInFlight = false;
         }
     }
@@ -1238,8 +1276,8 @@ body:not(.dark-mode) .silmaril-ls-chips .silmaril-ls-active .silmaril-ls-num {
                 method: 'GET',
             });
             if (!response.ok || response.redirected) {
-                console.error("[TornLoadoutSwitcher] Set Loadout request failed:", response);
-                return false;
+                console.error("[TornLoadoutSwitcher] Set Loadout request failed:", response.status);
+                return {success: false};
             }
             // Torn answers a rejected request - a stale rfcv token above all - with HTTP 200
             // and the error inside the JSON body, so response.ok on its own reports success
@@ -1247,25 +1285,17 @@ body:not(.dark-mode) .silmaril-ls-chips .silmaril-ls-active .silmaril-ls-num {
             return readSwitchResult(await response.text());
         } catch (e) {
             console.error("[TornLoadoutSwitcher] Error setting loadout:", e);
-            return false;
+            return {};
         }
     }
 
-    function showResult(button, loadout, succeeded) {
-        button.classList.remove('silmaril-ls-busy');
+    function flashResult(button, succeeded) {
+        button.classList.remove('silmaril-ls-ok', 'silmaril-ls-fail');
         button.classList.add(succeeded ? 'silmaril-ls-ok' : 'silmaril-ls-fail');
         clearTimeout(button.silmarilResultTimer);
         button.silmarilResultTimer = setTimeout(() => {
             button.classList.remove('silmaril-ls-ok', 'silmaril-ls-fail');
         }, succeeded ? 2500 : 4000);
-        if (!succeeded) return;
-        // Torn may have re-rendered the header while the request was out, leaving this button
-        // detached, so the live title is looked up again rather than taken from the button.
-        const titleEl = findTitleElement();
-        if (!titleEl) return;
-        switchedTo = loadout;
-        nameAtSwitch = headerName(titleEl);
-        refreshActive(titleEl);
     }
 
     // ---- Number keys ------------------------------------------------------------------------
@@ -1327,11 +1357,6 @@ body:not(.dark-mode) .silmaril-ls-chips .silmaril-ls-active .silmaril-ls-num {
         if (!button) return;
         event.preventDefault();
         if (event.repeat) return;
-        // As with a click, the key of the loadout that is already on reloads the page.
-        if (button.classList.contains('silmaril-ls-active')) {
-            location.reload();
-            return;
-        }
         switchLoadout(button);
     }
 
@@ -1342,14 +1367,21 @@ body:not(.dark-mode) .silmaril-ls-chips .silmaril-ls-active .silmaril-ls-num {
         try {
             payload = JSON.parse(body);
         } catch (error) {
-            return null;
+            // A full HTML document is typically a login or challenge page.
+            return /^\s*(?:<!doctype\s+html\b|<html\b)/i.test(body) ? {success: false} : {};
         }
-        if (!payload || typeof payload !== 'object') return null;
+        if (!payload || typeof payload !== 'object') return {};
         if (payload.error || payload.errorMessage || payload.success === false ||
-            payload.success === 0 || payload.success === 'false') return false;
+            payload.success === 0 || payload.success === '0' || payload.success === 'false') return {success: false};
+        // nextSetID can refer to a different slot even when the requested switch succeeded.
+        for (const slot of [payload.equippedSet, payload.currentSettings?.currentSetID]) {
+            if ((typeof slot === 'number' || typeof slot === 'string') && /^[1-9]\d*$/.test(slot)) {
+                return {equipped: String(slot)};
+            }
+        }
         if (payload.success === true || payload.success === 1 || payload.success === 'true' ||
-            payload.status === 'success') return true;
-        return null;
+            payload.success === '1' || payload.status === 'success') return {success: true};
+        return {};
     }
 
     function sleep(ms) {
